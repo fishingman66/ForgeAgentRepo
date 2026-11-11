@@ -53,6 +53,7 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
     private final AgentKnowledgeDocumentMapper documentMapper;
     private final AgentKbChunkMapper chunkMapper;
     private final KnowledgeDocProcessor docProcessor;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
     private final VectorStore vectorStore;
     private final KnowledgeProperties properties;
     private final EmbeddingFactory embeddingFactory;
@@ -186,6 +187,9 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
                 log.warn("[知识库] 删除文档文件失败: {}", e.getMessage());
             }
             documentMapper.deleteById(doc.getId());
+            // R3-1 自动打标:文档删除后其证据不再可达,引用它的用例应转 EVIDENCE_STALE
+            eventPublisher.publishEvent(new com.forgeagent.rag.service.eval.KbDocumentGenerationEvent(
+                doc.getKnowledgeId(), doc.getId()));
             refreshDocCount(doc.getKnowledgeId());
             auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.delete", "knowledge_document", String.valueOf(doc.getId()),
                 "删除文档[" + doc.getFileName() + "]",

@@ -1,4 +1,4 @@
-import type { KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentQuery, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchForm, KnowledgeSearchHitVO, KnowledgeZeroHitQuery, KnowledgeZeroHitVO, KbEvalCaseVO, KbEvalRunVO, KbRebuildProgressVO } from '@/api/agent/knowledge/types';
+import type { KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentQuery, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchForm, KnowledgeSearchHitVO, KnowledgeZeroHitQuery, KnowledgeZeroHitVO, KbEvalCaseVO, KbEvalRunVO, KbQualityIssueVO, KbRebuildProgressVO } from '@/api/agent/knowledge/types';
 import type { PageResult } from '@/api/types';
 import type { AxiosPromise } from '@/utils/api-types';
 import request from '@/utils/request';
@@ -213,5 +213,77 @@ export const listKbEvalRuns = (knowledgeId: string | number, limit?: number): Ax
     url: '/agent/kb/eval/runs',
     method: 'get',
     params: { knowledgeId, limit }
+  });
+};
+
+/** 当前语料指纹(R3-4) */
+export const getKbEvalFingerprint = (knowledgeId: string | number): AxiosPromise<string> => {
+  return request({
+    url: '/agent/kb/eval/fingerprint',
+    method: 'get',
+    params: { knowledgeId }
+  });
+};
+
+/** 双跑对比(R3-4):交集重算后判决 */
+export const compareKbEval = (knowledgeId: string | number, baselineRunId: string | number, candidateRunId: string | number): AxiosPromise<Record<string, any>> => {
+  return request({
+    url: '/agent/kb/eval/compare',
+    method: 'post',
+    params: { knowledgeId, baselineRunId, candidateRunId }
+  });
+};
+
+/** 重建门禁检查(R3-4) */
+export const getKbEvalGate = (knowledgeId: string | number): AxiosPromise<Record<string, any>> => {
+  return request({
+    url: '/agent/kb/eval/gate',
+    method: 'get',
+    params: { knowledgeId }
+  });
+};
+
+/** 质量问题分页(R3-5) */
+export const pageKbQualityIssues = (knowledgeId: string | number, status?: string, pageNum = 1, pageSize = 20): AxiosPromise<PageResult<KbQualityIssueVO>> => {
+  return request({
+    url: '/agent/kb/quality/page',
+    method: 'get',
+    params: { knowledgeId, status, pageNum, pageSize }
+  });
+};
+
+/** 登记质量问题(按 knowledgeId+source+queryHash 去重) */
+export const registerKbQualityIssue = (data: { knowledgeId: string | number; queryText: string; reason?: string; source?: string; sourceId?: string | number; note?: string }): AxiosPromise<number> => {
+  return request({
+    url: '/agent/kb/quality/register',
+    method: 'post',
+    params: data
+  });
+};
+
+/** 质量问题状态流转 */
+export const changeKbQualityIssueStatus = (id: string | number, target: string, note?: string, revision?: number) => {
+  return request({
+    url: '/agent/kb/quality/' + id + '/status',
+    method: 'put',
+    params: { target, note, revision }
+  });
+};
+
+/** 关联评测用例 */
+export const linkKbQualityIssueCase = (id: string | number, caseId: string | number) => {
+  return request({
+    url: '/agent/kb/quality/' + id + '/link-case',
+    method: 'put',
+    params: { caseId }
+  });
+};
+
+/** 从检索命中生成评测用例(source=DEBUG_PAGE) */
+export const createKbCaseFromHit = (data: { knowledgeId: string | number; question: string; documentId: string | number; chunkId?: string | number; span?: string }): AxiosPromise<number> => {
+  return request({
+    url: '/agent/kb/quality/case-from-hit',
+    method: 'post',
+    params: data
   });
 };

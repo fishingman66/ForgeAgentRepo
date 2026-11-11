@@ -26,6 +26,7 @@ import com.forgeagent.rag.service.document.TokenEstimator;
 import com.forgeagent.rag.service.embedding.EmbeddingFactory;
 import com.forgeagent.rag.service.embedding.EmbeddingService;
 import com.forgeagent.rag.service.vector.VectorStore;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import java.nio.file.Files;
@@ -96,6 +97,7 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
     private final AgentKnowledgeMapper knowledgeMapper;
     private final AgentKnowledgeDocumentMapper documentMapper;
     private final AgentKbChunkMapper chunkMapper;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
     private final AgentChatAttachmentMapper attachmentMapper;
     private final EmbeddingFactory embeddingFactory;
     private final VectorStore vectorStore;
@@ -337,6 +339,9 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
                 .set(AgentKnowledgeDocument::getParsedText,
                     text.length() <= PARSED_TEXT_STORE_LIMIT ? text : null));
             cleanupStaleGenerations(documentId, generation);
+            // R3-1 自动打标:换代后通知评测服务重跑引用该文档的用例覆盖判定
+            eventPublisher.publishEvent(new com.forgeagent.rag.service.eval.KbDocumentGenerationEvent(
+                doc.getKnowledgeId(), documentId));
             syncChatAttachment(doc, text, chunks.size(), true, null);
             log.info("[知识库] 文档 {} 处理完成,代次 {} 分块数 {}", documentId, generation, chunks.size());
         } catch (Exception e) {

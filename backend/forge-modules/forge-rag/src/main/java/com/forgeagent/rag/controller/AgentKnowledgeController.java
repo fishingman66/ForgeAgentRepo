@@ -11,7 +11,9 @@ import com.forgeagent.rag.domain.vo.AgentKbZeroHitLogVo;
 import com.forgeagent.rag.domain.vo.AgentKnowledgeVo;
 import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import com.forgeagent.rag.domain.vo.KbRebuildProgressVo;
+import com.forgeagent.rag.config.KnowledgeProperties;
 import com.forgeagent.rag.service.IAgentKnowledgeService;
+import com.forgeagent.rag.service.KbEvalService;
 import com.forgeagent.common.core.domain.PageResult;
 import com.forgeagent.common.core.domain.R;
 import com.forgeagent.common.core.validate.AddGroup;
@@ -20,9 +22,11 @@ import com.forgeagent.common.log.annotation.Log;
 import com.forgeagent.common.log.enums.BusinessType;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
 import com.forgeagent.common.web.core.BaseController;
+import com.forgeagent.common.core.exception.ServiceException;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.Map;
 /**
  * 知识库注册 Controller
  *
@@ -35,6 +39,23 @@ import java.util.List;
 public class AgentKnowledgeController extends BaseController {
 
     private final IAgentKnowledgeService knowledgeService;
+    private final KbEvalService evalService;
+    private final KnowledgeProperties properties;
+
+    /**
+     * R3-4 重建门禁:rag.knowledge.gate.required=true 时,最近两次评测运行判决为
+     * BLOCKED(指标回归超 ε)则拒绝重建;LOG_ONLY 类原因只记录不拦截
+     */
+    private void checkRebuildGate(Long id) {
+        if (!Boolean.TRUE.equals(properties.getGateRequired())) {
+            return;
+        }
+        Map<String, Object> verdict = evalService.gateCheck(id);
+        if ("BLOCKED".equals(verdict.get("state"))) {
+            throw new ServiceException("重建被评测门禁拦截:" + verdict.get("description")
+                + ";请先修复召回质量,或临时关闭 rag.knowledge.gate.required 后强制执行");
+        }
+    }
 
     /**
      * 分页查询知识库
@@ -94,6 +115,7 @@ public class AgentKnowledgeController extends BaseController {
     @Log(title = "知识库重建索引", businessType = BusinessType.UPDATE)
     @PutMapping("/{id}/reindex")
     public R<Void> reindex(@NotNull(message = "主键不能为空") @PathVariable Long id) {
+        checkRebuildGate(id);
         return toAjax(knowledgeService.rebuildIndex(id));
     }
 
@@ -106,6 +128,7 @@ public class AgentKnowledgeController extends BaseController {
     @Log(title = "知识库差异重建", businessType = BusinessType.UPDATE)
     @PutMapping("/{id}/reindex-stale")
     public R<Integer> reindexStale(@NotNull(message = "主键不能为空") @PathVariable Long id) {
+        checkRebuildGate(id);
         return R.ok(knowledgeService.rebuildStale(id));
     }
     /**

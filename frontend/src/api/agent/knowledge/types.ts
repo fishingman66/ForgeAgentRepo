@@ -184,12 +184,22 @@ export interface KbEvalCaseVO {
   knowledgeId: number | string;
   /** 评测问题 */
   question: string;
-  /** 期望命中的文档名(模糊包含,空=不校验) */
+  /** 期望命中的文档名(模糊包含,空=不校验;legacy 口径) */
   expectedDocName?: string;
-  /** 期望命中内容包含的关键词(逗号分隔,任一命中即可,空=不校验) */
+  /** 期望命中内容包含的关键词(逗号分隔,任一命中即可,空=不校验;legacy 口径) */
   expectedKeywords?: string;
+  /** 证据标注 JSON:[{"documentId":123,"span":"原文片段"}],空=legacy 口径 */
+  evidences?: string;
+  /** ACTIVE / EVIDENCE_STALE / DEPRECATED */
+  status?: string;
+  /** MANUAL / DEBUG_PAGE / ZERO_HIT */
+  source?: string;
+  sourceId?: number | string;
+  /** 数据集修订号 */
+  datasetRevision?: string;
   remark?: string;
   createTime?: string;
+  updateTime?: string;
 }
 
 /** 知识库检索评测运行记录 */
@@ -205,7 +215,48 @@ export interface KbEvalRunVO {
   /** 命中用例的平均相关度分 */
   avgScore?: number;
   durationMs?: number;
+  /** HitRate@K */
+  hitRate?: number;
+  /** Recall@K */
+  recallAtK?: number;
+  /** Precision@K */
+  precisionAtK?: number;
+  /** NDCG@K */
+  ndcgAtK?: number;
+  /** 有效用例数(ACTIVE) */
+  effectiveCases?: number;
+  /** 证据过期用例数 */
+  staleCases?: number;
+  /** 检索降级用例数 */
+  degradedCases?: number;
+  /** 门禁判决 PASSED/BLOCKED/LOG_ONLY */
+  gateState?: string;
+  /** 门禁原因 */
+  gateReason?: string;
+  /** 语料指纹 */
+  corpusFingerprint?: string;
   createTime?: string;
+}
+
+/** 知识库质量问题(R3-5) */
+export interface KbQualityIssueVO {
+  id?: number | string;
+  knowledgeId?: number | string;
+  queryText?: string;
+  queryHash?: string;
+  reason?: string;
+  source?: string;
+  sourceId?: number | string;
+  owner?: string;
+  linkedCaseId?: number | string;
+  /** NEW / IN_PROGRESS / RESOLVED */
+  status?: string;
+  note?: string;
+  createTime?: string;
+  updateTime?: string;
+  resolveTime?: string;
+  /** 乐观锁 */
+  revision?: number;
 }
 
 /** 知识库索引重建进度 */

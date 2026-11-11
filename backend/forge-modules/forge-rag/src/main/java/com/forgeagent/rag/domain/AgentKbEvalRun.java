@@ -53,6 +53,77 @@ public class AgentKbEvalRun implements Serializable {
     private Double mrr;
 
     /**
+     * HitRate@K(命中用例/有效用例)
+     */
+    private Double hitRate;
+
+    /**
+     * Recall@K(平均证据覆盖度)
+     */
+    private Double recallAtK;
+
+    /**
+     * Precision@K(相关条数/K)
+     */
+    private Double precisionAtK;
+
+    /**
+     * NDCG@K(二值相关,ideal=min(max(标注数,观测数),K))
+     */
+    private Double ndcgAtK;
+
+    /**
+     * 五指标+分组+Wilson95%置信区间明细 JSON
+     */
+    private String metricsJson;
+
+    /**
+     * 评测时配置快照 JSON(嵌入模型/分块参数/阈值)
+     */
+    private String configSnapshot;
+
+    /**
+     * 语料指纹 sha256(排序后的 (documentId, activeGeneration) | embeddingModel:dim | chunkFingerprint)
+     */
+    private String corpusFingerprint;
+
+    /**
+     * 数据集修订号
+     */
+    private String datasetRevision;
+
+    /**
+     * 有效用例数(ACTIVE)
+     */
+    private Integer effectiveCases;
+
+    /**
+     * 证据过期用例数(EVIDENCE_STALE,不入指标)
+     */
+    private Integer staleCases;
+
+    /**
+     * 检索降级用例数
+     */
+    private Integer degradedCases;
+
+    /**
+     * 门禁判决:PASSED / BLOCKED / LOG_ONLY
+     */
+    private String gateState;
+
+    /**
+     * 门禁原因:METRICS_REGRESSED / WITHIN_TOLERANCE / BASELINE_RECORDED /
+     * NOT_COMPARABLE / STALE_RATIO_EXCEEDED / DEGRADED_CASES / INSUFFICIENT_CASES
+     */
+    private String gateReason;
+
+    /**
+     * 逐用例判定明细 JSON(交集重算与门禁对比用)
+     */
+    private String caseResultsJson;
+
+    /**
      * 命中用例的平均相关度分
      */
     private Double avgScore;

@@ -92,4 +92,34 @@ public class AgentKbEvalController extends BaseController {
                                                   PageQuery pageQuery) {
         return R.ok(evalService.pageRuns(knowledgeId, pageQuery));
     }
+
+    /**
+     * 当前语料指纹(R3-4):门禁可比性的依据之一
+     */
+    @SaCheckPermission("agent:knowledge:query")
+    @GetMapping("/fingerprint")
+    public R<String> fingerprint(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
+        return R.ok(evalService.corpusFingerprint(knowledgeId));
+    }
+
+    /**
+     * 双跑对比(R3-4):按用例交集重算两侧指标后判决,结果写回候选 run
+     */
+    @SaCheckPermission("agent:knowledge:edit")
+    @Log(title = "知识库评测对比", businessType = BusinessType.OTHER)
+    @PostMapping("/compare")
+    public R<Map<String, Object>> compare(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                          @NotNull(message = "基线运行ID不能为空") Long baselineRunId,
+                                          @NotNull(message = "候选运行ID不能为空") Long candidateRunId) {
+        return R.ok(evalService.compare(knowledgeId, baselineRunId, candidateRunId));
+    }
+
+    /**
+     * 重建门禁检查(R3-4):最近两次运行的判决;BLOCKED 时重建入口会拒绝
+     */
+    @SaCheckPermission("agent:knowledge:query")
+    @GetMapping("/gate")
+    public R<Map<String, Object>> gate(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
+        return R.ok(evalService.gateCheck(knowledgeId));
+    }
 }

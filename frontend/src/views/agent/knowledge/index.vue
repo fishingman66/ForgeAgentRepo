@@ -325,14 +325,31 @@
       <el-divider content-position="left">评测用例({{ evalDialog.cases.length }})</el-divider>
       <div class="doc-toolbar">
         <el-input v-model="evalDialog.newCase.question" placeholder="评测问题" style="width: 300px" />
-        <el-input v-model="evalDialog.newCase.expectedDocName" placeholder="期望文档名(可选,模糊包含)" style="width: 200px" />
-        <el-input v-model="evalDialog.newCase.expectedKeywords" placeholder="期望关键词(逗号分隔,可选)" style="width: 220px" />
+        <el-input v-model="evalDialog.newCase.expectedDocName" placeholder="期望文档名(可选,legacy 口径)" style="width: 200px" />
+        <el-input v-model="evalDialog.newCase.expectedKeywords" placeholder="期望关键词(可选,legacy 口径)" style="width: 220px" />
         <el-button type="primary" plain icon="Plus" :loading="evalDialog.saving" @click="handleAddEvalCase">添加用例</el-button>
       </div>
+      <div class="doc-toolbar">
+        <el-input v-model="evalDialog.newCase.evidences" type="textarea" :rows="2" style="width: 100%"
+          placeholder='证据标注 JSON(可选,新口径,填了优先于文档名/关键词):[{"documentId":123,"span":"原文片段"}] —— span 非空走覆盖判定(阈值 0.5,跨块区间并集),span 全空只比文档ID' />
+      </div>
       <el-table v-loading="evalDialog.loading" border :data="evalDialog.cases" max-height="220" size="small">
-        <el-table-column label="评测问题" prop="question" min-width="260" show-overflow-tooltip />
-        <el-table-column label="期望文档" prop="expectedDocName" min-width="130" show-overflow-tooltip />
-        <el-table-column label="期望关键词" prop="expectedKeywords" min-width="150" show-overflow-tooltip />
+        <el-table-column label="评测问题" prop="question" min-width="240" show-overflow-tooltip />
+        <el-table-column label="口径" width="80" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.evidences ? 'primary' : 'info'" size="small">{{ scope.row.evidences ? '证据' : 'legacy' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="期望文档/关键词" min-width="150" show-overflow-tooltip>
+          <template #default="scope">{{ scope.row.expectedDocName || scope.row.expectedKeywords || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.status === 'ACTIVE' ? 'success' : scope.row.status === 'DEPRECATED' ? 'info' : 'warning'" size="small">
+              {{ scope.row.status === 'ACTIVE' ? '生效' : scope.row.status === 'DEPRECATED' ? '已废弃' : '证据过期' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="80" align="center">
           <template #default="scope">
             <el-button v-hasPermi="['agent:knowledge:edit']" size="small" text type="danger" icon="Delete" @click="handleDelEvalCase((scope.row as KbEvalCaseVO))">删除</el-button>
@@ -342,42 +359,95 @@
 
       <el-divider content-position="left">最近一次运行结果</el-divider>
       <div v-if="evalDialog.runResult" class="eval-summary">
-        <el-tag type="success">命中率 {{ ((evalDialog.runResult.hitRate || 0) * 100).toFixed(1) }}%</el-tag>
+        <el-tag type="success">HitRate {{ (((evalDialog.runResult.run?.hitRate ?? evalDialog.runResult.hitRate)) * 100).toFixed(1) }}%</el-tag>
         <el-tag type="primary">MRR {{ (evalDialog.runResult.run?.mrr || 0).toFixed(4) }}</el-tag>
-        <el-tag>命中 {{ evalDialog.runResult.run?.hitCases || 0 }} / {{ evalDialog.runResult.run?.totalCases || 0 }}</el-tag>
-        <el-tag type="info">平均分 {{ (evalDialog.runResult.run?.avgScore || 0).toFixed(4) }}</el-tag>
+        <el-tag type="primary">Recall {{ (evalDialog.runResult.run?.recallAtK || 0).toFixed(4) }}</el-tag>
+        <el-tag type="primary">Precision {{ (evalDialog.runResult.run?.precisionAtK || 0).toFixed(4) }}</el-tag>
+        <el-tag type="primary">NDCG {{ (evalDialog.runResult.run?.ndcgAtK || 0).toFixed(4) }}</el-tag>
+        <el-tag>有效 {{ evalDialog.runResult.run?.effectiveCases ?? evalDialog.runResult.run?.totalCases ?? 0 }}</el-tag>
+        <el-tag v-if="evalDialog.runResult.run?.staleCases" type="warning">过期 {{ evalDialog.runResult.run.staleCases }}</el-tag>
+        <el-tag v-if="evalDialog.runResult.run?.degradedCases" type="danger">降级 {{ evalDialog.runResult.run.degradedCases }}</el-tag>
         <el-tag type="info">耗时 {{ evalDialog.runResult.run?.durationMs || 0 }} ms</el-tag>
       </div>
       <el-table v-if="evalDialog.runResult" border :data="evalDialog.runResult.caseResults" max-height="240" size="small">
-        <el-table-column label="问题" prop="question" min-width="220" show-overflow-tooltip />
+        <el-table-column label="问题" prop="question" min-width="200" show-overflow-tooltip />
         <el-table-column label="命中" width="70" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.hit ? 'success' : 'danger'" size="small">{{ scope.row.hit ? '命中' : '未命中' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="首中排名" prop="rank" width="80" align="center" />
+        <el-table-column label="证据覆盖" width="110" align="center">
+          <template #default="scope">{{ (scope.row.evidenceCoverages || []).length ? (scope.row.evidenceCoverages as number[]).map((c: number) => c.toFixed(2)).join(' / ') : '-' }}</template>
+        </el-table-column>
         <el-table-column label="相关度" prop="score" width="90" align="center" />
-        <el-table-column label="实际命中文件" min-width="160" show-overflow-tooltip>
+        <el-table-column label="降级" width="70" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.degraded" type="danger" size="small">降级</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="实际命中文件" min-width="140" show-overflow-tooltip>
           <template #default="scope">{{ (scope.row.hitFiles || []).join(' / ') || '-' }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="110" align="center">
+          <template #default="scope">
+            <el-button v-if="!scope.row.hit" v-hasPermi="['agent:knowledge:edit']" size="small" text type="warning" @click="handleRegisterIssue(scope.row)">登记质量问题</el-button>
+          </template>
+        </el-table-column>
       </el-table>
-      <el-empty v-else description="点击「运行评测」批量执行用例并统计命中率与 MRR" :image-size="60" />
+      <el-empty v-else description="点击「运行评测」批量执行用例并统计五指标" :image-size="60" />
 
       <el-divider content-position="left">运行历史</el-divider>
       <el-table border :data="evalDialog.runs" max-height="180" size="small">
         <el-table-column label="时间" prop="createTime" width="165" align="center" />
         <el-table-column label="TopK" prop="topK" width="70" align="center" />
-        <el-table-column label="用例数" prop="totalCases" width="80" align="center" />
-        <el-table-column label="命中" prop="hitCases" width="70" align="center" />
-        <el-table-column label="命中率" width="90" align="center">
-          <template #default="scope">
-            {{ scope.row.totalCases ? ((scope.row.hitCases / scope.row.totalCases) * 100).toFixed(1) + '%' : '-' }}
-          </template>
+        <el-table-column label="有效" prop="effectiveCases" width="70" align="center" />
+        <el-table-column label="HitRate" width="80" align="center">
+          <template #default="scope">{{ ((scope.row.hitRate ?? (scope.row.totalCases ? scope.row.hitCases / scope.row.totalCases : 0)) * 100).toFixed(1) + '%' }}</template>
         </el-table-column>
-        <el-table-column label="MRR" width="90" align="center">
+        <el-table-column label="MRR" width="80" align="center">
           <template #default="scope">{{ (scope.row.mrr || 0).toFixed(4) }}</template>
         </el-table-column>
+        <el-table-column label="NDCG" width="80" align="center">
+          <template #default="scope">{{ scope.row.ndcgAtK != null ? (scope.row.ndcgAtK).toFixed(4) : '-' }}</template>
+        </el-table-column>
+        <el-table-column label="门禁" width="100" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.gateState" :type="scope.row.gateState === 'PASSED' ? 'success' : scope.row.gateState === 'BLOCKED' ? 'danger' : 'info'" size="small">
+              {{ scope.row.gateState }}/{{ scope.row.gateReason }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="耗时(ms)" prop="durationMs" width="90" align="center" />
+      </el-table>
+
+      <el-divider content-position="left">质量问题({{ evalDialog.issues.length }})</el-divider>
+      <el-table v-loading="evalDialog.loading" border :data="evalDialog.issues" max-height="180" size="small">
+        <el-table-column label="查询" prop="queryText" min-width="200" show-overflow-tooltip />
+        <el-table-column label="原因" width="150" align="center">
+          <template #default="scope">
+            <el-tag size="small" type="info">{{ scope.row.reason }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" prop="source" width="100" align="center" />
+        <el-table-column label="状态" width="110" align="center">
+          <template #default="scope">
+            <el-tag :type="scope.row.status === 'RESOLVED' ? 'success' : scope.row.status === 'IN_PROGRESS' ? 'primary' : 'warning'" size="small">
+              {{ scope.row.status === 'RESOLVED' ? '已解决' : scope.row.status === 'IN_PROGRESS' ? '处理中' : '新建' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="关联用例" prop="linkedCaseId" width="90" align="center" />
+        <el-table-column label="操作" width="180" align="center">
+          <template #default="scope">
+            <el-button v-if="scope.row.status !== 'RESOLVED'" v-hasPermi="['agent:knowledge:edit']" size="small" text type="primary" @click="handleIssueTransition((scope.row as KbQualityIssueVO), scope.row.status === 'NEW' ? 'IN_PROGRESS' : 'RESOLVED')">
+              {{ scope.row.status === 'NEW' ? '开始处理' : '标记解决' }}
+            </el-button>
+            <el-button v-else v-hasPermi="['agent:knowledge:edit']" size="small" text type="warning" @click="handleIssueTransition((scope.row as KbQualityIssueVO), 'IN_PROGRESS')">重新打开</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-dialog>
 
@@ -421,11 +491,12 @@ import {
   listKnowledgeDocument, uploadKnowledgeDocument, retryKnowledgeDocument, delKnowledgeDocument,
   listKnowledgeChunks, downloadKnowledgeDocument, searchKnowledge,
   updateKnowledgeChunk, changeKnowledgeChunkEnabled, listKnowledgeZeroHit, rebuildKnowledgeIndex,
-  rebuildStaleKnowledge, getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns
+  rebuildStaleKnowledge, getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns,
+  pageKbQualityIssues, registerKbQualityIssue, changeKbQualityIssueStatus
 } from '@/api/agent/knowledge';
 import type {
   KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchHitVO, KnowledgeZeroHitVO,
-  KbEvalCaseVO, KbEvalRunVO, KbRebuildProgressVO
+  KbEvalCaseVO, KbEvalRunVO, KbQualityIssueVO, KbRebuildProgressVO
 } from '@/api/agent/knowledge/types';
 import { myWorkspaces } from '@/api/agent/workspace';
 import type { WorkspaceVO } from '@/api/agent/workspace/types';
@@ -686,9 +757,10 @@ const evalDialog = reactive({
   saving: false,
   topK: 5,
   cases: [] as KbEvalCaseVO[],
-  newCase: { question: '', expectedDocName: '', expectedKeywords: '' } as KbEvalCaseVO,
+  newCase: { question: '', expectedDocName: '', expectedKeywords: '', evidences: '' } as KbEvalCaseVO,
   runResult: null as Record<string, any> | null,
-  runs: [] as KbEvalRunVO[]
+  runs: [] as KbEvalRunVO[],
+  issues: [] as KbQualityIssueVO[]
 });
 
 const handleEval = () => {
@@ -707,12 +779,14 @@ const loadEvalAll = async () => {
   if (!evalDialog.knowledgeId) return;
   evalDialog.loading = true;
   try {
-    const [caseRes, runRes] = await Promise.all([
+    const [caseRes, runRes, issueRes] = await Promise.all([
       listKbEvalCases(evalDialog.knowledgeId),
-      listKbEvalRuns(evalDialog.knowledgeId, 10)
+      listKbEvalRuns(evalDialog.knowledgeId, 10),
+      pageKbQualityIssues(evalDialog.knowledgeId, undefined, 1, 50)
     ]);
     evalDialog.cases = caseRes.data || [];
     evalDialog.runs = runRes.data || [];
+    evalDialog.issues = issueRes.data?.rows || [];
   } finally {
     evalDialog.loading = false;
   }
@@ -723,8 +797,20 @@ const handleAddEvalCase = async () => {
     proxy?.$modal.msgWarning('请输入评测问题');
     return;
   }
-  if (!evalDialog.newCase.expectedDocName && !evalDialog.newCase.expectedKeywords) {
-    proxy?.$modal.msgWarning('期望文档名与期望关键词至少填一项,否则无法判定命中');
+  const evidences = evalDialog.newCase.evidences?.trim();
+  if (evidences) {
+    try {
+      const parsed = JSON.parse(evidences);
+      if (!Array.isArray(parsed) || !parsed.length) {
+        proxy?.$modal.msgWarning('证据标注必须是以下格式的非空数组');
+        return;
+      }
+    } catch {
+      proxy?.$modal.msgWarning('证据标注 JSON 不合法');
+      return;
+    }
+  } else if (!evalDialog.newCase.expectedDocName && !evalDialog.newCase.expectedKeywords) {
+    proxy?.$modal.msgWarning('证据标注与期望文档名/关键词至少填一项,否则无法判定命中');
     return;
   }
   evalDialog.saving = true;
@@ -733,9 +819,10 @@ const handleAddEvalCase = async () => {
       knowledgeId: evalDialog.knowledgeId,
       question: evalDialog.newCase.question.trim(),
       expectedDocName: evalDialog.newCase.expectedDocName?.trim(),
-      expectedKeywords: evalDialog.newCase.expectedKeywords?.trim()
+      expectedKeywords: evalDialog.newCase.expectedKeywords?.trim(),
+      evidences: evidences || undefined
     });
-    evalDialog.newCase = { knowledgeId: evalDialog.knowledgeId, question: '', expectedDocName: '', expectedKeywords: '' };
+    evalDialog.newCase = { knowledgeId: evalDialog.knowledgeId, question: '', expectedDocName: '', expectedKeywords: '', evidences: '' };
     proxy?.$modal.msgSuccess('用例已添加');
     loadEvalAll();
   } finally {
@@ -766,6 +853,35 @@ const handleRunEval = async () => {
     listKbEvalRuns(evalDialog.knowledgeId, 10).then((r) => (evalDialog.runs = r.data || []));
   } finally {
     evalDialog.running = false;
+  }
+};
+
+/** 未命中的用例一键登记质量问题(source=CASE_FAIL,后端按 queryHash 去重) */
+const handleRegisterIssue = async (row: Record<string, any>) => {
+  try {
+    await registerKbQualityIssue({
+      knowledgeId: evalDialog.knowledgeId,
+      queryText: String(row.question),
+      reason: 'RETRIEVAL_MISS',
+      source: 'CASE_FAIL',
+      note: '评测未命中自动登记'
+    });
+    proxy?.$modal.msgSuccess('已登记质量问题');
+    loadEvalAll();
+  } catch (e) {
+    // 后端报错已统一提示
+  }
+};
+
+/** 质量问题状态流转(乐观锁 revision) */
+const handleIssueTransition = async (row: KbQualityIssueVO, target: string) => {
+  try {
+    await changeKbQualityIssueStatus(row.id!, target, row.note, row.revision);
+    proxy?.$modal.msgSuccess(target === 'RESOLVED' ? '已标记解决' : '已更新状态');
+    loadEvalAll();
+  } catch (e) {
+    // revision 不一致等由后端统一提示
+    loadEvalAll();
   }
 };
 

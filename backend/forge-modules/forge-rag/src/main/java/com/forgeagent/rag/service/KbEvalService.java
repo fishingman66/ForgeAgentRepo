@@ -50,4 +50,22 @@ public interface KbEvalService {
      * 分页查询(与平台分页风格一致,供管理界面使用)
      */
     PageResult<AgentKbEvalRun> pageRuns(Long knowledgeId, PageQuery pageQuery);
+
+    /**
+     * 当前语料指纹(R3-4):排序后的 (documentId, activeGeneration) | embeddingModel:dim | chunkFingerprint
+     */
+    String corpusFingerprint(Long knowledgeId);
+
+    /**
+     * 双跑对比(R3-4):按用例交集重算两侧指标后交 {@code GateJudgeCore} 判决,
+     * 结果写回候选 run 的 gate_state/gate_reason
+     *
+     * @return verdict + 两侧指标 + 交集规模
+     */
+    Map<String, Object> compare(Long knowledgeId, Long baselineRunId, Long candidateRunId);
+
+    /**
+     * 重建门禁(R3-4):取最近两次运行做判决;不足两次按"首次(无基线)"处理,永不拦截
+     */
+    Map<String, Object> gateCheck(Long knowledgeId);
 }

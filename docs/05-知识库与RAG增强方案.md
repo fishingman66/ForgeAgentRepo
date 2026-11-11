@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）,R3~R5 待启动** · 2026-11-11 · 适用版本 6.1.x
+> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）,R4~R5 待启动** · 2026-11-11 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -695,6 +695,21 @@ agent_kb_query_log（R1-6）
 
 单测：`OverlapRatioCalculator`（跨块拼合、NFKC、掩码）、五指标（手工构造 3 个 case 验算）、`GateJudgeCore`（ε 边界、不可比、degenerate）、用例标记 stale。e2e：30 用例的基线跑（改造前先跑一次存档）→ 改造后比对，**验收口径：hitRate 不下降，MRR 提升 ≥ 10%**。
 
+### R3 交付记录（2026-11-11，R3-1~R3-6 全部落地）
+
+**实现落点**：判定与指标全部抽成纯静态组件（`service/eval/` 包，零业务依赖）——`SpanHitJudge`（normalize=NFKC+去空白+去掩码*+小写；overlapRatio=LCS/span；aggregateCoverage=区间并集，DP 沿对角线只收极大公共子串）、`EvalMetricsCalculator`（五指标+Wilson95% 仅展示+分组 overall/span/document/legacy，空组省略）、`GateJudgeCore`（判决顺序即规范）、`CorpusFingerprints`（语料指纹）、`EvalEvidence`（证据 JSON 解析/校验）。legacy 用例保留旧口径判定并在结果标 `legacy=true`，分组隔离不混算。
+
+**决策记录（偏离计划处）**：
+1. 最小匹配长度按语种自适应：含 CJK ≥2 字、纯拉丁 ≥4 字母——英文 bigram/trigram 巧合重叠会把 30% 的 junk 覆盖算进并集（实测），固定 2 字门槛对中文语料是对的、对英文是错的。
+2. 自动打标用 Spring 事件（`KbDocumentGenerationEvent`）：Processor → KbEvalService → IAgentKnowledgeService 是循环依赖，事件解耦后换代/删除两个时机都触发，双向判定（不达标 EVIDENCE_STALE，恢复可达回 ACTIVE）。覆盖判定用该文档全量新代分块做候选，几乎不误标；删除文档必然 stale。
+3. NDCG 折扣标准公式 `1/log2(p+1)`；ideal 用观测值兜底（`min(max(标注数,观测数),K)`）防重叠块把 NDCG 顶过 1——单测锁定。
+4. 门禁接在重建入口（Controller 层调 `gateCheck`），`rag.knowledge.gate.required` 默认关；不注入 AgentKnowledgeServiceImpl 是因为 KbEvalServiceImpl 依赖 IAgentKnowledgeService。
+5. 逐用例判定明细落 `agent_kb_eval_run.case_results_json`，双跑对比按 caseId 交集重算两侧指标——不落明细就无法事后交集。
+6. 质量问题轻量 3 态 + `(knowledge_id, source, query_hash)` 唯一去重；RESOLVED 后同指纹再次登记视为复发自动 reopen。queryHash 抽 `QueryHashes` 公共工具，检索日志与质量问题共用唯一真源。
+7. 单轮/多轮分组未做：检索评测用例没有轮次字段，该分组归 agent_eval。
+
+**验证**：forge-rag 单测 140/140（+21）；e2e `temp/r3_verify.py` 34/34（三类用例判定、五指标落库、同语料对比 WITHIN_TOLERANCE、跨代对比 NOT_COMPARABLE、换代后不误标、门禁端点、case-from-hit、质量问题去重/流转/复发 reopen、删除文档自动 stale）；`pnpm typecheck`/`build` 过；基线 HitRate 93.33% / MRR 0.8667 / NDCG 0.8841 **不降**。
+
 ---
 
 ## 6. R4 · 问答可信度
@@ -793,7 +808,7 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `backend/sql/agent_kb_r2_ingest.sql` | **已交付**：`agent_kb_chunk` + `generation`/`vector_status`/`vector_retry_count`/`parent_offset_start`/`parent_offset_end`/`page_no`/`sheet_name` + `idx_kb_chunk_doc_gen`/`idx_kb_chunk_vsync`；`agent_knowledge_document` + `active_generation`/`notice`；`agent_knowledge` + `hide_parent_with_disabled_child` |
 | `backend/sql/agent_kb_r2_clean.sql` | **已交付**：`agent_knowledge` + `clean_rules json`（NULL=默认:页眉页脚/空白归一开,NFKC/PII 关） |
 | `backend/sql/agent_kb_r5_fingerprint.sql` | **已交付**：`agent_knowledge` + `parse_fingerprint`/`chunk_fingerprint`;`agent_knowledge_document` + `config_stale`/`parse_fingerprint`/`parsed_text mediumtext` |
-| `backend/sql/agent_kb_r3_eval.sql` | `agent_kb_eval_case` + `evidences`/`status`/`dataset_revision`；`agent_kb_eval_run` + 六个统计/指纹列；新表 `agent_kb_quality_issue` |
+| `backend/sql/agent_kb_r3_eval.sql` | **已交付**：`agent_kb_eval_case` + `evidences`/`status`/`source`/`source_id`/`dataset_revision`/`update_time`；`agent_kb_eval_run` + 五指标列/`metrics_json`/`config_snapshot`/`corpus_fingerprint`/`dataset_revision`/用例计数/门禁列/`case_results_json`；质量问题表另落 `agent_kb_r3_quality.sql` |
 | `backend/sql/agent_kb_r5_acl.sql` | `agent_kb_doc_acl`；文档表 + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed` |
 
 > 脚本风格：**幂等**用 `create table if not exists` + `information_schema` 判断 + `PREPARE/EXECUTE`（MySQL 无 `ADD COLUMN IF NOT EXISTS`，直接 `ALTER` 重复执行会整脚本中断）+ 菜单权限 `insert ... where not exists`。Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 同步。
@@ -922,6 +937,6 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | R2-2 清洗层 | 2026-11-11 | `clean_rules` 库级规则 + `DocumentCleaner` 管线（页眉页脚/页码 → NFKC → 正则 → PII → 空白归一,代码块保护）;NFKC 默认关（全角标点会一并半角化）;保存时拒绝非法 JSON;表单 4 开关 | forge-rag 119/119、e2e 17/17、`pnpm build` 过、基线不降 | **已交付** |
 | R2-5 指纹与差异重建 | 2026-11-11 | 解析/分块双指纹;改配置或嵌入模型 → 文档标脏;`rebuildStale` 差异重建 + `staleCount` 展示与按钮分流;解析产物复用（`parsed_text` ≤400 万字符落库,指纹一致跳过解析+清洗） | forge-rag 119/119、e2e 20/20、agent 回归 63/63、前端 typecheck/build 过、基线不降 | **已交付** |
 | R2 剩余 | — | 无(R2 全部完成;OCR/多模态解析归 R5) | — | 完成 |
-| R3 评测闭环 | 待定 | span 证据 + 五指标 + CI + 双跑门禁 + 查询日志闭环 + 质量议题 | 手工验算 + 基线对比 | 未启动 |
+| R3 评测闭环 | **已交付**（2026-11-11） | span 证据 + 五指标 + 双跑门禁 + 查询日志闭环 + 质量议题（单轮/多轮分组无字段支撑未做；Wilson CI 已落） | 手工验算 + 基线对比（不降）+ e2e 34 项 | 已交付 |
 | R4 问答可信 | 待定 | 结构化资料块 + 引用校验 + 拒答策略 + 答案层评测 | 三类对抗用例 | 未启动 |
 | R5 治理与规模化 | 待定 | 文档 ACL + 审核时效回收站 + 图谱辅助检索 + 外部源 + OCR/多模态 | 按子项单独出验证口径 | 未启动 |

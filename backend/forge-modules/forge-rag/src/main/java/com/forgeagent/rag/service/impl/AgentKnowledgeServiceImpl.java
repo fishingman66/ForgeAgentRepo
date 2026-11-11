@@ -1028,12 +1028,10 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
     }
 
     /**
-     * 查询指纹:去空白 + 小写 + 折叠连续空格后取 md5,用于聚合"同一类问题"
+     * 查询指纹:委托 {@link com.forgeagent.rag.service.support.QueryHashes}(与质量问题去重同口径,唯一真源)
      */
     private static String queryHash(String query) {
-        String normalized = StringUtils.defaultString(query).trim().toLowerCase(Locale.ROOT)
-            .replaceAll("\\s+", " ");
-        return org.springframework.util.DigestUtils.md5DigestAsHex(normalized.getBytes(StandardCharsets.UTF_8));
+        return com.forgeagent.rag.service.support.QueryHashes.of(query);
     }
 
     /**

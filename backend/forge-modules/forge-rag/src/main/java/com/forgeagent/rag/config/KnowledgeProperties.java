@@ -111,6 +111,12 @@ public class KnowledgeProperties {
     private Boolean ragCacheEnabled = true;
 
     /**
+     * R3-4 重建门禁:开启后重建索引/差异重建前会检查最近两次评测运行,
+     * BLOCKED(指标回归超 ε)则拒绝;默认关,先观察再打开
+     */
+    private Boolean gateRequired = false;
+
+    /**
      * 对话 RAG 检索: 结果缓存时长(秒);分块编辑/禁用后最长该秒数内生效
      */
     private Integer ragCacheTtlSeconds = 60;
