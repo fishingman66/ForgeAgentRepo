@@ -1,0 +1,3 @@
+com.forgeagent.common.encrypt.config.EncryptorAutoConfiguration
+com.forgeagent.common.encrypt.config.ApiDecryptAutoConfiguration
+

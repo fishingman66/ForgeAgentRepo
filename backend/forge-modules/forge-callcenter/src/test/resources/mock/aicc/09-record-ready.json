@@ -1,0 +1,15 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "recordReady",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182495000,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "recordingId": "MOCK-REC-0001",
+        "recordingUrl": "mock://wav/8k-mono-1s"
+      }
+    }
+  ]
+}

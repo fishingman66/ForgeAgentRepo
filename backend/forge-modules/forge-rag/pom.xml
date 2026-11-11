@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>forge-rag</artifactId>
+    <description>
+        RAG 检索增强模块(知识库 / 文档摄取 / 向量化 / Milvus 检索 / 重排)
+    </description>
+    <dependencies>
+        <!-- 共享内核 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-agent-core</artifactId>
+        </dependency>
+
+        <!-- 通用工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-core</artifactId>
+        </dependency>
+
+        <!-- 数据库服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-mybatis</artifactId>
+        </dependency>
+
+        <!-- 缓存服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-redis</artifactId>
+        </dependency>
+
+        <!-- 日志记录 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-log</artifactId>
+        </dependency>
+
+        <!-- JSON 工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-json</artifactId>
+        </dependency>
+
+        <!-- Jackson 数据绑定(Milvus REST 调用) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- 安全模块 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-security</artifactId>
+        </dependency>
+
+        <!-- web服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-web</artifactId>
+        </dependency>
+
+        <!-- Excel 导出 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-excel</artifactId>
+        </dependency>
+
+        <!-- PDF 文档解析(Word/Excel 复用 fesod 传递的 poi-ooxml-lite) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- 测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

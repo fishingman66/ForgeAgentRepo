@@ -1,0 +1,16 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "hangup",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182496000,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "hangupCause": "normal",
+        "hangupBy": "seat",
+        "sipCode": 200
+      }
+    }
+  ]
+}

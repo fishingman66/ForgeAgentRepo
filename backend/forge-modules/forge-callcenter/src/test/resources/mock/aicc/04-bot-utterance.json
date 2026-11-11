@@ -1,0 +1,17 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "botUtterance",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182403800,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "speaker": "bot",
+        "text": "已为你查询到订单正在配送中",
+        "startMs": 3300,
+        "endMs": 3800
+      }
+    }
+  ]
+}

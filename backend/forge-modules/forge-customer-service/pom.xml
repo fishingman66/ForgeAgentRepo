@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>forge-customer-service</artifactId>
+
+    <description>
+        智能客服业务域模块(访客 / 会话 / 工单 / 坐席 / 渠道 / 质检);
+        通过 forge-agent 的 api.customerservice 契约包单向依赖 Agent 执行域,禁止反向依赖
+    </description>
+
+    <dependencies>
+        <!-- Agent 执行域:传递依赖 core / rag / memory / common-web / common-mybatis / common-redis -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-agent</artifactId>
+        </dependency>
+
+        <!-- 共享 DTO -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-api</artifactId>
+        </dependency>
+
+        <!-- 共享契约层(V0.5):单向依赖,公共层不得反向依赖本模块 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-callcenter-common</artifactId>
+        </dependency>
+
+        <!-- 知识图谱模块(P3/M3):客服领域三元组维护走 KgService,图谱本体不感知客服 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-kg</artifactId>
+        </dependency>
+
+        <!-- 单元测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>forge-agent-core</artifactId>
+    <description>
+        Agent 平台共享内核(Agent/模型/空间成员/附件实体与映射、权限助手、配置缓存、模型工厂)
+    </description>
+    <dependencies>
+        <!-- 通用工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-core</artifactId>
+        </dependency>
+
+        <!-- 数据库服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-mybatis</artifactId>
+        </dependency>
+
+        <!-- 缓存服务(配置缓存 @Cacheable) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-redis</artifactId>
+        </dependency>
+
+        <!-- 安全模块(登录用户上下文) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-satoken</artifactId>
+        </dependency>
+
+        <!-- AgentScope Java 运行内核(共享模型工厂) -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope</artifactId>
+        </dependency>
+    </dependencies>
+</project>

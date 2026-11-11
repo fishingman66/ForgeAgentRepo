@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>forge-kg</artifactId>
+
+    <description>
+        知识图谱模块(P3 / M3):实体-关系存图与召回能力,供长期记忆、智能客服等域复用。
+        存储后端可插拔(开发/测试用 MySQL 两表,生产可接 Neo4j),
+        本模块不反向依赖任何业务模块,只依赖 common-core 与 common-mybatis。
+    </description>
+
+    <dependencies>
+        <!-- 通用工具(StringUtils 等) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-core</artifactId>
+        </dependency>
+
+        <!-- 数据库服务(MySQL 存图实现) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-mybatis</artifactId>
+        </dependency>
+
+        <!-- 单元测试(仅 test scope) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

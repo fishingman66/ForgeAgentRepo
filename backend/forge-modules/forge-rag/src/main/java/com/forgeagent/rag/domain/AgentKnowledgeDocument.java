@@ -1,0 +1,90 @@
+package com.forgeagent.rag.domain;
+
+import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import com.forgeagent.common.mybatis.core.domain.BaseEntity;
+import java.io.Serial;
+/**
+ * 知识库文档对象 agent_knowledge_document
+ *
+ * @author ForgeAgent
+ */
+@Data
+@EqualsAndHashCode(callSuper = true)
+@TableName("agent_knowledge_document")
+public class AgentKnowledgeDocument extends BaseEntity {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    /**
+     * 主键
+     */
+    @TableId(value = "id")
+    private Long id;
+
+    /**
+     * 所属知识库ID
+     */
+    private Long knowledgeId;
+
+    /**
+     * 原始文件名
+     */
+    private String fileName;
+
+    /**
+     * 文件扩展名(小写,如 txt/md/docx/xlsx/pdf)
+     */
+    private String fileExt;
+
+    /**
+     * 文件大小(字节)
+     */
+    private Long fileSize;
+
+    /**
+     * 文件内容MD5(同一知识库内按内容去重)
+     */
+    private String fileMd5;
+
+    /**
+     * 文件存储路径
+     */
+    private String filePath;
+
+    /**
+     * 解析向量化状态(0处理中 1可用 2失败)
+     */
+    private String status;
+
+    /**
+     * 失败原因
+     */
+    private String failReason;
+
+    /**
+     * 分块数量
+     */
+    private Integer chunkCount;
+
+    /**
+     * 当前生效代次:重建成功后切换;检索只认该代次的分块(切换前旧代仍可查)
+     */
+    private Integer activeGeneration;
+
+    /**
+     * 处理提示(如「向量写入失败,已排队补偿」「扫描件需 OCR,当前未启用」)
+     */
+    private String notice;
+
+    /**
+     * 删除标志(0存在 2删除)
+     */
+    @TableLogic
+    private Long delFlag;
+
+}

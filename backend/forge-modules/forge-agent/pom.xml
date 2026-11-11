@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>forge-agent</artifactId>
+
+    <description>
+        Agent 平台业务模块(工作空间 / Agent 开发 / 运行时等)
+    </description>
+
+    <dependencies>
+
+        <!-- 共享内核(Agent/模型/空间成员/附件实体与辅助服务) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-agent-core</artifactId>
+        </dependency>
+
+        <!-- RAG 检索增强(知识库检索/文档解析) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-rag</artifactId>
+        </dependency>
+
+        <!-- 长期记忆 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-memory</artifactId>
+        </dependency>
+
+        <!-- 通用工具-->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-core</artifactId>
+        </dependency>
+
+        <!-- 缓存服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-redis</artifactId>
+        </dependency>
+
+        <!-- 数据库服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-mybatis</artifactId>
+        </dependency>
+
+        <!-- 日志记录 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-log</artifactId>
+        </dependency>
+
+        <!-- JSON 工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-json</artifactId>
+        </dependency>
+
+        <!-- Jackson 数据绑定(Milvus REST 调用) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- 安全模块 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-security</artifactId>
+        </dependency>
+
+        <!-- web服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-web</artifactId>
+        </dependency>
+
+        <!-- Excel 导出 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-excel</artifactId>
+        </dependency>
+
+        <!-- PDF 文档解析(知识库文档向量化用,Word/Excel 复用 fesod 传递的 poi-ooxml-lite) -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.4</version>
+        </dependency>
+
+        <!-- AgentScope Java 运行内核:ReAct 推理、模型卡、MCP、工具与中间件 -->
+        <dependency>
+            <groupId>io.agentscope</groupId>
+            <artifactId>agentscope</artifactId>
+        </dependency>
+
+        <!-- 测试(质量基建批次:工作流引擎单测) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- MCP SDK 对齐 spring-ai 2.0.0 所需版本(2.0.0 含 mcp-json-jackson3);
+             AgentScope 默认传递 0.17.0(仅 jackson2),会把 Spring AI MCP 自动装配所需类顶掉导致启动失败 -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp</artifactId>
+            <version>2.0.0</version>
+        </dependency>
+
+    </dependencies>
+
+</project>

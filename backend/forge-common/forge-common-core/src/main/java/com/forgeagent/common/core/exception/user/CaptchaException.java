@@ -1,0 +1,21 @@
+package com.forgeagent.common.core.exception.user;
+
+import java.io.Serial;
+
+/**
+ * 验证码错误异常类
+ *
+ * @author ForgeAgent
+ */
+public class CaptchaException extends UserException {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    /**
+     * 构造验证码错误异常。
+     */
+    public CaptchaException() {
+        super("user.jcaptcha.error");
+    }
+}

@@ -1,0 +1,19 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "asrResult",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182403200,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "speaker": "caller",
+        "text": "我要查一下订单状态",
+        "confidence": 0.93,
+        "isFinal": true,
+        "startMs": 1800,
+        "endMs": 3200
+      }
+    }
+  ]
+}

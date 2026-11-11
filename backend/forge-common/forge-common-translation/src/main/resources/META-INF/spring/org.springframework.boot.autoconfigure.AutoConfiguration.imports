@@ -1,0 +1,6 @@
+com.forgeagent.common.translation.config.TranslationConfig
+com.forgeagent.common.translation.core.impl.DeptNameTranslationImpl
+com.forgeagent.common.translation.core.impl.DictTypeTranslationImpl
+com.forgeagent.common.translation.core.impl.OssUrlTranslationImpl
+com.forgeagent.common.translation.core.impl.UserNameTranslationImpl
+com.forgeagent.common.translation.core.impl.NicknameTranslationImpl

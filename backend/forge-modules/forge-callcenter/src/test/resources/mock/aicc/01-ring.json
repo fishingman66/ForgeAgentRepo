@@ -1,0 +1,18 @@
+{
+  "workNo": "",
+  "eventList": [
+    {
+      "eventType": "callRing",
+      "workNo": "",
+      "eventGenTime": 1794182400000,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "caller": "138****5678",
+        "callee": "400****100",
+        "ani": "138****5678",
+        "dnis": "400****100",
+        "direction": "inbound"
+      }
+    }
+  ]
+}

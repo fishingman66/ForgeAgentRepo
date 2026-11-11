@@ -1,0 +1,16 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "transfer",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182407500,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "transferFrom": "BOT",
+        "transferTo": "SKILL-AFTERSALE",
+        "reason": "visitor_request"
+      }
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+package com.forgeagent.workflow.liteflow.start;
+
+import cn.hutool.core.util.ObjectUtil;
+import com.yomahub.liteflow.annotation.LiteflowComponent;
+import com.yomahub.liteflow.core.NodeBooleanComponent;
+import com.forgeagent.workflow.common.ConditionalOnEnable;
+import com.forgeagent.workflow.domain.context.StartProcessContext;
+
+/**
+ * 判断启动流程时是否走已有实例续提交分支。
+ *
+ * @author may; 改造: 智造 ForgeAgent 2026-11
+ */
+@ConditionalOnEnable
+@LiteflowComponent("startExists")
+public class StartExistsComponent extends NodeBooleanComponent {
+
+    @Override
+    public boolean processBoolean() {
+        StartProcessContext context = getContextBean(StartProcessContext.class);
+        return ObjectUtil.isNotNull(context.getExistingInstance());
+    }
+
+}

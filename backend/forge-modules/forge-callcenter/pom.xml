@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>forge-callcenter</artifactId>
+
+    <description>
+        语音与呼叫中心模块(V1 适配层);依赖 forge-customer-service 复用文本域 public Service,
+        依赖 forge-callcenter-common 复用零业务契约;依赖方向 callcenter → customerservice → common,禁止反向。
+    </description>
+
+    <dependencies>
+        <!-- 文本客服域:复用 CsChannelGuard / CsSecretCipher / CsComplianceService 等 public 能力 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-customer-service</artifactId>
+        </dependency>
+
+        <!-- 零业务契约层 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-callcenter-common</artifactId>
+        </dependency>
+
+        <!-- 录音本地对象存储(D6):OssClient / OssFactory,版本由 forge-common-bom 管理 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-oss</artifactId>
+        </dependency>
+
+        <!-- 单元测试 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

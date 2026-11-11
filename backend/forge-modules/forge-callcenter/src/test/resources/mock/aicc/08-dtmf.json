@@ -1,0 +1,14 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "dtmf",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182412000,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "digits": "1"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+com.forgeagent.common.push.config.MessageAutoConfiguration
+com.forgeagent.common.push.config.MessageSseConfiguration
+com.forgeagent.common.push.config.MessageWebSocketConfiguration

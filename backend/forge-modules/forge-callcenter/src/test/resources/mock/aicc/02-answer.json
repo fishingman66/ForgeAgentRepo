@@ -1,0 +1,14 @@
+{
+  "workNo": "",
+  "eventList": [
+    {
+      "eventType": "callAnswer",
+      "workNo": "",
+      "eventGenTime": 1794182401500,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "answerAt": "2026-11-09 08:00:01"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.forgeagent.agent.mapper.AgentWorkspaceMapper">
+
+    <select id="selectMyWorkspaces" resultType="com.forgeagent.agent.domain.vo.AgentWorkspaceVo">
+        select w.id,
+               w.name,
+               w.description,
+               w.status,
+               w.owner_id,
+               w.dept_id,
+               d.dept_name                                       as dept_name,
+               u.nick_name                                       as owner_name,
+               m.role                                            as my_role,
+               (select count(*) from agent_workspace_member cm
+                 where cm.workspace_id = w.id)                   as member_count,
+               w.create_time,
+               w.update_time
+        from agent_workspace w
+                 join agent_workspace_member m
+                      on m.workspace_id = w.id and m.user_id = #{userId}
+                 left join sys_user u on u.user_id = w.owner_id
+                 left join sys_dept d on d.dept_id = w.dept_id
+        where w.del_flag = 0
+        <if test="keyword != null and keyword != ''">
+            and w.name like concat('%', #{keyword}, '%')
+        </if>
+        order by w.create_time desc
+    </select>
+
+    <select id="selectWorkspacePage" resultType="com.forgeagent.agent.domain.vo.AgentWorkspaceVo">
+        select w.id,
+               w.name,
+               w.description,
+               w.status,
+               w.owner_id,
+               w.dept_id,
+               d.dept_name                                       as dept_name,
+               u.nick_name                                       as owner_name,
+               (select count(*) from agent_workspace_member cm
+                 where cm.workspace_id = w.id)                   as member_count,
+               w.create_time,
+               w.update_time
+        from agent_workspace w
+                 left join sys_user u on u.user_id = w.owner_id
+                 left join sys_dept d on d.dept_id = w.dept_id
+        where w.del_flag = 0
+        <if test="keyword != null and keyword != ''">
+            and w.name like concat('%', #{keyword}, '%')
+        </if>
+        <if test="status != null and status != ''">
+            and w.status = #{status}
+        </if>
+        <if test="deptId != null">
+            and w.dept_id = #{deptId}
+        </if>
+        order by w.create_time desc
+    </select>
+
+</mapper>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <groupId>com.forgeagent</groupId>
+        <artifactId>forge-modules</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>forge-memory</artifactId>
+    <description>
+        长期记忆模块(跨会话记忆沉淀 / 对话注入 / 异步抽取)
+    </description>
+    <dependencies>
+        <!-- 共享内核 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-agent-core</artifactId>
+        </dependency>
+
+        <!-- 通用工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-core</artifactId>
+        </dependency>
+
+        <!-- P3/M3:知识图谱能力本体(forge-kg),记忆侧只保留注入适配与补建入口 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-kg</artifactId>
+        </dependency>
+
+        <!-- P3/M2':复用 RAG 的 EmbeddingFactory 与 VectorCodec(forge-rag 不反向依赖本模块,无循环) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-rag</artifactId>
+        </dependency>
+
+        <!-- PII 脱敏规则(零业务依赖契约层,仅 JDK;复用客服域同一套正则,避免两处规则漂移) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-callcenter-common</artifactId>
+        </dependency>
+
+        <!-- 数据库服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-mybatis</artifactId>
+        </dependency>
+
+        <!-- 缓存服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-redis</artifactId>
+        </dependency>
+
+        <!-- 日志记录 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-log</artifactId>
+        </dependency>
+
+        <!-- JSON 工具 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-json</artifactId>
+        </dependency>
+
+        <!-- 安全模块 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-security</artifactId>
+        </dependency>
+
+        <!-- web服务 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-web</artifactId>
+        </dependency>
+
+        <!-- 单元测试(仅 test scope,与其余业务模块同一套测试基建) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Excel 导出 -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-excel</artifactId>
+        </dependency>
+    </dependencies>
+</project>

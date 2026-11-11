@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>forgeagent-platform</artifactId>
+        <groupId>com.forgeagent</groupId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>forge-common</artifactId>
+    <packaging>pom</packaging>
+
+    <description>
+        common 通用模块
+    </description>
+
+    <modules>
+        <module>forge-common-bom</module>
+        <module>forge-common-social</module>
+        <module>forge-common-core</module>
+        <module>forge-common-doc</module>
+        <module>forge-common-excel</module>
+        <module>forge-common-job</module>
+        <module>forge-common-log</module>
+        <module>forge-common-mail</module>
+        <module>forge-common-mybatis</module>
+        <module>forge-common-oss</module>
+        <module>forge-common-redis</module>
+        <module>forge-common-satoken</module>
+        <module>forge-common-security</module>
+        <module>forge-common-sms</module>
+        <module>forge-common-elasticsearch</module>
+        <module>forge-common-web</module>
+        <module>forge-common-translation</module>
+        <module>forge-common-sensitive</module>
+        <module>forge-common-json</module>
+        <module>forge-common-encrypt</module>
+        <module>forge-common-push</module>
+        <module>forge-common-liteflow</module>
+        <module>forge-common-mqtt</module>
+        <module>forge-common-mcp</module>
+    </modules>
+
+</project>

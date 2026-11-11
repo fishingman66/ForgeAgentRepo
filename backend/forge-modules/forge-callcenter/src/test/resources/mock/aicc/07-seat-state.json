@@ -1,0 +1,16 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "seatState",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182409000,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "workNo": "SEAT-001",
+        "readyState": "READY",
+        "pauseReason": ""
+      }
+    }
+  ]
+}

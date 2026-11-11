@@ -1,0 +1,953 @@
+{
+  "name": "kb-baseline-r0",
+  "generatedAt": "2026-11-11 14:26:07",
+  "environment": {
+    "profile": "dev",
+    "vectorStore": "mysql(应用层余弦)",
+    "embeddingModel": "local-hash(伪向量,仅供链路验证)",
+    "chunkSize": 500,
+    "chunkOverlap": 50,
+    "chunkUnit": "char",
+    "splitStrategy": "structure",
+    "parentChunk": false,
+    "topK": 5,
+    "judge": "证据片段与命中内容去空白后包含匹配"
+  },
+  "corpus": {
+    "docs": 6,
+    "docsReady": 6,
+    "chunks": 36,
+    "chunksWithVector": 36,
+    "chunksVectorPending": 0
+  },
+  "overall": {
+    "hitRate": 0.9333,
+    "mrr": 0.8667,
+    "recallAtK": 0.9333,
+    "precisionAtK": 0.1867,
+    "ndcgAtK": 0.8841,
+    "cases": 30
+  },
+  "byTopic": {
+    "工作流": {
+      "hitRate": 1.0,
+      "mrr": 1.0,
+      "recallAtK": 1.0,
+      "precisionAtK": 0.2,
+      "ndcgAtK": 1.0,
+      "cases": 5
+    },
+    "排障": {
+      "hitRate": 0.8,
+      "mrr": 0.8,
+      "recallAtK": 0.8,
+      "precisionAtK": 0.16,
+      "ndcgAtK": 0.8,
+      "cases": 5
+    },
+    "权限": {
+      "hitRate": 1.0,
+      "mrr": 0.9,
+      "recallAtK": 1.0,
+      "precisionAtK": 0.2,
+      "ndcgAtK": 0.9262,
+      "cases": 5
+    },
+    "知识库": {
+      "hitRate": 1.0,
+      "mrr": 1.0,
+      "recallAtK": 1.0,
+      "precisionAtK": 0.2,
+      "ndcgAtK": 1.0,
+      "cases": 5
+    },
+    "记忆": {
+      "hitRate": 0.8,
+      "mrr": 0.5,
+      "recallAtK": 0.8,
+      "precisionAtK": 0.16,
+      "ndcgAtK": 0.5786,
+      "cases": 5
+    },
+    "部署": {
+      "hitRate": 1.0,
+      "mrr": 1.0,
+      "recallAtK": 1.0,
+      "precisionAtK": 0.2,
+      "ndcgAtK": 1.0,
+      "cases": 5
+    }
+  },
+  "cases": [
+    {
+      "id": "c01",
+      "topic": "部署",
+      "doc": "01-部署与运行.md",
+      "question": "端口跟配置文件里写的不一样，怎么查？",
+      "span": "实际监听端口与预期不一致",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "01-部署与运行.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "01-部署与运行.md",
+        "01-部署与运行.md",
+        "01-部署与运行.md",
+        "03-知识库手册.md",
+        "04-工作流编排.md"
+      ]
+    },
+    {
+      "id": "c02",
+      "topic": "部署",
+      "doc": "01-部署与运行.md",
+      "question": "生产环境有哪些专属开关？",
+      "span": "生产专属开关包括数据库连接池上限、慢查询阈值、审计日志保留天数",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "01-部署与运行.md",
+      "channels": [
+        "both",
+        "both",
+        "keyword",
+        "vector",
+        "vector"
+      ],
+      "hitDocs": [
+        "01-部署与运行.md",
+        "03-知识库手册.md",
+        "01-部署与运行.md",
+        "03-知识库手册.md",
+        "02-权限模型.md"
+      ]
+    },
+    {
+      "id": "c03",
+      "topic": "部署",
+      "doc": "01-部署与运行.md",
+      "question": "不装向量库的时候向量存在哪里？",
+      "span": "向量会存进分块表的二进制列，检索在应用层计算余弦相似度",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.032266458495966696,
+      "top1ScoreType": "cosine",
+      "top1Doc": "01-部署与运行.md",
+      "channels": [
+        "both",
+        "both",
+        "vector",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "01-部署与运行.md",
+        "06-记忆与图谱.md",
+        "03-知识库手册.md",
+        "05-故障排查.md",
+        "05-故障排查.md"
+      ]
+    },
+    {
+      "id": "c04",
+      "topic": "部署",
+      "doc": "01-部署与运行.md",
+      "question": "中文全文检索需要什么分词器？",
+      "span": "MySQL 的全文索引需要 ngram 分词器",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "01-部署与运行.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "01-部署与运行.md",
+        "03-知识库手册.md",
+        "03-知识库手册.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c05",
+      "topic": "部署",
+      "doc": "01-部署与运行.md",
+      "question": "Redis 没起来会有什么影响？",
+      "span": "Redis 连不上时缓存相关功能降级，登录态校验也会失败",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03252247488101534,
+      "top1ScoreType": "cosine",
+      "top1Doc": "01-部署与运行.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "vector",
+        "vector"
+      ],
+      "hitDocs": [
+        "01-部署与运行.md",
+        "02-权限模型.md",
+        "01-部署与运行.md",
+        "02-权限模型.md",
+        "05-故障排查.md"
+      ]
+    },
+    {
+      "id": "c06",
+      "topic": "权限",
+      "doc": "02-权限模型.md",
+      "question": "工作空间里有哪几种角色？",
+      "span": "角色分为管理员、开发者、访客三种",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "04-工作流编排.md",
+        "06-记忆与图谱.md",
+        "05-故障排查.md",
+        "02-权限模型.md"
+      ]
+    },
+    {
+      "id": "c07",
+      "topic": "权限",
+      "doc": "02-权限模型.md",
+      "question": "平台共享的资源谁能改？",
+      "span": "只有超级管理员可以新增与修改",
+      "hitRank": 2,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 0.6309297535714575,
+      "hitCount": 5,
+      "top1Score": 0.03252247488101534,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "keyword"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "02-权限模型.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md",
+        "01-部署与运行.md"
+      ]
+    },
+    {
+      "id": "c08",
+      "topic": "权限",
+      "doc": "02-权限模型.md",
+      "question": "私有资源能改成共享的吗？",
+      "span": "不允许把私有资源降级成共享资源",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "02-权限模型.md",
+        "02-权限模型.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c09",
+      "topic": "权限",
+      "doc": "02-权限模型.md",
+      "question": "列表查询的可见性条件要放在哪一层？",
+      "span": "列表查询必须把可见性条件下推到 SQL",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "01-部署与运行.md",
+        "04-工作流编排.md",
+        "01-部署与运行.md",
+        "02-权限模型.md"
+      ]
+    },
+    {
+      "id": "c10",
+      "topic": "权限",
+      "doc": "02-权限模型.md",
+      "question": "登录令牌多久过期？",
+      "span": "令牌有效期默认十二小时，支持无感刷新",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "05-故障排查.md",
+        "01-部署与运行.md",
+        "05-故障排查.md",
+        "05-故障排查.md"
+      ]
+    },
+    {
+      "id": "c11",
+      "topic": "知识库",
+      "doc": "03-知识库手册.md",
+      "question": "向量维度谁来定？",
+      "span": "向量维度由模型实际输出决定",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md",
+        "03-知识库手册.md",
+        "01-部署与运行.md"
+      ]
+    },
+    {
+      "id": "c12",
+      "topic": "知识库",
+      "doc": "03-知识库手册.md",
+      "question": "分块切太大有什么坏处？",
+      "span": "分块太大会让一个块里混进多个主题",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "03-知识库手册.md",
+        "01-部署与运行.md",
+        "03-知识库手册.md",
+        "05-故障排查.md"
+      ]
+    },
+    {
+      "id": "c13",
+      "topic": "知识库",
+      "doc": "03-知识库手册.md",
+      "question": "父块默认多大？",
+      "span": "父块默认 2000 字符",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "keyword"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "03-知识库手册.md",
+        "02-权限模型.md",
+        "04-工作流编排.md",
+        "01-部署与运行.md"
+      ]
+    },
+    {
+      "id": "c14",
+      "topic": "知识库",
+      "doc": "03-知识库手册.md",
+      "question": "重建索引的时候还能搜吗？",
+      "span": "重建期间知识库照常可以检索，用的是旧代分块",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03252247488101534,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "03-知识库手册.md",
+        "01-部署与运行.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c15",
+      "topic": "知识库",
+      "doc": "03-知识库手册.md",
+      "question": "为什么阈值配了反而什么都搜不到？",
+      "span": "融合排名分的量级很小，拿绝对阈值去卡它会让召回结果整体消失",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.032266458495966696,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "01-部署与运行.md",
+        "05-故障排查.md",
+        "06-记忆与图谱.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c16",
+      "topic": "工作流",
+      "doc": "04-工作流编排.md",
+      "question": "画布上一共几种节点？",
+      "span": "内置节点有十二类",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "04-工作流编排.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "keyword"
+      ],
+      "hitDocs": [
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c17",
+      "topic": "工作流",
+      "doc": "04-工作流编排.md",
+      "question": "节点重试最多几次？",
+      "span": "重试次数上限为三次，重试间隔不超过五秒",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "04-工作流编排.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c18",
+      "topic": "工作流",
+      "doc": "04-工作流编排.md",
+      "question": "条件节点支持哪些运算符？",
+      "span": "条件节点支持八种运算符",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "04-工作流编排.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "02-权限模型.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c19",
+      "topic": "工作流",
+      "doc": "04-工作流编排.md",
+      "question": "定时触发怎么防止重复执行？",
+      "span": "定时触发的幂等键由触发器 ID 与调度分钟组成",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "04-工作流编排.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "01-部署与运行.md"
+      ]
+    },
+    {
+      "id": "c20",
+      "topic": "工作流",
+      "doc": "04-工作流编排.md",
+      "question": "工作流跑挂了会不会自动转普通问答？",
+      "span": "工作流执行失败不会降级成普通推理",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "04-工作流编排.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "02-权限模型.md",
+        "02-权限模型.md",
+        "04-工作流编排.md"
+      ]
+    },
+    {
+      "id": "c21",
+      "topic": "排障",
+      "doc": "05-故障排查.md",
+      "question": "为什么接口失败也返回 200？",
+      "span": "业务失败也会返回 HTTP 200",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "05-故障排查.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "05-故障排查.md",
+        "05-故障排查.md",
+        "02-权限模型.md",
+        "05-故障排查.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c22",
+      "topic": "排障",
+      "doc": "05-故障排查.md",
+      "question": "文档显示可用但搜不到内容是什么原因？",
+      "span": "文档显示可用但向量条数为零",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "05-故障排查.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "keyword",
+        "vector"
+      ],
+      "hitDocs": [
+        "05-故障排查.md",
+        "03-知识库手册.md",
+        "02-权限模型.md",
+        "03-知识库手册.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c23",
+      "topic": "排障",
+      "doc": "05-故障排查.md",
+      "question": "查询改写失败了整轮对话会失败吗？",
+      "span": "改写是增强项，超时应该退回原句继续",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "05-故障排查.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "05-故障排查.md",
+        "04-工作流编排.md",
+        "02-权限模型.md",
+        "04-工作流编排.md",
+        "01-部署与运行.md"
+      ]
+    },
+    {
+      "id": "c24",
+      "topic": "排障",
+      "doc": "05-故障排查.md",
+      "question": "后台任务里检索为什么要传工作空间？",
+      "span": "内部链路调用检索时不带登录态",
+      "hitRank": null,
+      "recall": 0.0,
+      "precision": 0.0,
+      "ndcg": 0.0,
+      "hitCount": 5,
+      "top1Score": 0.032266458495966696,
+      "top1ScoreType": "cosine",
+      "top1Doc": "02-权限模型.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "02-权限模型.md",
+        "05-故障排查.md",
+        "04-工作流编排.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md"
+      ]
+    },
+    {
+      "id": "c25",
+      "topic": "排障",
+      "doc": "05-故障排查.md",
+      "question": "拿到错误编号之后怎么定位问题？",
+      "span": "拿这个编号去日志里搜索能定位到完整堆栈",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "05-故障排查.md",
+      "channels": [
+        "both",
+        "vector",
+        "keyword",
+        "vector",
+        "keyword"
+      ],
+      "hitDocs": [
+        "05-故障排查.md",
+        "01-部署与运行.md",
+        "02-权限模型.md",
+        "01-部署与运行.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c26",
+      "topic": "记忆",
+      "doc": "06-记忆与图谱.md",
+      "question": "同一个事实有新旧两个值会怎么处理？",
+      "span": "事实记忆落表并带事实键",
+      "hitRank": 2,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 0.6309297535714575,
+      "hitCount": 5,
+      "top1Score": 0.03200204813108039,
+      "top1ScoreType": "cosine",
+      "top1Doc": "03-知识库手册.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "03-知识库手册.md",
+        "06-记忆与图谱.md",
+        "02-权限模型.md",
+        "01-部署与运行.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c27",
+      "topic": "记忆",
+      "doc": "06-记忆与图谱.md",
+      "question": "记忆是按什么规则挑出来注入的？",
+      "span": "记忆注入按重要性、时间衰减、命中次数三者混合打分",
+      "hitRank": 2,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 0.6309297535714575,
+      "hitCount": 5,
+      "top1Score": 0.03252247488101534,
+      "top1ScoreType": "cosine",
+      "top1Doc": "06-记忆与图谱.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "keyword",
+        "vector"
+      ],
+      "hitDocs": [
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "03-知识库手册.md",
+        "05-故障排查.md"
+      ]
+    },
+    {
+      "id": "c28",
+      "topic": "记忆",
+      "doc": "06-记忆与图谱.md",
+      "question": "删除一个用户的记忆会连带删什么？",
+      "span": "遗忘是级联操作",
+      "hitRank": null,
+      "recall": 0.0,
+      "precision": 0.0,
+      "ndcg": 0.0,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "06-记忆与图谱.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "both"
+      ],
+      "hitDocs": [
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "03-知识库手册.md"
+      ]
+    },
+    {
+      "id": "c29",
+      "topic": "记忆",
+      "doc": "06-记忆与图谱.md",
+      "question": "图谱里重复的节点和关系怎么处理？",
+      "span": "节点按名称去重，边按起点、关系、终点去重",
+      "hitRank": 1,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 1.0,
+      "hitCount": 5,
+      "top1Score": 0.03252247488101534,
+      "top1ScoreType": "cosine",
+      "top1Doc": "06-记忆与图谱.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "06-记忆与图谱.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "04-工作流编排.md",
+        "02-权限模型.md"
+      ]
+    },
+    {
+      "id": "c30",
+      "topic": "记忆",
+      "doc": "06-记忆与图谱.md",
+      "question": "过期数据是删掉还是保留？",
+      "span": "到期直接归档而不是物理删除",
+      "hitRank": 2,
+      "recall": 1.0,
+      "precision": 0.2,
+      "ndcg": 0.6309297535714575,
+      "hitCount": 5,
+      "top1Score": 0.03278688524590164,
+      "top1ScoreType": "cosine",
+      "top1Doc": "06-记忆与图谱.md",
+      "channels": [
+        "both",
+        "both",
+        "both",
+        "both",
+        "vector"
+      ],
+      "hitDocs": [
+        "06-记忆与图谱.md",
+        "06-记忆与图谱.md",
+        "01-部署与运行.md",
+        "01-部署与运行.md",
+        "05-故障排查.md"
+      ]
+    }
+  ]
+}

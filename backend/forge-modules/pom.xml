@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>forgeagent-platform</artifactId>
+        <groupId>com.forgeagent</groupId>
+        <version>${revision}</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+    <artifactId>forge-modules</artifactId>
+    <packaging>pom</packaging>
+
+    <description>
+        forge-modules 业务模块
+    </description>
+
+    <modules>
+        <module>forge-agent-core</module>
+        <module>forge-agent</module>
+        <module>forge-rag</module>
+        <module>forge-kg</module>
+        <module>forge-memory</module>
+        <module>forge-gen</module>
+        <module>forge-job</module>
+        <module>forge-system</module>
+        <module>forge-workflow</module>
+        <module>forge-callcenter-common</module>
+        <module>forge-customer-service</module>
+        <module>forge-callcenter</module>
+    </modules>
+
+</project>

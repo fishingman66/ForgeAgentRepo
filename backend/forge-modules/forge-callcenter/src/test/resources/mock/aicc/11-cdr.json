@@ -1,0 +1,16 @@
+{
+  "workNo": "SEAT-001",
+  "eventList": [
+    {
+      "eventType": "cdr",
+      "workNo": "SEAT-001",
+      "eventGenTime": 1794182496500,
+      "content": {
+        "callId": "MOCK-CALL-20261109-0001",
+        "durationSec": 96,
+        "billSec": 96,
+        "hangupAt": "2026-11-09 08:01:36"
+      }
+    }
+  ]
+}

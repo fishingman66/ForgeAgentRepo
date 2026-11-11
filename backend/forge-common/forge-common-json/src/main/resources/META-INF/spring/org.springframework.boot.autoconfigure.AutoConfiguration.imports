@@ -1,0 +1,2 @@
+com.forgeagent.common.json.config.JacksonConfig
+com.forgeagent.common.json.config.JsonEnhancementConfig

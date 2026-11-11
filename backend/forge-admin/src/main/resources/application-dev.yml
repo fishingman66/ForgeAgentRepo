@@ -1,0 +1,366 @@
+--- # 监控中心配置
+spring.boot.admin.client:
+  # 增加客户端开关
+  enabled: false
+  url: http://localhost:9090/admin
+  instance:
+    service-host-type: IP
+    metadata:
+      username: ${spring.boot.admin.client.username}
+      userpassword: ${spring.boot.admin.client.password}
+  username: @monitor.username@
+  password: @monitor.password@
+
+--- # snail-job 配置
+snail-job:
+  enabled: false
+  # 需要在 SnailJob 后台组管理创建对应名称的组,然后创建任务的时候选择对应的组,才能正确分派任务
+  group: "forge_group"
+  # SnailJob 接入验证令牌 详见 script/sql/ry_job.sql `sj_group_config` 表
+  token: "SJ_cKqBTPzCsWA3VyuCfFoccmuIEGXjr5KT"
+  server:
+    host: 127.0.0.1
+    port: 17888
+  # 命名空间UUID 详见 script/sql/ry_job.sql `sj_namespace`表`unique_id`字段
+  namespace: ${spring.profiles.active}
+  # 随主应用端口漂移
+  port: 2${server.port}
+  # 客户端ip指定
+  host:
+
+--- # MyBatis Plus 配置
+mybatis-plus:
+  sql-log:
+    # 完整 SQL 输出开关
+    enabled: true
+    # 输出方式，可选 console、log
+    output: console
+    # 忽略高频轮询表的成功 SQL 日志；执行异常仍会输出
+    ignore-tables: [flow_event_wait]
+
+--- # 数据源配置
+spring:
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    # 动态数据源文档 https://www.kancloud.cn/tracy5546/dynamic-datasource/content
+    dynamic:
+      # 设置默认的数据源或者数据源组,默认值即为 master
+      primary: master
+      # 严格模式 匹配不到数据源则报错
+      strict: true
+      datasource:
+        # 主库数据源
+        master:
+          type: ${spring.datasource.type}
+          driverClassName: com.mysql.cj.jdbc.Driver
+          # jdbc 所有参数配置参考 https://lionli.blog.csdn.net/article/details/122018562
+          # rewriteBatchedStatements=true 批处理优化 大幅提升批量插入更新删除性能(对数据库有性能损耗 使用批量操作应考虑性能问题)
+          url: jdbc:mysql://localhost:3306/forge-vue?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&autoReconnect=true&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true
+          username: root
+          password: Hong1234
+#        # 从库数据源
+#        slave:
+#          lazy: true
+#          type: ${spring.datasource.type}
+#          driverClassName: com.mysql.cj.jdbc.Driver
+#          url: jdbc:mysql://localhost:3306/forge-vue?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8&autoReconnect=true&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true
+#          username:
+#          password:
+#        postgres:
+#          type: ${spring.datasource.type}
+#          driverClassName: org.postgresql.Driver
+#          url: jdbc:postgresql://localhost:5432/postgres?useUnicode=true&characterEncoding=utf8&useSSL=true&autoReconnect=true&reWriteBatchedInserts=true
+#          username: root
+#          password: root
+      hikari:
+        # 最大连接池数量
+        maxPoolSize: 20
+        # 最小空闲线程数量
+        minIdle: 10
+        # 配置获取连接等待超时的时间
+        connectionTimeout: 30000
+        # 校验超时时间
+        validationTimeout: 5000
+        # 空闲连接存活最大时间，默认10分钟
+        idleTimeout: 600000
+        # 此属性控制池中连接的最长生命周期，值0表示无限生命周期，默认30分钟
+        maxLifetime: 1800000
+        # 多久检查一次连接的活性
+        keepaliveTime: 30000
+
+--- # redis 单机配置(单机与集群只能开启一个另一个需要注释掉)
+spring.data:
+  redis:
+    # 地址
+    host: localhost
+    # 端口，默认为6379
+    port: 6379
+    # 数据库索引
+    database: 0
+    # redis 密码必须配置(本机 Redis 未设密码,注释掉避免空密码触发 AUTH)
+    # password:
+    # 连接超时时间
+    timeout: 10s
+    # 是否开启ssl
+    ssl.enabled: false
+
+# redisson 配置
+redisson:
+  # redis key前缀
+  keyPrefix:
+  # 线程池数量
+  threads: 4
+  # Netty线程池数量
+  nettyThreads: 8
+  # 单节点配置
+  singleServerConfig:
+    # 客户端名称 不能用中文
+    clientName: ForgeAgent
+    # 最小空闲连接数
+    connectionMinimumIdleSize: 8
+    # 连接池大小
+    connectionPoolSize: 32
+    # 连接空闲超时，单位：毫秒
+    idleConnectionTimeout: 10000
+    # 命令等待超时，单位：毫秒
+    timeout: 3000
+    # 发布和订阅连接池大小
+    subscriptionConnectionPoolSize: 50
+
+--- # mail 邮件发送
+mail:
+  enabled: false
+  host: smtp.163.com
+  port: 465
+  # 是否需要用户名密码验证
+  auth: true
+  # 发送方，遵循RFC-822标准
+  from: xxx@163.com
+  # 用户名（注意：如果使用foxmail邮箱，此处user为qq号）
+  user: xxx@163.com
+  # 密码（注意，某些邮箱需要为SMTP服务单独设置密码，详情查看相关帮助）
+  pass: xxxxxxxxxx
+  # 使用 STARTTLS安全连接，STARTTLS是对纯文本通信协议的扩展。
+  starttlsEnable: true
+  # 使用SSL安全连接
+  sslEnable: true
+  # SMTP超时时长，单位毫秒，缺省值不超时
+  timeout: 0
+  # Socket连接超时值，单位毫秒，缺省值不超时
+  connectionTimeout: 0
+
+--- # sms 短信 支持 阿里云 腾讯云 云片 等等各式各样的短信服务商
+# https://sms4j.com/doc3/ 差异配置文档地址 支持单厂商多配置，可以配置多个同时使用
+sms:
+  # 配置源类型用于标定配置来源(interface,yaml)
+  config-type: yaml
+  # 用于标定yml中的配置是否开启短信拦截，接口配置不受此限制
+  restricted: true
+  # 短信拦截限制单手机号每分钟最大发送，只对开启了拦截的配置有效
+  minute-max: 1
+  # 短信拦截限制单手机号每日最大发送量，只对开启了拦截的配置有效
+  account-max: 30
+  # 以下配置来自于 org.dromara.sms4j.provider.config.BaseConfig类中
+  blends:
+    # 唯一ID 用于发送短信寻找具体配置 随便定义别用中文即可
+    # 可以同时存在两个相同厂商 例如: ali1 ali2 两个不同的阿里短信账号 也可用于区分租户
+    config1:
+      # 框架定义的厂商名称标识，标定此配置是哪个厂商，详细请看厂商标识介绍部分
+      supplier: alibaba
+      # 有些称为accessKey有些称之为apiKey，也有称为sdkKey或者appId。
+      access-key-id: 您的accessKey
+      # 称为accessSecret有些称之为apiSecret
+      access-key-secret: 您的accessKeySecret
+      signature: 您的短信签名
+      sdk-app-id: 您的sdkAppId
+    config2:
+      # 厂商标识，标定此配置是哪个厂商，详细请看厂商标识介绍部分
+      supplier: tencent
+      access-key-id: 您的accessKey
+      access-key-secret: 您的accessKeySecret
+      signature: 您的短信签名
+      sdk-app-id: 您的sdkAppId
+
+
+--- # 三方授权
+justauth:
+  # 前端外网访问地址
+  address: http://localhost:80
+  type:
+    maxkey:
+      # maxkey 服务器地址
+      # 注意 如下均配置均不需要修改 maxkey 已经内置好了数据
+      server-url: http://sso.maxkey.top
+      client-id: 876892492581044224
+      client-secret: x1Y5MTMwNzIwMjMxNTM4NDc3Mzche8
+      redirect-uri: ${justauth.address}/social-callback?source=maxkey
+    topiam:
+      # topiam 服务器地址
+      server-url: http://127.0.0.1:1898/api/v1/authorize/y0q************spq***********8ol
+      client-id: 449c4*********937************759
+      client-secret: ac7***********1e0************28d
+      redirect-uri: ${justauth.address}/social-callback?source=topiam
+      scopes: [openid, email, phone, profile]
+    qq:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=qq
+      union-id: false
+    weibo:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=weibo
+    gitee:
+      client-id: 91436b7940090d09c72c7daf85b959cfd5f215d67eea73acbf61b6b590751a98
+      client-secret: 02c6fcfd70342980cd8dd2f2c06c1a350645d76c754d7a264c4e125f9ba915ac
+      redirect-uri: ${justauth.address}/social-callback?source=gitee
+    dingtalk:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=dingtalk
+    baidu:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=baidu
+    csdn:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=csdn
+    coding:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=coding
+      coding-group-name: xx
+    oschina:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=oschina
+    alipay_wallet:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=alipay_wallet
+      alipay-public-key: MIIB**************DAQAB
+    wechat_open:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=wechat_open
+    wechat_mp:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=wechat_mp
+    wechat_enterprise:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=wechat_enterprise
+      agent-id: 1000002
+    gitlab:
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=gitlab
+    gitea:
+      # gitea 服务器地址
+      server-url: https://demo.gitea.com
+      client-id: 10**********6
+      client-secret: 1f7d08**********5b7**********29e
+      redirect-uri: ${justauth.address}/social-callback?source=gitea
+
+# RAG 模块 - 知识库向量检索
+# 本地开发默认走 mysql:向量存 agent_kb_chunk.embedding,应用层算余弦,不装 Milvus 也能跑通 RAG。
+# 需要连真 Milvus 时把 vector-store 改成 milvus(生产配置不要动这一项)。
+rag:
+  knowledge:
+    vector-store: mysql
+    milvus-host: 127.0.0.1
+    milvus-port: 19530
+    milvus-token:
+    collection-name: agent_kb_chunk
+    vector-dim: 384
+    file-dir: ./data/knowledge
+    max-file-size-mb: 10
+    milvus-timeout-ms: 10000
+    # 对话 RAG:相关度阈值。只作用于可比分数(精排分/向量余弦),不作用于 RRF 融合分——
+    # 早期这里配 0.01 是为了绕开"拿 RRF 分比阈值导致恒零命中"的缺陷,该缺陷已修,
+    # 现在保持默认 0.05 即可(仅过滤近乎正交的噪声)。
+    # 对话 RAG:多轮对话查询改写(有历史时先把用户问题改写为独立检索查询)
+    query-rewrite-enabled: true
+    # 对话 RAG:注入上下文 token 预算(超预算的低分命中不注入)
+    rag-context-budget: 2000
+    # 对话 RAG:命中分块邻块扩展(前后各补 1 个同文档分块)
+    rag-neighbor-expand: true
+    # 对话 RAG:检索结果缓存(仅对话链路,秒)
+    rag-cache-enabled: true
+    rag-cache-ttl-seconds: 60
+    # MCP 检索端点(对外暴露知识库检索给 Claude Desktop/Cursor 等 MCP 客户端;默认关闭)
+    # mcp-enabled: true
+    # mcp-token: your-token
+
+# P3 / M1:记忆体系六层化 —— L0 上下文预算 / L1 工作记忆 / L2 会话摘要
+agent:
+  chat:
+    # L0:单轮上下文窗口总预算(tokens),不含输出预留
+    context-window-tokens: 16000
+    context-output-reserve: 2000
+    history-min-tokens: 512
+    history-max-turns: 40
+    history-preload-limit: 80
+    # L2:异步滚动摘要
+    summary-enabled: true
+    summary-trigger-tokens: 1500
+    summary-keep-recent-messages: 4
+    summary-max-chars: 800
+    # L1:工具结果压缩进 run 作用域工作记忆
+    working-memory-enabled: true
+    working-memory-threshold-tokens: 800
+    working-memory-preview-chars: 200
+    working-memory-max-chars: 200000
+    working-memory-max-entries: 20
+    working-memory-ttl-seconds: 3600
+    working-memory-recall-limit-chars: 4000
+    # P3 / M3 后续:图谱辅助检索(把访客口语扩展成领域实体词再检索;只扩检索词,不动 FAQ 匹配)
+    customer-service:
+      kg-expand-enabled: true
+      kg-expand-max-terms: 3
+
+# P3 / M2':L3 长期记忆语义向量(MySQL 向量列,零外部依赖)
+# dev 打开以联通全链路;local-hash 是特征哈希伪向量,不具备真实语义准确性,
+# 生产请配 memory.vector.model 指向 agent_model 里的 OpenAI 兼容嵌入模型
+memory:
+  vector:
+    enabled: true
+    backend: mysql
+    model: local-hash
+    top-k: 20
+    min-score: 0.2
+    scan-limit: 5000
+    pending-batch: 20
+    semantic-weight: 0.6
+
+  # P3 / M4:记忆治理(消息归档 + TTL + 配额淘汰;默认关,dev 开启便于验证)
+  # scan-ms 必须 >0(@Scheduled 坑),开关用 enabled
+  governance:
+    enabled: true
+    scan-ms: 600000
+    archive-retention-days: 180
+    archive-batch: 500
+    archive-max-batches: 20
+    ttl-days: 0
+    default-quota: 0
+    quota-evict-batch: 50
+
+  # P3 / M3: 记忆侧只配「图谱注入」的自用参数(总开关与后端在下面的 kg.*)
+  # 图谱本体已经是独立模块 forge-kg,智能客服后续可直接复用 KgService
+  graph:
+    inject-chars: 220
+    neighbor-limit: 5
+    rebuild-batch: 10
+    rebuild-limit: 200
+
+# P3 / M3: 知识图谱模块 forge-kg(开发/测试用 MySQL 两表存图,零新基建)
+# 生产若要换 Neo4j 等专用图库:新增一个 backend() 返回 neo4j 的 KgStore 实现并注册为 Bean,
+# 调用方(记忆/客服)与本配置项都不用改;配了未实现的后端会按关闭处理并告警一次。
+kg:
+  enabled: true
+  backend: mysql
+  scan-node-limit: 500
+  max-triples-per-ingest: 6
+  min-edge-weight: 1.0

@@ -1,0 +1,30 @@
+package com.forgeagent.workflow.domain.bo;
+
+import lombok.Data;
+
+import java.io.Serial;
+import java.io.Serializable;
+
+
+/**
+ * 流程抄送请求对象。
+ *
+ * @author may; 改造: 智造 ForgeAgent 2026-11
+ */
+@Data
+public class FlowCopyBo implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    /**
+     * 用户id
+     */
+    private Long userId;
+
+    /**
+     * 用户昵称
+     */
+    private String nickName;
+
+}

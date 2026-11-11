@@ -1,0 +1,16 @@
+packages:
+  - '.'
+
+allowBuilds:
+  '@parcel/watcher': true
+  es5-ext: true
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - '@vitest/mocker@5.1.0'
+  - '@vitest/spy@5.1.0'
+  - vitest@5.1.0
+  - vxe-table@4.23.13
+
+overrides:
+  esbuild: 0.28.1

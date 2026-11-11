@@ -1,0 +1,275 @@
+{
+  "contract": "AICC_MOCK_V0",
+  "provider": "AICC_MOCK",
+  "source": "ForgeAgent语音与呼叫中心改造方案_AICC_v2.md 第十三章",
+  "scope": "仅 dev/test；prod profile 下拒绝启动",
+  "signature": {
+    "algorithm": "HMAC-SHA256",
+    "secretFile": "secret.txt",
+    "canonical": "timestamp + \"\\n\" + nonce + \"\\n\" + rawBody",
+    "encoding": "Base64URL 无填充",
+    "signatureHeader": "X-Cc-Signature",
+    "timestampHeader": "X-Cc-Timestamp",
+    "nonceHeader": "X-Cc-Nonce",
+    "toleranceSeconds": 300,
+    "extraHeaders": {
+      "Guid": "MOCK-GUID-0001",
+      "service_token": "mock-token"
+    }
+  },
+  "response": {
+    "success": {
+      "message": "success",
+      "retcode": "0"
+    },
+    "rejected": {
+      "message": "invalid signature",
+      "retcode": "1001"
+    },
+    "rejectHttpStatus": 200
+  },
+  "callId": "MOCK-CALL-20261109-0001",
+  "baseEventGenTime": 1794182400000,
+  "baseEventGenTimeText": "2026-11-09 08:00:00 GMT+8",
+  "workNo": "SEAT-001",
+  "caller": "138****5678",
+  "callee": "400****100",
+  "recording": {
+    "recordingId": "MOCK-REC-0001",
+    "url": "mock://wav/8k-mono-1s",
+    "file": "recording.wav",
+    "format": "8kHz / 16bit / mono / 1s 静音",
+    "expectedBytes": 16044
+  },
+  "eventTypeMap": {
+    "callRing": "call.ring",
+    "callAnswer": "call.answer",
+    "asrResult": "call.asr_result",
+    "botUtterance": "call.bot_utterance",
+    "dtmf": "call.dtmf",
+    "transfer": "call.transfer",
+    "seatState": "call.seat_state",
+    "recordReady": "call.record.ready",
+    "hangup": "call.hangup",
+    "cdr": "call.cdr"
+  },
+  "idempotency": {
+    "key": "sha256(callId|eventType|eventGenTime|canonicalJson(content))",
+    "scope": "per callId",
+    "note": "AICC 报文无 eventId，业务层按事件指纹派生幂等键；nonce 是请求级去重，两者分层"
+  },
+  "stateMachine": {
+    "initial": "NONE",
+    "stateRank": [
+      "NONE",
+      "RINGING",
+      "ANSWERED",
+      "BOT_SERVING",
+      "TRANSFERRING",
+      "SEAT_CONNECTED",
+      "ENDED"
+    ],
+    "stateByEvent": {
+      "call.ring": "RINGING",
+      "call.answer": "ANSWERED",
+      "call.asr_result": "BOT_SERVING",
+      "call.bot_utterance": "BOT_SERVING",
+      "call.dtmf": "BOT_SERVING",
+      "call.transfer": "TRANSFERRING",
+      "call.seat_state": "SEAT_CONNECTED",
+      "call.record.ready": "SEAT_CONNECTED",
+      "call.hangup": "ENDED",
+      "call.cdr": "ENDED"
+    },
+    "effectsByEvent": {
+      "call.ring": [],
+      "call.answer": [],
+      "call.asr_result": [
+        "transcript_segment"
+      ],
+      "call.bot_utterance": [
+        "transcript_segment"
+      ],
+      "call.dtmf": [
+        "csat_invitation"
+      ],
+      "call.transfer": [
+        "transfer"
+      ],
+      "call.seat_state": [
+        "seat_ready"
+      ],
+      "call.record.ready": [
+        "recording_object",
+        "recording_access_audit"
+      ],
+      "call.hangup": [
+        "call_ended",
+        "ticket_resolved"
+      ],
+      "call.cdr": [
+        "cdr"
+      ]
+    },
+    "rule": "事件只推进更高 rank；迟到或乱序事件不得回退状态。events[].expectedState 为按序推进后的实际态，stateByEvent 为事件目标态"
+  },
+  "events": [
+    {
+      "index": 1,
+      "file": "01-ring.json",
+      "eventType": "callRing",
+      "normalized": "call.ring",
+      "offsetMs": 0,
+      "eventGenTime": 1794182400000,
+      "expectedState": "RINGING",
+      "effects": []
+    },
+    {
+      "index": 2,
+      "file": "02-answer.json",
+      "eventType": "callAnswer",
+      "normalized": "call.answer",
+      "offsetMs": 1500,
+      "eventGenTime": 1794182401500,
+      "expectedState": "ANSWERED",
+      "effects": []
+    },
+    {
+      "index": 3,
+      "file": "03-asr-order.json",
+      "eventType": "asrResult",
+      "normalized": "call.asr_result",
+      "offsetMs": 3200,
+      "eventGenTime": 1794182403200,
+      "expectedState": "BOT_SERVING",
+      "effects": [
+        "transcript_segment"
+      ]
+    },
+    {
+      "index": 4,
+      "file": "04-bot-utterance.json",
+      "eventType": "botUtterance",
+      "normalized": "call.bot_utterance",
+      "offsetMs": 3800,
+      "eventGenTime": 1794182403800,
+      "expectedState": "BOT_SERVING",
+      "effects": [
+        "transcript_segment"
+      ]
+    },
+    {
+      "index": 5,
+      "file": "05-asr-transfer.json",
+      "eventType": "asrResult",
+      "normalized": "call.asr_result",
+      "offsetMs": 7200,
+      "eventGenTime": 1794182407200,
+      "expectedState": "BOT_SERVING",
+      "effects": [
+        "transcript_segment"
+      ]
+    },
+    {
+      "index": 6,
+      "file": "06-transfer.json",
+      "eventType": "transfer",
+      "normalized": "call.transfer",
+      "offsetMs": 7500,
+      "eventGenTime": 1794182407500,
+      "expectedState": "TRANSFERRING",
+      "effects": [
+        "transfer"
+      ]
+    },
+    {
+      "index": 7,
+      "file": "07-seat-state.json",
+      "eventType": "seatState",
+      "normalized": "call.seat_state",
+      "offsetMs": 9000,
+      "eventGenTime": 1794182409000,
+      "expectedState": "SEAT_CONNECTED",
+      "effects": [
+        "seat_ready"
+      ]
+    },
+    {
+      "index": 8,
+      "file": "08-dtmf.json",
+      "eventType": "dtmf",
+      "normalized": "call.dtmf",
+      "offsetMs": 12000,
+      "eventGenTime": 1794182412000,
+      "expectedState": "SEAT_CONNECTED",
+      "effects": [
+        "csat_invitation"
+      ]
+    },
+    {
+      "index": 9,
+      "file": "09-record-ready.json",
+      "eventType": "recordReady",
+      "normalized": "call.record.ready",
+      "offsetMs": 95000,
+      "eventGenTime": 1794182495000,
+      "expectedState": "SEAT_CONNECTED",
+      "effects": [
+        "recording_object",
+        "recording_access_audit"
+      ]
+    },
+    {
+      "index": 10,
+      "file": "10-hangup.json",
+      "eventType": "hangup",
+      "normalized": "call.hangup",
+      "offsetMs": 96000,
+      "eventGenTime": 1794182496000,
+      "expectedState": "ENDED",
+      "effects": [
+        "call_ended",
+        "ticket_resolved"
+      ]
+    },
+    {
+      "index": 11,
+      "file": "11-cdr.json",
+      "eventType": "cdr",
+      "normalized": "call.cdr",
+      "offsetMs": 96500,
+      "eventGenTime": 1794182496500,
+      "expectedState": "ENDED",
+      "effects": [
+        "cdr"
+      ]
+    }
+  ],
+  "expectedFinal": {
+    "callState": "ENDED",
+    "ticketStatus": "RESOLVED",
+    "csatInvitations": 1,
+    "transcriptSegments": 3,
+    "recordingObjects": 1,
+    "recordingAccessAudits": 1,
+    "cdrAggregatable": true,
+    "durationSec": 96,
+    "billSec": 96
+  },
+  "fixtureFiles": [
+    "01-ring.json",
+    "02-answer.json",
+    "03-asr-order.json",
+    "04-bot-utterance.json",
+    "05-asr-transfer.json",
+    "06-transfer.json",
+    "07-seat-state.json",
+    "08-dtmf.json",
+    "09-record-ready.json",
+    "10-hangup.json",
+    "11-cdr.json",
+    "sequence.json",
+    "recording.wav",
+    "secret.txt"
+  ]
+}
