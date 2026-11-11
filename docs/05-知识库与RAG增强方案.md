@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 全部交付 + R0 基线 + R2-A / R2-1 / R2-3 已交付；R2-2 / R2-5 与 R3~R5 待启动** · 2026-11-11 · 适用版本 6.1.x
+> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）,R3~R5 待启动** · 2026-11-11 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -397,9 +397,8 @@ LLM 打分路由保留，但候选截断从 20 降到 12，且超时 8s（逐条
 
 **R2 进度与剩余**
 
-R0 基线已存档后按建议顺序推进：✅ R2-1 解析硬化、✅ R2-3 分块 token 化与策略插拔（实施记录见 §4）。
-**剩余**：R2-2 `DocumentCleaner`（页眉页脚清洗）、R2-5 配置指纹与差异重建（解析产物复用）。
-这两项都会改动召回分布，做完必须重跑 `docs/baseline/kb_baseline.py` 与定版基线对比，HitRate / MRR 不得下降。
+**R2 全部完成**：✅ R2-1 解析硬化、✅ R2-2 清洗层、✅ R2-3 分块 token 化与策略插拔、✅ R2-4 同步补偿（随 R2-A）、✅ R2-5 指纹与差异重建、✅ D2 `generation`（随 R2-A）。OCR/多模态解析归 R5。
+后续批次（R3 评测闭环起步）每项改完必须重跑 `docs/baseline/kb_baseline.py` 与定版基线对比，HitRate / MRR 不得下降。
 
 ---
 
@@ -449,19 +448,35 @@ R0 基线已存档后按建议顺序推进：✅ R2-1 解析硬化、✅ R2-3 �
 - 扫描件如果按计划标"可用但 0 块"，前端是绿标、运营看不出问题；改标失败 + 明确原因后才可运营。
 - **同分排序不稳定会让评测数字漂移**：`rrfScore` 是 HashMap，`sorted(comparingByValue().reversed())` 遇到同分时顺序由哈希决定。必须显式 `.thenComparing(key)`，否则"改了一行无关代码，指标变了"这种假信号会反复出现。
 
-### R2-2 清洗层（新增 `DocumentCleaner`，未启动）
+### R2-2 清洗层（新增 `DocumentCleaner`）—— 已交付（实施记录见本节末）
 
 顺序**钉死**（顺序错了会互相打架）：
 
 ```
-页眉页脚 → 水印/页码 → 正则替换 → PII 脱敏 → 空白归一
+页眉页脚/页码 → NFKC → 正则替换 → PII 脱敏 → 空白归一
 ```
 
-* 页眉页脚检测参数（照参考项目实测值）：只看每页**前 2 行 + 后 2 行**、行长 ≤ 120 字符、≥ 2 页才检测、某归一化行（去掉全部数字 + 折叠空白）出现在 ≥ `ceil(页数 × 0.6)` 页即判定。
-* 空白归一：连续空行压一行、行尾空格、`U+00A0`；**代码块内跳过**（避免破坏缩进）。
-* 全半角 NFKC：仅对**非代码块**生效（NFKC 会把全角括号/数字改成半角，代码里会坏）。
-* PII 脱敏：手机/身份证/银行卡/邮箱（复用 `CsPiiMasker` 的正则，保留前 3 后 4 便于人工核对），库级开关默认关。
-* 清洗规则落库（`agent_knowledge.clean_rules` JSON），参与配置指纹。
+**实施记录（2026-11-11，已交付）**
+
+| 文件 | 改动 |
+| --- | --- |
+| `sql/agent_kb_r2_clean.sql`（新） | `agent_knowledge` + `clean_rules json`（NULL=默认），Docker init 同步并实跑校验（knowledge 28 列） |
+| `document/CleanRules.java`（新） | 规则 record + JSON 解析：缺省键取默认、坏 JSON/非法正则回默认并留痕（不阻断摄取）；**NFKC 默认关、PII 默认关** |
+| `document/KbPiiMasker.java`（新） | 正则与 callcenter-common 的 `CsPiiMasker` 逐字一致（javadoc 注明双向同步）；不直接依赖,避免 rag 横向引入呼叫中心模块 |
+| `document/DocumentCleaner.java`（新） | 清洗管线：按页标记切页 → 页眉页脚（≥2 页、每页首/尾各 2 个非空行、行长 ≤120、归一化行出现 ≥ceil(页数×0.6) 页才删）→ 纯页码行（≤5 字符且无字母）→ NFKC（**在正则之前**,用户正则按半角写才稳定）→ 正则（逐行,非法跳过）→ PII（代码块内也生效）→ 空白归一（NBSP/行尾空格/连续空行,代码块内跳过） |
+| `impl/KnowledgeDocProcessorImpl.java` | 解析后、分块前接清洗;统计落 notice + 日志 |
+| `impl/AgentKnowledgeServiceImpl.java` | `normalizeCleanRules`:留空=默认,必须是合法 JSON 对象,否则**保存时直接拒绝**（坏配置静默落库会让摄取侧只能回默认,运营发现不了） |
+| Bo/Vo/entity、前端 | `cleanRules` JSON 透传;表单 4 个开关(页眉页脚/空白归一/全半角/PII),提交组装 JSON |
+
+**关键偏差与依据**
+
+| 计划 | 实际 | 依据 |
+| --- | --- | --- |
+| 全半角 NFKC(非代码块) | **默认关** | NFKC 会把全角逗号/括号(FF01-FF5E)一并半角化——中文语料标点全变,证据判定与展示都会漂。全角句号 U+3002 无兼容分解不受影响。需要时按库显式开 |
+| jsoup 做清洗 | 纯 JDK 实现 | 清洗只需正则与 Normalizer,无 DOM 需求;与 R2-1 的 HTML 抽取同思路 |
+| `CsPiiMasker` 复用 | 正则逐字一致,类独立 | rag 与 callcenter-common 无业务交集,不为一个工具类引入横向依赖 |
+
+**验证**：forge-rag **119/119**（+12 `DocumentCleanerTest`、+7 `CleanRulesTest`,含阈值边界、单页不启用、NFKC 顺序、代码块保护、PII、非法正则）;e2e **17/17**（A 库开清洗删页眉删页码打码 PII、B 库全关原样保留、非法 JSON 拒收、notice 统计）;`pnpm build` 过;基线 **93.33% / 0.8667 / 0.8841 不降**（默认清洗对无页标记文本近乎透传）。
 
 ### R2-3 分块：token 为单位 + 策略可插拔 —— 已交付（实施记录见本节末）
 
@@ -544,13 +559,27 @@ token 计价真正起作用的是**无标题长文 / 中英混排**（`TextChunk
 * **开关 `rag.knowledge.sync.compensation-enabled`，默认 true；「0=关闭」用独立 boolean，不用 fixedDelay=0**（既有踩坑记录）
 * 顺带清理"代次落后于生效代次"的遗留分块（重建切换后清理中断的兜底）
 
-### R2-5 配置指纹 + 差异重建 + 解析产物复用（未启动）
+### R2-5 配置指纹 + 差异重建 + 解析产物复用 —— 已交付（实施记录见本节末）
 
-* `agent_knowledge.parse_fingerprint` = `sha256(parser 版本 | 清洗规则 | OCR/vision 配置)`
-* `agent_knowledge.chunk_fingerprint` = `sha256(策略 | chunk_tokens | overlap | 父子参数 | chunk_unit)`
-* `agent_knowledge_document.config_stale`（0/1）：改配置后由 `AgentKnowledgeServiceImpl#updateByBo` 标脏（只标 `status=1` 的文档）
-* **解析产物复用**：`agent_knowledge_document.parsed_text`（MEDIUMTEXT）或对象存储文件。重建时若 `parse_fingerprint` 未变，直接复用已解析文本 → 重建成本从「重解析 + 重嵌」降到「重切 + 重嵌」。这是本方案里**性价比最高的一项**：现在改 chunkSize 要全库重解析 PDF。
-* 重建入口区分：`rebuildAll`（全库，危险，需二次确认）/ `rebuildStale`（只重建 stale 文档，默认按钮走这个）
+**实施记录（2026-11-11，已交付）**
+
+| 文件 | 改动 |
+| --- | --- |
+| `sql/agent_kb_r5_fingerprint.sql`（新） | `agent_knowledge` + `parse_fingerprint`/`chunk_fingerprint`;`agent_knowledge_document` + `config_stale`/`parse_fingerprint`/`parsed_text mediumtext`。Docker init 同步并实跑校验 |
+| `document/KnowledgeFingerprints.java`（新） | sha256 指纹:解析指纹 = 管线版本 + **规范化清洗规则**（先 parse 成 CleanRules 再序列化,语义等价的 JSON 键序/缺省键同指纹）;分块指纹 = 单位\|策略\|大小\|重叠\|父子开关\|父块大小（原始值参与,缺省与显式默认值指纹不同——代价只是一次无害的重建,换来实现不与摄取侧默认逻辑耦合）。`PARSE_PIPELINE_VERSION` 常量:解析器/清洗实现升级时递增,让存量文档整体标脏 |
+| `impl/AgentKnowledgeServiceImpl.java` | insert 算双指纹;updateByBo 用「生效配置 = 本次传值,缺省沿用旧值」重算,**任一指纹变化或嵌入模型变化 → status=1 的文档标 config_stale=1**（不自动重建——误操作场景下自动全量重建代价太大）;`rebuildStale(id)` 只重建 stale 文档;列表填充 `staleCount` |
+| `impl/KnowledgeDocProcessorImpl.java` | **解析产物复用**:文档 `parse_fingerprint` == 知识库当前解析指纹且 `parsed_text` 可用 → 跳过解析+清洗;摄取成功后落产物（≤400 万字符才落,超长不落不阻断）+ 清 config_stale + 记录文档级解析指纹 |
+| Controller/接口、前端 | `PUT /{id}/reindex-stale` 返回触发篇数;列表"文档数"列显示 `N 待重建` tag;重建按钮分流:stale>0 走差异重建（确认文案说明其余文档不受影响）,stale=0 询问全量;文档列表加"待重建"tag;**嵌入模型变化也标脏**（旧向量在新模型空间无意义） |
+
+**关键设计说明**
+
+| 项 | 决策 | 依据 |
+| --- | --- | --- |
+| 产物存哪 | `parsed_text` mediumtext 落文档行,`@TableField(select=false)` 默认不加载 | 16MB 上限 vs 文档 20M 字符上限:超 400 万字符不落产物置 NULL,重建重解析,正确性不受影响 |
+| 复用判定 | **文档级** `parse_fingerprint` vs 知识库当前指纹 | 只靠 kb 指纹/config_stale 分不清"重切"与"重解析":改 chunkSize 只需重切,解析产物照常复用 |
+| 重建入口 | 默认按钮走差异重建,全量重建保留为 API 与 stale=0 时的确认项 | 改配置后受影响的只有指纹覆盖的文档;嵌入模型变化也标脏,全量场景已被 stale 覆盖 |
+
+**验证**：forge-rag **119/119**（+5 `KnowledgeFingerprintsTest`:语义等价同指纹/键序无关/语义变化换指纹/全参数追踪）;e2e **20/20**（建库指纹落库 → 改 chunkSize 后 chunk 指纹变/parse 指纹不变/文档标脏 → 差异重建触发 1 篇、清 stale、分块数按新参数变化、日志「复用解析产物」→ 再触发返回 0）;agent 回归 63/63;前端 typecheck/build 过（门禁生效）;基线 **93.33% / 0.8667 / 0.8841 不降**。
 
 ### R2-6 `generation`：重建不产生检索空洞（修 D2）——已交付
 
@@ -762,7 +791,8 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | --- | --- |
 | `backend/sql/agent_kb_r1_retrieval.sql` | **已交付**：`agent_kb_query_log` + `agent:knowledge:querylog` 权限。其余规划列（`retrieval_weight`/`relative_threshold_ratio`）尚未需要，随对应批次追加 |
 | `backend/sql/agent_kb_r2_ingest.sql` | **已交付**：`agent_kb_chunk` + `generation`/`vector_status`/`vector_retry_count`/`parent_offset_start`/`parent_offset_end`/`page_no`/`sheet_name` + `idx_kb_chunk_doc_gen`/`idx_kb_chunk_vsync`；`agent_knowledge_document` + `active_generation`/`notice`；`agent_knowledge` + `hide_parent_with_disabled_child` |
-| `backend/sql/agent_kb_r2_chunking.sql` | **已交付**：`agent_knowledge` + `chunk_unit`/`split_strategy`（默认 `char`/`structure`，存量零迁移）；`agent_kb_chunk` + `heading_path`。R2-5 剩余列（`clean_rules`/`parse_fingerprint`/`chunk_fingerprint`/`parsed_text`/`config_stale`）随该批次追加 |
+| `backend/sql/agent_kb_r2_clean.sql` | **已交付**：`agent_knowledge` + `clean_rules json`（NULL=默认:页眉页脚/空白归一开,NFKC/PII 关） |
+| `backend/sql/agent_kb_r5_fingerprint.sql` | **已交付**：`agent_knowledge` + `parse_fingerprint`/`chunk_fingerprint`;`agent_knowledge_document` + `config_stale`/`parse_fingerprint`/`parsed_text mediumtext` |
 | `backend/sql/agent_kb_r3_eval.sql` | `agent_kb_eval_case` + `evidences`/`status`/`dataset_revision`；`agent_kb_eval_run` + 六个统计/指纹列；新表 `agent_kb_quality_issue` |
 | `backend/sql/agent_kb_r5_acl.sql` | `agent_kb_doc_acl`；文档表 + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed` |
 
@@ -889,7 +919,9 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | R0 基线 | 2026-11-11 | 可复现评测集：6 篇语料 + 30 条带精确证据片段的问题 + 判定/指标脚本；定版结果 HitRate@5 93.33% / MRR 0.8667 / NDCG@5 0.8841（dev、local-hash、char 500/50） | `docs/baseline/kb_baseline.py` 一键复现；连跑两次逐位一致 | **已交付** |
 | R2-1 解析硬化 | 2026-11-11 | 魔数校验、zip 炸弹/zip-slip、乱码页跳过、扫描件明确失败、HTML 正文抽取（零依赖）、解析 60s 超时与独立线程池；顺带修「同分候选排序不稳定」 | forge-rag 81/81、e2e 16/16、基线连跑两次一致 | **已交付** |
 | R2-3 分块 token 化与策略插拔 | 2026-11-11 | `chunk_unit`(char/token) + `split_strategy`(structure/fixed) + `heading_path`；`TextChunker` 重构为计价器×策略双参数；表单两个下拉；默认保持 `char`；修全文 SQL / 本地向量同分破平、基线夹具串行摄取 + OPTIMIZE | forge-rag 92/92 + forge-agent 63/63、e2e 21/21、既有四套 e2e 全绿（22/16/14/19）、基线定版并连跑两次一致、token 口径对照、`pnpm build` 过、Docker DDL 实跑校验 | **已交付** |
-| R2 剩余 | 待定 | R2-2 `DocumentCleaner`、R2-5 配置指纹与差异重建（解析产物复用） | 恶意文件 e2e + 基线对比（HitRate/MRR 不降） | 未启动 |
+| R2-2 清洗层 | 2026-11-11 | `clean_rules` 库级规则 + `DocumentCleaner` 管线（页眉页脚/页码 → NFKC → 正则 → PII → 空白归一,代码块保护）;NFKC 默认关（全角标点会一并半角化）;保存时拒绝非法 JSON;表单 4 开关 | forge-rag 119/119、e2e 17/17、`pnpm build` 过、基线不降 | **已交付** |
+| R2-5 指纹与差异重建 | 2026-11-11 | 解析/分块双指纹;改配置或嵌入模型 → 文档标脏;`rebuildStale` 差异重建 + `staleCount` 展示与按钮分流;解析产物复用（`parsed_text` ≤400 万字符落库,指纹一致跳过解析+清洗） | forge-rag 119/119、e2e 20/20、agent 回归 63/63、前端 typecheck/build 过、基线不降 | **已交付** |
+| R2 剩余 | — | 无(R2 全部完成;OCR/多模态解析归 R5) | — | 完成 |
 | R3 评测闭环 | 待定 | span 证据 + 五指标 + CI + 双跑门禁 + 查询日志闭环 + 质量议题 | 手工验算 + 基线对比 | 未启动 |
 | R4 问答可信 | 待定 | 结构化资料块 + 引用校验 + 拒答策略 + 答案层评测 | 三类对抗用例 | 未启动 |
 | R5 治理与规模化 | 待定 | 文档 ACL + 审核时效回收站 + 图谱辅助检索 + 外部源 + OCR/多模态 | 按子项单独出验证口径 | 未启动 |

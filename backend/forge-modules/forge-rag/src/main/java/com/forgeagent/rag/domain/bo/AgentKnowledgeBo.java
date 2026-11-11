@@ -104,6 +104,12 @@ private java.math.BigDecimal rerankThreshold;
     private String splitStrategy;
 
     /**
+     * 清洗规则 JSON 字符串(headerFooter/blankNormalize/nfkc/piiMask 布尔键 + regexReplace 数组);
+     * 留空按默认(页眉页脚/空白归一开,NFKC/PII 关)
+     */
+    private String cleanRules;
+
+    /**
      * 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文)
      */
     private String parentChunkEnabled;

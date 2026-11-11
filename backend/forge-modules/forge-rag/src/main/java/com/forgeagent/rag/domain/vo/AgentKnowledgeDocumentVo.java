@@ -59,6 +59,11 @@ public class AgentKnowledgeDocumentVo implements Serializable {
     private Integer chunkCount;
 
     /**
+     * 配置过期(1=知识库分块/清洗口径已变,待差异重建)
+     */
+    private Integer configStale;
+
+    /**
      * 创建时间
      */
     private Date createTime;

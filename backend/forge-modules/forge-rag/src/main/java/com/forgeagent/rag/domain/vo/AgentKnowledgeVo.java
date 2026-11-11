@@ -93,6 +93,16 @@ private java.math.BigDecimal rerankThreshold;
     private String splitStrategy;
 
     /**
+     * 清洗规则 JSON(NULL=默认)
+     */
+    private String cleanRules;
+
+    /**
+     * 配置过期文档数(分块/清洗口径变化后待差异重建的文档数;0=全部与当前配置一致)
+     */
+    private Long staleCount;
+
+    /**
      * 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文)
      */
     private String parentChunkEnabled;

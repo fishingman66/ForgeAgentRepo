@@ -82,6 +82,22 @@ public class AgentKnowledgeDocument extends BaseEntity {
     private String notice;
 
     /**
+     * 配置过期:1=知识库分块/清洗口径已变,待差异重建(重建成功后清 0)
+     */
+    private Integer configStale;
+
+    /**
+     * 摄取时的解析管线指纹;与知识库当前指纹一致且 parsed_text 可用时,重建只重切不重解析
+     */
+    private String parseFingerprint;
+
+    /**
+     * 解析+清洗后的正文(复用产物;超大文档不落,置 NULL 不阻断;查询列表时默认不加载)
+     */
+    @com.baomidou.mybatisplus.annotation.TableField(select = false)
+    private String parsedText;
+
+    /**
      * 删除标志(0存在 2删除)
      */
     @TableLogic

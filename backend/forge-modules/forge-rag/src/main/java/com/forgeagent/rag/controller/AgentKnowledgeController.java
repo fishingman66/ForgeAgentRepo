@@ -87,13 +87,26 @@ public class AgentKnowledgeController extends BaseController {
     }
 
     /**
-     * 重建知识库索引:清除现有向量与分块,按当前嵌入模型与分块参数重新解析所有文档
+     * 重建知识库索引:逐文档按「当前代次 + 1」写入新代分块,成功后切指针并清理旧代。
+     * 重建期间旧代照常可检索;全量文档都会重做,配置没变的文档建议走差异重建
      */
     @SaCheckPermission("agent:knowledge:edit")
     @Log(title = "知识库重建索引", businessType = BusinessType.UPDATE)
     @PutMapping("/{id}/reindex")
     public R<Void> reindex(@NotNull(message = "主键不能为空") @PathVariable Long id) {
         return toAjax(knowledgeService.rebuildIndex(id));
+    }
+
+    /**
+     * 差异重建(R2-5):只重建配置过期(config_stale=1)的文档;
+     * 解析指纹未变的文档直接复用解析产物,成本从"重解析+重嵌"降到"重切+重嵌"。
+     * 返回触发的文档数,0 表示没有需要重建的文档
+     */
+    @SaCheckPermission("agent:knowledge:edit")
+    @Log(title = "知识库差异重建", businessType = BusinessType.UPDATE)
+    @PutMapping("/{id}/reindex-stale")
+    public R<Integer> reindexStale(@NotNull(message = "主键不能为空") @PathVariable Long id) {
+        return R.ok(knowledgeService.rebuildStale(id));
     }
     /**
      * 查询索引重建进度(按文档状态统计,前端可轮询展示重建完成度)

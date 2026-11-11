@@ -106,6 +106,21 @@ private java.math.BigDecimal rerankThreshold;
     private String splitStrategy;
 
     /**
+     * 解析清洗规则 JSON(NULL=默认:页眉页脚/空白归一开,NFKC/PII 关)
+     */
+    private String cleanRules;
+
+    /**
+     * 解析管线指纹(sha256:管线版本+规范化清洗规则;改清洗规则即变化 → 文档标脏)
+     */
+    private String parseFingerprint;
+
+    /**
+     * 分块配置指纹(sha256:单位+策略+大小+重叠+父子参数;改分块配置即变化 → 文档标脏)
+     */
+    private String chunkFingerprint;
+
+    /**
      * 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文)
      */
     private String parentChunkEnabled;

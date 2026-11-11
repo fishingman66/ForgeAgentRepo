@@ -15,7 +15,10 @@ import com.forgeagent.rag.mapper.AgentKbChunkMapper;
 import com.forgeagent.rag.mapper.AgentKnowledgeDocumentMapper;
 import com.forgeagent.rag.mapper.AgentKnowledgeMapper;
 import com.forgeagent.rag.service.KnowledgeDocProcessor;
+import com.forgeagent.rag.service.document.CleanRules;
+import com.forgeagent.rag.service.document.DocumentCleaner;
 import com.forgeagent.rag.service.document.DocumentParser;
+import com.forgeagent.rag.service.document.KnowledgeFingerprints;
 import com.forgeagent.rag.service.document.DocumentParserFactory;
 import com.forgeagent.rag.service.document.ParsedText;
 import com.forgeagent.rag.service.document.TextChunker;
@@ -68,6 +71,12 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
      * 正文长度上限(字符):超过这个量级的分块与向量化都不再有意义
      */
     private static final int MAX_TEXT_CHARS = 20_000_000;
+
+    /**
+     * 解析产物落库上限(字符):mediumtext 16MB 字节,utf8mb4 中文 3 字节/字,
+     * 400 万字符 ≈ 12MB,留有余量;超长文档不落产物(重建时重解析,正确性不受影响)
+     */
+    private static final int PARSED_TEXT_STORE_LIMIT = 4_000_000;
 
     /**
      * token 计价下的默认预算:中文 1 字≈1 token,400 token 约等于 400 个汉字
@@ -127,21 +136,65 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
             return;
         }
         try {
-            byte[] bytes = Files.readAllBytes(Path.of(doc.getFilePath()));
-            ParsedText parsed = parseWithTimeout(doc.getFileExt(), bytes);
-            String text = parsed.text();
-            if (text != null && text.length() > MAX_TEXT_CHARS) {
-                text = text.substring(0, MAX_TEXT_CHARS);
-                parsed = new ParsedText(text, parsed.pageCount(), parsed.scannedPages(),
-                    parsed.garbledPages(), appendWarning(parsed.warnings(), "正文超长已截断"));
+            // 解析产物复用(R2-5):文档指纹与知识库当前解析指纹一致且产物可用时,
+            // 跳过"解析+清洗"两步,重建成本从「重解析+重嵌」降到「重切+重嵌」
+            String parseFp = KnowledgeFingerprints.parseOf(kb.getCleanRules());
+            String cached = doc.getParseFingerprint() != null && doc.getParseFingerprint().equals(parseFp)
+                ? loadParsedText(documentId) : null;
+            String text;
+            ParsedText parsed = null;
+            List<String> cleanErrors = new ArrayList<>();
+            DocumentCleaner.CleanResult cleaned = null;
+            if (cached != null && !cached.isBlank()) {
+                text = cached;
+                log.info("[知识库] 文档 {} 复用解析产物,跳过解析与清洗", documentId);
+            } else {
+                byte[] bytes = Files.readAllBytes(Path.of(doc.getFilePath()));
+                parsed = parseWithTimeout(doc.getFileExt(), bytes);
+                text = parsed.text();
+                if (text != null && text.length() > MAX_TEXT_CHARS) {
+                    text = text.substring(0, MAX_TEXT_CHARS);
+                    parsed = new ParsedText(text, parsed.pageCount(), parsed.scannedPages(),
+                        parsed.garbledPages(), appendWarning(parsed.warnings(), "正文超长已截断"));
+                }
+                // 清洗管线(R2-2):页眉页脚/页码 → NFKC → 正则 → PII → 空白归一,规则由库级 clean_rules 决定
+                CleanRules cleanRules = CleanRules.parse(kb.getCleanRules(), cleanErrors);
+                cleaned = DocumentCleaner.clean(text, cleanRules);
+                if (cleaned.changed() || !cleanErrors.isEmpty()) {
+                    log.info("[知识库] 文档 {} 清洗完成:页眉页脚 {} 行,页码 {} 行,正则 {} 行,PII {} 行,告警 {}",
+                        documentId, cleaned.removedHeader(), cleaned.removedPageNo(),
+                        cleaned.regexLines(), cleaned.piiLines(), cleanErrors);
+                }
+                text = cleaned.text();
             }
             if (text == null || text.isBlank()) {
                 // 扫描件没有文本层,直接失败并说明原因:标"成功但 0 块"运营根本发现不了
-                throw new IllegalStateException(parsed.scannedPages() > 0
+                throw new IllegalStateException(parsed != null && parsed.scannedPages() > 0
                     ? "文档无可提取文本:" + parsed.scannedPages() + " 页均为扫描件,需 OCR(当前未启用)"
                     : "文档解析结果为空");
             }
-            String parseNotice = parsed.warningSummary();
+            String parseNotice = parsed != null ? parsed.warningSummary() : "";
+            if (cleaned != null && (cleaned.changed() || !cleanErrors.isEmpty())) {
+                StringBuilder cleanSummary = new StringBuilder();
+                if (cleaned.removedHeader() > 0 || cleaned.removedPageNo() > 0) {
+                    cleanSummary.append("清洗:页眉页脚 ").append(cleaned.removedHeader())
+                        .append(" 行,页码 ").append(cleaned.removedPageNo()).append(" 行");
+                }
+                if (cleaned.piiLines() > 0) {
+                    if (cleanSummary.length() > 0) {
+                        cleanSummary.append(";");
+                    }
+                    cleanSummary.append("PII 打码 ").append(cleaned.piiLines()).append(" 行");
+                }
+                for (String e : cleanErrors) {
+                    if (cleanSummary.length() > 0) {
+                        cleanSummary.append(";");
+                    }
+                    cleanSummary.append(e);
+                }
+                parseNotice = joinNotices(parseNotice,
+                    cleanSummary.length() > 0 ? cleanSummary.toString() : null);
+            }
             // 分块口径:单位(char/token)与策略(structure/fixed)由知识库配置,留空按存量口径
             String unit = TextChunker.isKnownUnit(kb.getChunkUnit())
                 ? kb.getChunkUnit() : TextChunker.UNIT_CHAR;
@@ -277,7 +330,12 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
                 .set(AgentKnowledgeDocument::getChunkCount, chunks.size())
                 .set(AgentKnowledgeDocument::getActiveGeneration, generation)
                 .set(AgentKnowledgeDocument::getFailReason, null)
-                .set(AgentKnowledgeDocument::getNotice, notice));
+                .set(AgentKnowledgeDocument::getNotice, notice)
+                // 摄取成功即与当前配置一致:清 stale 标记,并记录/刷新解析产物
+                .set(AgentKnowledgeDocument::getConfigStale, 0)
+                .set(AgentKnowledgeDocument::getParseFingerprint, parseFp)
+                .set(AgentKnowledgeDocument::getParsedText,
+                    text.length() <= PARSED_TEXT_STORE_LIMIT ? text : null));
             cleanupStaleGenerations(documentId, generation);
             syncChatAttachment(doc, text, chunks.size(), true, null);
             log.info("[知识库] 文档 {} 处理完成,代次 {} 分块数 {}", documentId, generation, chunks.size());
@@ -286,6 +344,17 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
             cleanupChunks(documentId, generation);
             markFailed(doc, e.getMessage());
         }
+    }
+
+    /**
+     * 读取解析产物(parsed_text 是 select=false 的大字段,需要时显式取)
+     */
+    private String loadParsedText(Long documentId) {
+        AgentKnowledgeDocument row = documentMapper.selectOne(
+            new LambdaQueryWrapper<AgentKnowledgeDocument>()
+                .select(AgentKnowledgeDocument::getParsedText)
+                .eq(AgentKnowledgeDocument::getId, documentId));
+        return row == null ? null : row.getParsedText();
     }
 
     /**

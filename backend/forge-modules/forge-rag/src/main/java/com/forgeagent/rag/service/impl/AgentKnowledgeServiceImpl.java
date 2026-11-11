@@ -134,7 +134,30 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             .eq(StringUtils.isNotBlank(bo.getStatus()), AgentKnowledge::getStatus, bo.getStatus())
             .orderByDesc(AgentKnowledge::getId);
         Page<AgentKnowledgeVo> page = knowledgeMapper.selectVoPage(pageQuery.build(), wrapper);
+        fillStaleCount(page.getRecords());
         return PageResult.build(page.getRecords(), page.getTotal());
+    }
+
+    /**
+     * 填充各知识库"配置过期文档数"(R2-5):前端据此提示待差异重建规模并分流重建入口
+     */
+    private void fillStaleCount(List<AgentKnowledgeVo> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        List<Long> ids = rows.stream().map(AgentKnowledgeVo::getId).filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<Long, Long> staleMap = new java.util.HashMap<>();
+        for (Map<String, Object> row : documentMapper.countStaleByKnowledgeIds(ids)) {
+            Object kid = row.get("knowledgeId");
+            Object cnt = row.get("cnt");
+            if (kid instanceof Number k && cnt instanceof Number c) {
+                staleMap.put(k.longValue(), c.longValue());
+            }
+        }
+        rows.forEach(r -> r.setStaleCount(staleMap.getOrDefault(r.getId(), 0L)));
     }
 
     @Override
@@ -171,6 +194,7 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         String unit = normalizeChunkUnit(bo.getChunkUnit());
         entity.setChunkUnit(unit);
         entity.setSplitStrategy(normalizeSplitStrategy(bo.getSplitStrategy()));
+        entity.setCleanRules(normalizeCleanRules(bo.getCleanRules()));
         boolean tokenUnit = com.forgeagent.rag.service.document.TextChunker.UNIT_TOKEN.equals(unit);
         if (entity.getChunkSize() == null) {
             entity.setChunkSize(tokenUnit ? 400 : 500);
@@ -178,6 +202,11 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         if (entity.getChunkOverlap() == null) {
             entity.setChunkOverlap(tokenUnit ? 60 : 50);
         }
+        // 配置指纹(R2-5):建库即定版,后续改配置靠指纹比对发现"哪些文档过期"
+        entity.setParseFingerprint(com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(entity.getCleanRules()));
+        entity.setChunkFingerprint(com.forgeagent.rag.service.document.KnowledgeFingerprints.chunkOf(
+            entity.getChunkUnit(), entity.getSplitStrategy(), entity.getChunkSize(),
+            entity.getChunkOverlap(), entity.getParentChunkEnabled(), entity.getParentChunkSize()));
         entity.setDocCount(0);
         // 记录向量维度(外部模型以真实返回为准,local-hash 取全局配置),用于集合分片与重建校验
         entity.setVectorDim(embeddingFactory.resolveDimension(entity));
@@ -225,7 +254,35 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         update.setChunkUnit(StringUtils.isBlank(bo.getChunkUnit()) ? null : normalizeChunkUnit(bo.getChunkUnit()));
         update.setSplitStrategy(StringUtils.isBlank(bo.getSplitStrategy())
             ? null : normalizeSplitStrategy(bo.getSplitStrategy()));
+        update.setCleanRules(StringUtils.isBlank(bo.getCleanRules()) ? null : normalizeCleanRules(bo.getCleanRules()));
+        // 配置指纹(R2-5):生效配置 = 本次传值,缺省沿用库内旧值;任一指纹变化 → status=1 的文档标脏,
+        // 由"差异重建"消费。这里只负责发现过期,不自动重建(自动全量重建在误操作场景代价太大)
+        String effCleanRules = update.getCleanRules() != null ? update.getCleanRules()
+            : StringUtils.defaultString(old.getCleanRules());
+        String effUnit = update.getChunkUnit() != null ? update.getChunkUnit() : old.getChunkUnit();
+        String effStrategy = update.getSplitStrategy() != null ? update.getSplitStrategy() : old.getSplitStrategy();
+        Integer effSize = update.getChunkSize() != null ? update.getChunkSize() : old.getChunkSize();
+        Integer effOverlap = update.getChunkOverlap() != null ? update.getChunkOverlap() : old.getChunkOverlap();
+        String effParentEnabled = update.getParentChunkEnabled() != null
+            ? update.getParentChunkEnabled() : old.getParentChunkEnabled();
+        Integer effParentSize = update.getParentChunkSize() != null
+            ? update.getParentChunkSize() : old.getParentChunkSize();
+        String newParseFp = com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(effCleanRules);
+        String newChunkFp = com.forgeagent.rag.service.document.KnowledgeFingerprints.chunkOf(
+            effUnit, effStrategy, effSize, effOverlap, effParentEnabled, effParentSize);
+        boolean fingerprintsChanged = !Objects.equals(newParseFp, old.getParseFingerprint())
+            || !Objects.equals(newChunkFp, old.getChunkFingerprint());
+        update.setParseFingerprint(newParseFp);
+        update.setChunkFingerprint(newChunkFp);
         boolean ok = knowledgeMapper.updateById(update) > 0;
+        // 嵌入模型变化不改分块/清洗指纹,但旧向量在新模型空间里没有意义:同样标脏走差异重建
+        if (ok && (fingerprintsChanged || embeddingChanged)) {
+            documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getKnowledgeId, bo.getId())
+                .eq(AgentKnowledgeDocument::getStatus, "1")
+                .set(AgentKnowledgeDocument::getConfigStale, 1));
+            log.info("[知识库] {} 配置指纹变化,已将可用文档标记为待差异重建", old.getName());
+        }
         // updateById 忽略 null 字段,相关度阈值与向量维度单独显式写入以支持清空/更新
         var configUpdate = com.baomidou.mybatisplus.core.toolkit.Wrappers.<AgentKnowledge>lambdaUpdate()
             .eq(AgentKnowledge::getId, bo.getId())
@@ -313,6 +370,35 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             Map.of("name", kb.getName(), "docCount", docs.size()),
             "0", "WARN");
         return true;
+    }
+
+    @Override
+    public Integer rebuildStale(Long id) {
+        AgentKnowledge kb = knowledgeMapper.selectById(id);
+        if (kb == null) {
+            throw new ServiceException("知识库不存在");
+        }
+        checkWsWritable(kb.getWorkspaceId());
+        // 差异重建(R2-5):只动 config_stale=1 的文档,指纹没变的文档零成本
+        List<AgentKnowledgeDocument> stale = documentMapper.selectList(
+            new LambdaQueryWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getKnowledgeId, id)
+                .eq(AgentKnowledgeDocument::getConfigStale, 1)
+                .eq(AgentKnowledgeDocument::getStatus, "1"));
+        for (AgentKnowledgeDocument doc : stale) {
+            int active = doc.getActiveGeneration() == null ? 1 : doc.getActiveGeneration();
+            documentMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getId, doc.getId())
+                .set(AgentKnowledgeDocument::getStatus, "0")
+                .set(AgentKnowledgeDocument::getFailReason, null));
+            docProcessor.processGenerationAsync(doc.getId(), active + 1);
+        }
+        auditLogHelper.record(kb.getWorkspaceId(), "kb.reindex.stale", "knowledge", String.valueOf(id),
+            "差异重建知识库[" + kb.getName() + "](共 " + stale.size() + " 篇配置过期文档)",
+            null,
+            Map.of("name", kb.getName(), "staleCount", stale.size()),
+            "0", "WARN");
+        return stale.size();
     }
 
     @Override
@@ -997,6 +1083,29 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             .ne(excludeId != null, AgentKnowledge::getId, excludeId);
         if (knowledgeMapper.selectCount(wrapper) > 0) {
             throw new ServiceException("知识库名称已存在:" + name);
+        }
+    }
+
+    /**
+     * 清洗规则归一:留空 = 默认规则;必须是合法 JSON 对象,否则直接拒绝
+     * (坏配置如果静默落库,摄取侧只能回默认并打告警,运营根本不知道配错了)
+     */
+    private static String normalizeCleanRules(String json) {
+        if (StringUtils.isBlank(json)) {
+            return null;
+        }
+        String trimmed = json.trim();
+        try {
+            com.fasterxml.jackson.databind.JsonNode node =
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(trimmed);
+            if (node == null || !node.isObject()) {
+                throw new ServiceException("clean_rules 必须是 JSON 对象");
+            }
+            return trimmed;
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceException("clean_rules 不是合法 JSON:" + e.getMessage());
         }
     }
 

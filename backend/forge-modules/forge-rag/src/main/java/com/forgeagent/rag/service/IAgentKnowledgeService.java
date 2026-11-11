@@ -69,9 +69,16 @@ public interface IAgentKnowledgeService {
                                                                            Boolean zeroHit, PageQuery pageQuery);
 
     /**
-     * 重建知识库索引:清除现有向量与分块,按当前嵌入模型与分块参数重新解析所有文档
+     * 重建知识库索引:逐文档按「当前代次 + 1」写入新代分块,成功后切指针并清理旧代;
+     * 重建期间旧代照常可检索
      */
     Boolean rebuildIndex(Long id);
+
+    /**
+     * 差异重建(R2-5):只重建配置过期(config_stale=1)的文档;
+     * 返回触发的文档数,0 表示没有需要重建的文档
+     */
+    Integer rebuildStale(Long id);
 
     /**
      * 查询索引重建进度(按文档状态统计:0 待处理 / 1 已完成 / 2 失败)

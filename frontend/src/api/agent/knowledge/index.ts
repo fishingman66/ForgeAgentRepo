@@ -47,10 +47,18 @@ export const changeKnowledgeStatus = (id: string | number, status: string) => {
   });
 };
 
-/** 重建知识库索引 */
+/** 重建知识库索引(全量:所有文档重做) */
 export const rebuildKnowledgeIndex = (id: string | number) => {
   return request({
     url: '/agent/knowledge/' + id + '/reindex',
+    method: 'put'
+  });
+};
+
+/** 差异重建:只重建配置过期的文档,返回触发的文档数(0=无需重建) */
+export const rebuildStaleKnowledge = (id: string | number): AxiosPromise<number> => {
+  return request({
+    url: '/agent/knowledge/' + id + '/reindex-stale',
     method: 'put'
   });
 };

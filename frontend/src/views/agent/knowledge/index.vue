@@ -49,7 +49,18 @@
         </el-table-column>
         <el-table-column label="描述" prop="description" min-width="160" show-overflow-tooltip />
         <el-table-column label="嵌入模型" prop="embeddingModel" width="120" align="center" />
-        <el-table-column label="文档数" prop="docCount" width="80" align="center" />
+        <el-table-column label="文档数" width="100" align="center">
+          <template #default="scope">
+            <span>{{ scope.row.docCount }}</span>
+            <el-tooltip
+              v-if="(scope.row as KnowledgeVO).staleCount && (scope.row as KnowledgeVO).staleCount! > 0"
+              :content="`${(scope.row as KnowledgeVO).staleCount} 篇文档的配置已过期,点「重建」做差异重建`"
+              placement="top"
+            >
+              <el-tag size="small" type="warning" style="margin-left: 4px">{{ (scope.row as KnowledgeVO).staleCount }} 待重建</el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="80" align="center">
           <template #default="scope">
             <el-switch
@@ -117,6 +128,15 @@
           </el-select>
           <div class="form-tip">结构感知保留表格表头、代码原子块与章节路径;定长仅按段落贪心装填,用于对照</div>
         </el-form-item>
+        <el-form-item label="解析清洗" prop="cleanHeaderFooter">
+          <div class="clean-switches">
+            <el-switch v-model="form.cleanHeaderFooter" active-text="页眉页脚" />
+            <el-switch v-model="form.cleanBlankNormalize" active-text="空白归一" />
+            <el-switch v-model="form.cleanNfkc" active-text="全半角归一" />
+            <el-switch v-model="form.cleanPiiMask" active-text="PII 脱敏" />
+          </div>
+          <div class="form-tip">按页标记检测重复页眉页脚与纯页码行;空白归一压缩连续空行与行尾空格。全半角归一会把全角逗号/括号一并半角化,中文语料慎用;PII 脱敏对手机/身份证/银行卡/邮箱保留前 3 后 4。改动后需重建索引生效</div>
+        </el-form-item>
         <el-form-item label="分块大小" prop="chunkSize">
           <el-input-number v-model="form.chunkSize" :min="100" :max="2000" :step="50" controls-position="right" style="width: 180px" />
           <span class="form-tip ml-2">{{ form.chunkUnit === 'token' ? 'token' : '字符' }}</span>
@@ -165,11 +185,12 @@
         <el-table-column label="大小" width="90" align="center">
           <template #default="scope">{{ formatSize(scope.row.fileSize) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90" align="center">
+        <el-table-column label="状态" width="130" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === '1' ? 'success' : scope.row.status === '2' ? 'danger' : 'warning'">
               {{ scope.row.status === '1' ? '可用' : scope.row.status === '2' ? '失败' : '处理中' }}
             </el-tag>
+            <el-tag v-if="(scope.row as KnowledgeDocumentVO).configStale === 1" type="warning" style="margin-left: 4px">待重建</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="分块数" prop="chunkCount" width="80" align="center" />
@@ -400,7 +421,7 @@ import {
   listKnowledgeDocument, uploadKnowledgeDocument, retryKnowledgeDocument, delKnowledgeDocument,
   listKnowledgeChunks, downloadKnowledgeDocument, searchKnowledge,
   updateKnowledgeChunk, changeKnowledgeChunkEnabled, listKnowledgeZeroHit, rebuildKnowledgeIndex,
-  getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns
+  rebuildStaleKnowledge, getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns
 } from '@/api/agent/knowledge';
 import type {
   KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchHitVO, KnowledgeZeroHitVO,
@@ -439,7 +460,7 @@ const loadWorkspaces = async () => {
 const dialog = reactive({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
-const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', remark: '' };
+const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
 const form = ref<KnowledgeForm>({ ...initForm });
 
 const rules = {
@@ -511,6 +532,14 @@ const handleAdd = () => {
 
 const handleEdit = (row: KnowledgeVO) => {
   isEdit.value = true;
+  let clean = { headerFooter: true, blankNormalize: true, nfkc: false, piiMask: false };
+  try {
+    if (row.cleanRules) {
+      clean = { ...clean, ...JSON.parse(row.cleanRules) };
+    }
+  } catch {
+    // 坏 JSON 按默认开关展示(后端摄取时同样回默认)
+  }
   form.value = {
     ...row,
     scoreThreshold: row.scoreThreshold === null || row.scoreThreshold === undefined ? null : Number(row.scoreThreshold),
@@ -518,7 +547,11 @@ const handleEdit = (row: KnowledgeVO) => {
     parentChunkEnabled: row.parentChunkEnabled || '0',
     parentChunkSize: row.parentChunkSize || 2000,
     chunkUnit: row.chunkUnit || 'char',
-    splitStrategy: row.splitStrategy || 'structure'
+    splitStrategy: row.splitStrategy || 'structure',
+    cleanHeaderFooter: clean.headerFooter !== false,
+    cleanBlankNormalize: clean.blankNormalize !== false,
+    cleanNfkc: clean.nfkc === true,
+    cleanPiiMask: clean.piiMask === true
   };
   dialog.title = '编辑知识库';
   dialog.visible = true;
@@ -529,11 +562,20 @@ const submitForm = () => {
     if (!valid) return;
     dialog.saving = true;
     try {
+      const payload = {
+        ...form.value,
+        cleanRules: JSON.stringify({
+          headerFooter: form.value.cleanHeaderFooter !== false,
+          blankNormalize: form.value.cleanBlankNormalize !== false,
+          nfkc: form.value.cleanNfkc === true,
+          piiMask: form.value.cleanPiiMask === true
+        })
+      };
       if (isEdit.value) {
-        await updateKnowledge(form.value);
+        await updateKnowledge(payload);
         proxy?.$modal.msgSuccess('修改成功');
       } else {
-        await addKnowledge(form.value);
+        await addKnowledge(payload);
         proxy?.$modal.msgSuccess('新建成功');
       }
       dialog.visible = false;
@@ -570,11 +612,23 @@ const handleDelete = async (row: KnowledgeVO) => {
 
 const handleRebuild = async (row: KnowledgeVO) => {
   try {
+    const stale = row.staleCount ?? 0;
+    if (stale > 0) {
+      // 差异重建(R2-5):只重建配置过期的文档,其余文档与解析产物不受影响
+      await proxy?.$modal.confirm(
+        `知识库「${row.name}」有 ${stale} 篇文档的配置已过期。\n只重建这些文档(其余文档与解析产物不受影响,期间旧索引照常可用)?`
+      );
+      const res = await rebuildStaleKnowledge(row.id);
+      proxy?.$modal.msgSuccess(`已触发差异重建,共 ${res.data ?? stale} 篇文档后台处理`);
+      getList();
+      startRebuildPolling(row);
+      return;
+    }
     await proxy?.$modal.confirm(
-      `确认重建知识库「${row.name}」的索引吗?\n将清除现有向量与分块,并按当前嵌入模型/分块参数重新解析全部文档,期间检索可能为空。`
+      `确认重建知识库「${row.name}」的索引吗?\n将按当前嵌入模型/分块参数重新解析全部文档(按代次重建,期间旧索引照常可用)。`
     );
     await rebuildKnowledgeIndex(row.id);
-    proxy?.$modal.msgSuccess('已触发重建索引,文档将在后台重新解析');
+    proxy?.$modal.msgSuccess('已触发重建索引,文档将在后台重新处理');
     getList();
     startRebuildPolling(row);
   } catch (e) {
@@ -979,5 +1033,10 @@ onMounted(() => {
 .progress-failed {
   color: #f56c6c;
   font-weight: 600;
+}
+.clean-switches {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
 }
 </style>

@@ -25,6 +25,10 @@ export interface KnowledgeVO {
   chunkUnit?: string;
   /** 分块策略(structure结构感知/fixed定长对照) */
   splitStrategy?: string;
+  /** 清洗规则 JSON(NULL=默认) */
+  cleanRules?: string;
+  /** 配置过期文档数(0=全部与当前配置一致) */
+  staleCount?: number;
   docCount?: number;
   remark?: string;
   createTime?: string;
@@ -56,6 +60,11 @@ export interface KnowledgeForm {
   chunkUnit?: string;
   /** 分块策略(structure结构感知/fixed定长对照),留空按 structure */
   splitStrategy?: string;
+  /** 清洗规则开关(提交时组装为 cleanRules JSON) */
+  cleanHeaderFooter?: boolean;
+  cleanBlankNormalize?: boolean;
+  cleanNfkc?: boolean;
+  cleanPiiMask?: boolean;
   remark?: string;
   keyword?: string;
 }
@@ -78,6 +87,8 @@ export interface KnowledgeDocumentVO {
   status: string;
   failReason?: string;
   chunkCount: number;
+  /** 配置过期(1=知识库分块/清洗口径已变,待差异重建) */
+  configStale?: number;
   createTime?: string;
   updateTime?: string;
 }
