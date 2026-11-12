@@ -122,6 +122,11 @@
           <el-switch v-model="form.reviewRequired" :active-value="1" :inactive-value="0" />
           <div class="form-tip">开启:新上传文档先落「待审核」,审核通过后才参与检索;存量文档不受影响</div>
         </el-form-item>
+        <el-form-item label="检索参数覆盖" prop="retrievalOverrides">
+          <el-input v-model="form.retrievalOverrides" type="textarea" :rows="3" style="width: 100%"
+            placeholder='可选,JSON 覆盖库级检索参数(留空=跟随全局):{"topK":8,"searchMode":"hybrid","vectorWeight":1,"keywordWeight":1,"scoreThreshold":0.4,"rerank":true}' />
+          <div class="form-tip">调用方显式传参仍优先;两路权重只放大/缩小 RRF 贡献的相对大小</div>
+        </el-form-item>
         <el-form-item label="分块单位" prop="chunkUnit">
           <el-select v-model="form.chunkUnit" style="width: 180px">
             <el-option label="按字符(存量口径)" value="char" />
@@ -591,7 +596,7 @@ const loadWorkspaces = async () => {
 const dialog = reactive({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
-const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, reviewRequired: 0, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
+const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, reviewRequired: 0, retrievalOverrides: '', parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
 const form = ref<KnowledgeForm>({ ...initForm });
 
 const rules = {
@@ -695,6 +700,7 @@ const handleEdit = (row: KnowledgeVO) => {
     rerankThreshold: row.rerankThreshold === null || row.rerankThreshold === undefined ? null : Number(row.rerankThreshold),
     fallbackAnswerEnabled: row.fallbackAnswerEnabled === null || row.fallbackAnswerEnabled === undefined ? 1 : Number(row.fallbackAnswerEnabled),
     reviewRequired: row.reviewRequired === null || row.reviewRequired === undefined ? 0 : Number(row.reviewRequired),
+    retrievalOverrides: row.retrievalOverrides || '',
     parentChunkEnabled: row.parentChunkEnabled || '0',
     parentChunkSize: row.parentChunkSize || 2000,
     chunkUnit: row.chunkUnit || 'char',

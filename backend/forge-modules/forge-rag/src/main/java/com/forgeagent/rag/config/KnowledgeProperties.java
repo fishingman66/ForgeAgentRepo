@@ -135,6 +135,35 @@ public class KnowledgeProperties {
     private Integer trashRetentionDays = 30;
 
     /**
+     * R5-3 图谱辅助检索:作为 RRF 第三路开启(默认关,dev 可开);融合只允许 RRF
+     */
+    private Boolean graphRouteEnabled = false;
+
+    /**
+     * 图扩跳上限(1~2 跳;跳数越多越容易跑偏)
+     */
+    private Integer graphMaxHops = 2;
+
+    /**
+     * 实体匹配上限与图路回填分块上限
+     */
+    private Integer graphEntityLimit = 10;
+
+    private Integer graphChunkLimit = 20;
+
+    /**
+     * R5-3 摄取侧实体抽取:默认关;需配 kg.extract-model(agent_model.model_name)
+     */
+    private Boolean kgExtractEnabled = false;
+
+    private String kgExtractModel = "";
+
+    /**
+     * 单文档最多抽取多少个分块(1 分块 1 次模型调用,控制成本)
+     */
+    private Integer kgExtractMaxChunks = 60;
+
+    /**
      * 精排调用硬超时(毫秒)。精排是增强项,模型抖动不该把整轮检索拖到几十秒;超时回退 RRF 粗排
      */
     private Integer rerankTimeoutMs = 1500;

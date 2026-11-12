@@ -57,7 +57,12 @@ public enum DegradedReason {
      * R5-1/R5-2:不可见文档过多(hidden 与允许列表均超上限),本次跳过向量路,
      * 只走关键词路(SQL 可安全下推大列表)。宁可少一路召回,也不做后置过滤击穿 ACL
      */
-    DOC_SCOPE_FILTER_OVERFLOW("doc_scope_filter_overflow");
+    DOC_SCOPE_FILTER_OVERFLOW("doc_scope_filter_overflow"),
+
+    /**
+     * R5-3 图谱路查询失败(已跳过该路,本次仅向量/关键词)
+     */
+    GRAPH_ROUTE_FAILED("graph_route_failed");
 
     private final String code;
 

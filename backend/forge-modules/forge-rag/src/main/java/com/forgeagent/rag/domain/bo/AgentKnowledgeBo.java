@@ -90,6 +90,11 @@ private java.math.BigDecimal rerankThreshold;
     private Integer reviewRequired;
 
     /**
+     * 库级检索参数覆盖 JSON(R5-6):{topK,searchMode,vectorWeight,keywordWeight,scoreThreshold,rerank}
+     */
+    private String retrievalOverrides;
+
+    /**
      * 分块大小(字符数)
      */
     @Min(value = 100, message = "分块大小不能小于 100", groups = {AddGroup.class, EditGroup.class})

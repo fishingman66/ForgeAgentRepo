@@ -55,6 +55,11 @@ public class KnowledgeSearchBo implements Serializable {
     private Boolean cacheable = Boolean.FALSE;
 
     /**
+     * R5-6 MCP filters:限定文档范围(空=不限);在检索前作为允许列表下推
+     */
+    private java.util.List<Long> documentIds;
+
+    /**
      * 体检 S2:内部检索入口(searchInternal)的调用方工作空间ID——
      * 目标知识库必须属于该空间或为全局库,防止跨空间读取;search(登录态)不使用该字段
      */

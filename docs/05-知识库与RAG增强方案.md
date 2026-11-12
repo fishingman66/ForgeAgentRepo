@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）+ R4 问答可信度已交付（R4-1~R4-4）+ R5-1/R5-2 已交付（R5-3~R5-6 按需待启动）** · 2026-11-12 · 适用版本 6.1.x
+> 状态：**R1 + R0 + R2 + R3 + R4 全部交付；R5-1/R5-2/R5-3/R5-4(URL)/R5-6 已交付，R5-5(OCR/多模态)与 S3/Confluence 真实接入按需** · 2026-11-12 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -815,6 +815,20 @@ agent_kb_query_log（R1-6）
 4. **准入复核**：图提议的 chunkId 必须回 MySQL 按同一谓词（`enabled=1` + 当前 generation）复核 —— 图是滞后数据，直接信会击穿版本隔离。
 5. 融合只允许 RRF（加权融合的权重是按两路 min-max 定义的，hop 折扣分是第三把尺子，**没有可用权重**）；写入侧强制校验，不允许「图谱 + weighted」组合。
 
+### R5-3/R5-4/R5-6 交付记录（2026-11-12）
+
+**R5-3 图谱辅助检索**：`service/graph/` —— `GraphQueryTokenizer`（CJK 整段 + 2~4 字滑窗、字母数字 run 整段、去单字）、`KbGraphRetriever`（种子实体匹配 → 逐跳 `kgService.neighbors` → `1/(1+hops)` 打分、同块取 max、hidden 文档过滤）、`KbKgExtractService`（监听 `KbDocumentGenerationEvent` 异步抽取，1 chunk 1 次模型调用；`kg.extract-enabled` 默认关、`kg.extract-model` 未配只告警一次；抽取结果写 `forge-kg` 与 `agent_kb_kg_entity` 映射）。图路只贡献 RRF 名次分、不参与两路权重；命中分块仍经 `loadChunksAndDocs` 的 enabled+generation 复核（图是滞后数据）。新增 `forge-rag → forge-kg` 单向依赖。
+
+**R5-4 外部源**：`service/ext/` SPI（`ExtSourceConnector`）+ `UrlExtSourceConnector`（真实抓取：`SsrfGuard` 复用工作流 http 节点防护语义 —— 仅 http/https、拒回环/私网/链路本地/组播、禁用重定向、5MB 上限、20s 超时；HTML 去脚本样式标签抽正文）+ `S3`/`Confluence` 骨架（明确报"尚未接入"，不静默入空文档）。服务层按条目 `(source_id, external_id)` 增量去重，入库走 `importText`（内容 MD5 去重 + 按库审核态定发布态）。
+
+**R5-6 库级参数与 MCP**：`agent_knowledge.retrieval_overrides` JSON（topK/检索模式/两路权重/相似度阈值/精排开关），**优先级：调用方显式参数 > 库级覆盖 > 全局**；两路权重只放大各自 RRF 贡献的相对大小（不改写绝对阈值口径）；缓存键带覆盖签名。MCP `knowledge_search` 新增 `filters.documentIds`（允许列表下推，与 ACL hidden 集合并，不做召回后过滤），新增 `knowledge_chunks` 工具（按文档分页看分块）。
+
+**顺手修掉的存量缺陷**：`/mcp` 端点自身有 token 校验，但从未加入 `security.excludes`，实际一直被登录拦截（外部客户端根本调不通）。已补 `/mcp` 与 `/mcp/**` 免登录。
+
+**验证**：`GraphQueryTokenizerTest` 4 + `KbGraphRetrieverTest` 4（hop 折扣/同块 max/hidden/开关）+ `SsrfGuardTest` 4 + `KnowledgeRetrievalOverridesTest` 4；forge-rag **161/161**；e2e `temp/r5b_verify.py` **18/18**（两阶段：默认配置验参数覆盖/MCP filters/外部源 SSRF 拒绝，重启开图路验"仅靠图谱映射召回目标分块"）；基线 93.33% / 0.8667 / 0.8841 **不降**。
+
+**未做（按确认口径）**：R5-5 图片 VLM/OCR；S3 与 Confluence 真实接入（SPI 已就绪，实现 `fetch` 即可启用）。
+
 ### R5-4 外部源
 
 URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS 解析后拒私网/回环/链路本地、禁重定向）、S3 兼容对象存储增量同步、Confluence。统一为 `agent_kb_ext_source(type/config/status/last_sync_at)` + 条目表，失败重试走 R2-4 的补偿通道。
@@ -844,6 +858,7 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `backend/sql/agent_kb_r3_eval.sql` | **已交付**：`agent_kb_eval_case` + `evidences`/`status`/`source`/`source_id`/`dataset_revision`/`update_time`；`agent_kb_eval_run` + 五指标列/`metrics_json`/`config_snapshot`/`corpus_fingerprint`/`dataset_revision`/用例计数/门禁列/`case_results_json`；质量问题表另落 `agent_kb_r3_quality.sql` |
 | `backend/sql/agent_kb_r4_trust.sql` | **已交付**：`agent_knowledge` + `fallback_answer_enabled`（库级零召回兜底/严格拒答）；`agent_eval_case` + `expected_refusal`（期望拒答用例）。幂等（information_schema + PREPARE，重跑验证过） |
 | `backend/sql/agent_kb_r5_acl.sql` | **已交付**：`agent_knowledge_document` + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed`/`trashed_at` + `idx_kb_doc_visible`；`agent_knowledge` + `review_required`；新表 `agent_kb_doc_acl`。幂等（information_schema + PREPARE，重跑验证过） |
+| `backend/sql/agent_kb_r5_scale.sql` | **已交付**：`agent_knowledge` + `retrieval_overrides`（库级参数覆盖）；新表 `agent_kb_kg_entity`（分块-实体映射）、`agent_kb_ext_source` / `agent_kb_ext_item`（外部源与条目）。幂等（重跑验证过） |
 | `backend/sql/agent_kb_r5_graph.sql` | （按需）图谱辅助检索若启用，仅加指标表；图数据复用 `forge-kg` 现有两表 |
 
 > 脚本风格：**幂等**用 `create table if not exists` + `information_schema` 判断 + `PREPARE/EXECUTE`（MySQL 无 `ADD COLUMN IF NOT EXISTS`，直接 `ALTER` 重复执行会整脚本中断）+ 菜单权限 `insert ... where not exists`。Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 同步。
@@ -866,6 +881,9 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `citation.validate-enabled` | true（已交付） | R4 |
 | `fallback-answer-enabled` | true（已交付，落 kb 级列） | R4 |
 | `trash.cleanup-enabled` / `trash.retention-days` | true / 30（已交付） | R5 |
+| `graph.route-enabled` | false（dev true；已交付） | R5 |
+| `graph.max-hops` / `graph-entity-limit` / `graph-chunk-limit` | 2 / 10 / 20（已交付） | R5 |
+| `kg.extract-enabled` / `kg.extract-model` / `kg.extract-max-chunks` | false / 空 / 60（已交付） | R5 |
 | `graph.route-enabled` | false（dev true） | R5 |
 
 ### 8.3 前端改动点（`frontend/src/views/agent/knowledge/index.vue` + 拆子组件）

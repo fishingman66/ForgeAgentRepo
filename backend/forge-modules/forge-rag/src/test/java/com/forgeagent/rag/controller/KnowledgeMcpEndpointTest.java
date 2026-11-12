@@ -36,7 +36,7 @@ class KnowledgeMcpEndpointTest {
         properties.setMcpEnabled(true);
         // mapper/service 传 null:协议层用例不触达检索实现,
         // tools/call 的检索路径走参数校验失败与异常脱敏分支,同样可断言
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null);
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null);
     }
 
     private ResponseEntity<String> post(String body) {
@@ -137,12 +137,15 @@ class KnowledgeMcpEndpointTest {
         ResponseEntity<String> resp = post("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         JsonNode tools = parse(resp.getBody()).path("result").path("tools");
-        assertEquals(2, tools.size());
+        assertEquals(3, tools.size());
         assertEquals("knowledge_search", tools.get(0).path("name").asText());
         assertEquals("knowledge_list", tools.get(1).path("name").asText());
+        assertEquals("knowledge_chunks", tools.get(2).path("name").asText());
         JsonNode schema = tools.get(0).path("inputSchema");
         assertEquals("object", schema.path("type").asText());
         assertEquals("query", schema.path("required").get(0).asText());
+        // R5-6 filters 已暴露
+        assertEquals("object", schema.path("properties").path("filters").path("type").asText());
     }
 
     @Test

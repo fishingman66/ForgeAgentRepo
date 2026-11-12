@@ -19,6 +19,12 @@
             <artifactId>forge-agent-core</artifactId>
         </dependency>
 
+        <!-- R5-3:图谱辅助检索复用 forge-kg(零业务依赖,rag → kg 单向) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-kg</artifactId>
+        </dependency>
+
         <!-- 通用工具 -->
         <dependency>
             <groupId>com.forgeagent</groupId>

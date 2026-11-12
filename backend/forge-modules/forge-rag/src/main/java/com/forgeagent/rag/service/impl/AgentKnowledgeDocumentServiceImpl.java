@@ -157,8 +157,67 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
     }
 
     @Override
-    public Boolean retry(Long id) {
-        AgentKnowledgeDocument doc = documentMapper.selectById(id);
+    public Long importText(Long knowledgeId, String fileName, String content) {
+        AgentKnowledge kb = getKbOrThrow(knowledgeId);
+        checkWsWritable(kb.getWorkspaceId());
+        if (!"0".equals(kb.getStatus())) {
+            throw new ServiceException("知识库已停用,无法导入");
+        }
+        if (StringUtils.isBlank(content)) {
+            throw new ServiceException("外部源内容为空");
+        }
+        try {
+            byte[] bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            String fileMd5 = DigestUtils.md5DigestAsHex(bytes);
+            AgentKnowledgeDocument dup = documentMapper.selectOne(new LambdaQueryWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId)
+                .eq(AgentKnowledgeDocument::getFileMd5, fileMd5)
+                .eq(AgentKnowledgeDocument::getTrashed, 0)
+                .last("limit 1"));
+            if (dup != null) {
+                // 同一内容已在库内(可能来自其他上传/外部源),直接复用,不重复分块
+                return dup.getId();
+            }
+            String safeName = StringUtils.isBlank(fileName) ? "外部源导入.md" : fileName.trim();
+            if (safeName.length() > 190) {
+                safeName = safeName.substring(0, 186) + ".md";
+            }
+            if (!safeName.toLowerCase().endsWith(".md")) {
+                safeName = safeName + ".md";
+            }
+            Path dir = Path.of(properties.getFileDir(), String.valueOf(knowledgeId));
+            Files.createDirectories(dir);
+            Path target = dir.resolve(UUID.randomUUID() + ".md");
+            Files.write(target, bytes);
+            AgentKnowledgeDocument doc = new AgentKnowledgeDocument();
+            doc.setKnowledgeId(knowledgeId);
+            doc.setFileName(safeName);
+            doc.setFileExt("md");
+            doc.setFileSize((long) bytes.length);
+            doc.setFileMd5(fileMd5);
+            doc.setFilePath(target.toString());
+            doc.setStatus("0");
+            doc.setChunkCount(0);
+            doc.setPublishStatus(Integer.valueOf(1).equals(kb.getReviewRequired())
+                ? "PENDING_REVIEW" : "PUBLISHED");
+            doc.setVisibility("INHERIT");
+            doc.setTrashed(0);
+            documentMapper.insert(doc);
+            refreshDocCount(knowledgeId);
+            docProcessor.processAsync(doc.getId());
+            auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.import", "knowledge_document",
+                String.valueOf(doc.getId()), "外部源导入[" + safeName + "]至知识库[" + kb.getName() + "]",
+                null, Map.of("fileName", safeName, "knowledgeId", knowledgeId, "source", "EXT"), "0", "WARN");
+            return doc.getId();
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceException("外部源导入失败:" + e.getMessage());
+        }
+    }
+
+    @Override
+    public Boolean retry(Long id) {        AgentKnowledgeDocument doc = documentMapper.selectById(id);
         if (doc == null) {
             throw new ServiceException("文档不存在");
         }

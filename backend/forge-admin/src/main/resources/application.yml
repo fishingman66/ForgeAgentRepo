@@ -133,6 +133,9 @@ security:
     - /chat-channel/**
     # 语音与呼叫中心回调(V1):AICC 验签 + 时间窗 + nonce + 事件幂等,免登录
     - /chat-voice/**
+    # 知识库 MCP 端点(R1):以 rag.knowledge.mcp-token 鉴权(空=不校验),免登录
+    - /mcp
+    - /mcp/**
 
 # MyBatisPlus配置
 # https://baomidou.com/config/

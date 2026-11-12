@@ -27,6 +27,11 @@ public interface IAgentKnowledgeDocumentService {
     Long upload(Long knowledgeId, MultipartFile file);
 
     /**
+     * R5-4 外部源入库:把纯文本落成 markdown 文档并触发解析(内容 MD5 去重,重复返回已有文档ID)
+     */
+    Long importText(Long knowledgeId, String fileName, String content);
+
+    /**
      * 失败文档重试
      */
     Boolean retry(Long id);

@@ -96,6 +96,7 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
     private final EmbeddingFactory embeddingFactory;
     private final VectorStore vectorStore;
     private final com.forgeagent.rag.service.governance.DocVisibilityResolver visibilityResolver;
+    private final com.forgeagent.rag.service.graph.KbGraphRetriever graphRetriever;
     private final LlmRerankService llmRerankService;
     private final ApiRerankService apiRerankService;
     private final KnowledgeProperties knowledgeProperties;
@@ -196,6 +197,8 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         entity.setChunkUnit(unit);
         entity.setSplitStrategy(normalizeSplitStrategy(bo.getSplitStrategy()));
         entity.setCleanRules(normalizeCleanRules(bo.getCleanRules()));
+        com.forgeagent.rag.service.support.KnowledgeRetrievalOverrides.validate(bo.getRetrievalOverrides());
+        entity.setRetrievalOverrides(StringUtils.isBlank(bo.getRetrievalOverrides()) ? null : bo.getRetrievalOverrides());
         boolean tokenUnit = com.forgeagent.rag.service.document.TextChunker.UNIT_TOKEN.equals(unit);
         if (entity.getChunkSize() == null) {
             entity.setChunkSize(tokenUnit ? 400 : 500);
@@ -256,6 +259,12 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         update.setSplitStrategy(StringUtils.isBlank(bo.getSplitStrategy())
             ? null : normalizeSplitStrategy(bo.getSplitStrategy()));
         update.setCleanRules(StringUtils.isBlank(bo.getCleanRules()) ? null : normalizeCleanRules(bo.getCleanRules()));
+        // R5-6:覆盖参数可清空(传空串即恢复跟随全局)
+        if (bo.getRetrievalOverrides() != null) {
+            com.forgeagent.rag.service.support.KnowledgeRetrievalOverrides.validate(bo.getRetrievalOverrides());
+            update.setRetrievalOverrides(StringUtils.isBlank(bo.getRetrievalOverrides())
+                ? null : bo.getRetrievalOverrides());
+        }
         // 配置指纹(R2-5):生效配置 = 本次传值,缺省沿用库内旧值;任一指纹变化 → status=1 的文档标脏,
         // 由"差异重建"消费。这里只负责发现过期,不自动重建(自动全量重建在误操作场景代价太大)
         String effCleanRules = update.getCleanRules() != null ? update.getCleanRules()
@@ -533,10 +542,22 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             throw new ServiceException("知识库已停用");
         }
         List<DegradedReason> degraded = new ArrayList<>();
+        // R5-6 库级参数覆盖:调用方显式参数优先,只有"仍是默认值"时才让库级覆盖生效
+        com.forgeagent.rag.service.support.KnowledgeRetrievalOverrides ov =
+            com.forgeagent.rag.service.support.KnowledgeRetrievalOverrides.parse(kb.getRetrievalOverrides());
         int topK = bo.getTopK() == null ? 5 : bo.getTopK();
+        if (ov.topK() != null && (bo.getTopK() == null || bo.getTopK() == 5)) {
+            topK = ov.topK();
+        }
         String mode = StringUtils.isBlank(bo.getSearchMode()) ? "hybrid" : bo.getSearchMode().toLowerCase();
+        if (ov.searchMode() != null
+            && (StringUtils.isBlank(bo.getSearchMode()) || "hybrid".equalsIgnoreCase(bo.getSearchMode()))) {
+            mode = ov.searchMode().toLowerCase();
+        }
         // 开启精排时先放大召回:粗排多召回若干候选,再由重排序模型打分取最终 topK
-        boolean rerank = Boolean.TRUE.equals(bo.getRerank());
+        boolean rerank = Boolean.TRUE.equals(bo.getRerank()) || Boolean.TRUE.equals(ov.rerank());
+        double vectorWeight = ov.vectorWeightOrDefault();
+        double keywordWeight = ov.keywordWeightOrDefault();
         int rerankLimit = knowledgeProperties.getRerankCandidateLimit() == null
             ? 50 : Math.max(knowledgeProperties.getRerankCandidateLimit(), topK);
         int recall = rerank ? Math.min(Math.max(topK * 4, 20), rerankLimit) : topK;
@@ -544,7 +565,7 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         // R5-1/R5-2 可见性范围:治理谓词(回收站/发布态/生效窗口) + ACL 角色求交,
         // 一次算出 hidden 集,后面两条召回路线都下推(绝不召回后过滤,否则侵蚀 topK)
         com.forgeagent.rag.service.governance.DocVisibilityResolver.DocScope scope =
-            visibilityResolver.resolve(kb.getId());
+            visibilityResolver.resolve(kb.getId(), bo.getDocumentIds());
         List<Long> hiddenDocIds = scope.hiddenDocIds();
         String scopeSignature = hiddenDocIds.isEmpty() ? "all"
             : org.springframework.util.DigestUtils.md5DigestAsHex(
@@ -558,7 +579,8 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         if (Boolean.TRUE.equals(bo.getCacheable()) && Boolean.TRUE.equals(knowledgeProperties.getRagCacheEnabled())) {
             cacheKey = "agent:kb:search:" + kb.getId() + ":" + org.springframework.util.DigestUtils.md5DigestAsHex(
                 (bo.getQuery() + '|' + topK + '|' + mode + '|' + rerank + '|' + kb.getScoreThreshold()
-                    + '|' + kb.getRerankThreshold() + '|' + scopeSignature)
+                    + '|' + kb.getRerankThreshold() + '|' + scopeSignature + '|' + ov.signature()
+                    + "|g" + graphRouteCacheFlag())
                     .getBytes(StandardCharsets.UTF_8));
             try {
                 List<KnowledgeSearchHitVo> cached = RedisUtils.getCacheObject(cacheKey);
@@ -618,10 +640,24 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         int vectorHitCount = vectorHits.size();
         int keywordHitCount = keywordHits.size();
 
+        // R5-3 图谱路(可选第三路):实体匹配 → ≤2 跳扩 → 回落到来源分块。
+        // 融合只允许 RRF(hop 折扣分与余弦/BM25 不同尺度,没有可用权重)
+        List<Long> graphChunkIds = List.of();
+        boolean graphOn = Boolean.TRUE.equals(knowledgeProperties.getGraphRouteEnabled());
+        if (graphOn) {
+            try {
+                graphChunkIds = graphRetriever.retrieve(kb.getId(), bo.getQuery(), hiddenDocIds);
+            } catch (Exception e) {
+                degraded.add(DegradedReason.GRAPH_ROUTE_FAILED);
+                log.warn("[知识库] 图谱辅助检索失败,本次跳过图路: {}", e.getMessage());
+            }
+        }
+
         // 收集命中分块,剔除已禁用分块(禁用不参与检索)
         List<Long> allChunkIds = new ArrayList<>();
         vectorHits.forEach(h -> allChunkIds.add(h.id()));
         keywordHits.forEach(h -> allChunkIds.add(((Number) h.get("id")).longValue()));
+        allChunkIds.addAll(graphChunkIds);
         if (allChunkIds.isEmpty()) {
             return new SearchOutcome(List.of(), degraded, null, vectorHitCount, keywordHitCount,
                 System.currentTimeMillis() - startedAt);
@@ -698,14 +734,19 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         Map<Long, Double> keywordScoreMap = new HashMap<>();
         for (int i = 0; i < vectorHits.size(); i++) {
             VectorStore.VectorHit hit = vectorHits.get(i);
-            rrfScore.merge(hit.id(), 1.0 / (k + i + 1), Double::sum);
+            // 两路权重只放大/缩小各自 RRF 贡献的相对大小(不做分数归一化,避免改变绝对口径)
+            rrfScore.merge(hit.id(), vectorWeight / (k + i + 1), Double::sum);
             vectorScoreMap.put(hit.id(), hit.score() == null ? null : hit.score().doubleValue());
         }
         for (int i = 0; i < keywordHits.size(); i++) {
             Long cid = ((Number) keywordHits.get(i).get("id")).longValue();
-            rrfScore.merge(cid, 1.0 / (k + i + 1), Double::sum);
+            rrfScore.merge(cid, keywordWeight / (k + i + 1), Double::sum);
             Object kw = keywordHits.get(i).get("score");
             keywordScoreMap.put(cid, kw == null ? null : ((Number) kw).doubleValue());
+        }
+        // 图路只贡献 RRF 名次分(不参与两路权重)
+        for (int i = 0; i < graphChunkIds.size(); i++) {
+            rrfScore.merge(graphChunkIds.get(i), 1.0 / (k + i + 1), Double::sum);
         }
 
         // 粗排候选集:RRF 降序,精排时保留更多候选用于二次打分
@@ -805,7 +846,8 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
 
         // 相关度阈值:按本次实际执行阶段选择作用对象(精排分 → 余弦 → 无可比分不生效),
         // 不按配置硬选——精排临时不可用时若仍按精排阈值比,整批结果会被砍空且无从解释
-        Double vecThreshold = kb.getScoreThreshold() == null ? null : kb.getScoreThreshold().doubleValue();
+        Double vecThreshold = ov.scoreThreshold() != null ? ov.scoreThreshold()
+            : (kb.getScoreThreshold() == null ? null : kb.getScoreThreshold().doubleValue());
         Double rrThreshold = kb.getRerankThreshold() == null ? null : kb.getRerankThreshold().doubleValue();
         ScoreThresholdPolicy.Decision decision = ScoreThresholdPolicy.apply(result, vecThreshold, rrThreshold);
         result = new ArrayList<>(decision.kept());
@@ -1058,6 +1100,13 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             }
         }
         return outcome.thresholdAppliedOn() == null ? null : outcome.thresholdAppliedOn().code();
+    }
+
+    /**
+     * 检索缓存键里的图路标记:图路开关变化后旧缓存不得复用
+     */
+    private String graphRouteCacheFlag() {
+        return Boolean.TRUE.equals(knowledgeProperties.getGraphRouteEnabled()) ? "1" : "0";
     }
 
     /**

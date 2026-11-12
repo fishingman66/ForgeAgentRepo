@@ -83,6 +83,11 @@ private java.math.BigDecimal rerankThreshold;
     private Integer reviewRequired;
 
     /**
+     * 库级检索参数覆盖 JSON(R5-6)
+     */
+    private String retrievalOverrides;
+
+    /**
      * 分块大小(字符数)
      */
     private Integer chunkSize;

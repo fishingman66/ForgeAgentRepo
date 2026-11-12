@@ -72,6 +72,7 @@ public class KnowledgeMcpEndpoint {
 
     private final KnowledgeProperties properties;
     private final AgentKnowledgeMapper knowledgeMapper;
+    private final com.forgeagent.rag.mapper.AgentKbChunkMapper chunkMapper;
     private final IAgentKnowledgeService knowledgeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -246,6 +247,7 @@ public class KnowledgeMcpEndpoint {
             toolResult = switch (toolName) {
                 case "knowledge_search" -> knowledgeSearchTool(args);
                 case "knowledge_list" -> knowledgeListTool();
+                case "knowledge_chunks" -> knowledgeChunksTool(args);
                 default -> toolError("未知工具:" + toolName);
             };
         } catch (IllegalArgumentException e) {
@@ -308,6 +310,13 @@ public class KnowledgeMcpEndpoint {
             .put("description", "可选,限定知识库ID;缺省时检索全部启用的知识库");
         props.putObject("topK").put("type", "integer")
             .put("description", "可选,每个知识库返回条数,默认 5");
+        // R5-6 filters:文档范围下推(检索前作为允许列表,不做召回后过滤)
+        ObjectNode filters = props.putObject("filters");
+        filters.put("type", "object");
+        ObjectNode filterProps = filters.putObject("properties");
+        filterProps.putObject("documentIds").put("type", "array")
+            .put("description", "可选,限定文档ID列表(空=不限)");
+        filters.put("description", "可选过滤条件:documentIds 限定文档范围");
 
         ObjectNode tool = objectMapper.createObjectNode();
         tool.put("name", TOOL_NAME);
@@ -325,9 +334,22 @@ public class KnowledgeMcpEndpoint {
         ObjectNode listSchema = listTool.putObject("inputSchema");
         listSchema.put("type", "object");
 
+        // R5-6 分块浏览工具:按文档拉分块(检索命中后需要看上下文时使用)
+        ObjectNode chunkTool = objectMapper.createObjectNode();
+        chunkTool.put("name", "knowledge_chunks");
+        chunkTool.put("description", "按文档ID分页列出分块内容(带页码/序号),用于查看知识库原文片段");
+        ObjectNode chunkSchema = chunkTool.putObject("inputSchema");
+        chunkSchema.put("type", "object");
+        ObjectNode chunkProps = chunkSchema.putObject("properties");
+        chunkProps.putObject("documentId").put("type", "integer").put("description", "文档ID");
+        chunkProps.putObject("pageNum").put("type", "integer").put("description", "页码,默认 1");
+        chunkProps.putObject("pageSize").put("type", "integer").put("description", "每页条数,默认 20,最大 50");
+        chunkSchema.putArray("required").add("documentId");
+
         ArrayNode tools = objectMapper.createArrayNode();
         tools.add(tool);
         tools.add(listTool);
+        tools.add(chunkTool);
         return tools;
     }
 
@@ -356,6 +378,16 @@ public class KnowledgeMcpEndpoint {
         }
         int topK = Math.min(Math.max(args.path("topK").asInt(5), 1), MAX_TOP_K);
         boolean hasKb = args.hasNonNull("knowledgeId");
+        // R5-6 filters.documentIds:作为允许列表下推到检索(不是召回后过滤)
+        List<Long> documentIds = new ArrayList<>();
+        JsonNode docIdsNode = args.path("filters").path("documentIds");
+        if (docIdsNode.isArray()) {
+            for (JsonNode n : docIdsNode) {
+                if (n.canConvertToLong()) {
+                    documentIds.add(n.asLong());
+                }
+            }
+        }
         long start = System.currentTimeMillis();
 
         List<AgentKnowledge> targets = new ArrayList<>();
@@ -382,6 +414,9 @@ public class KnowledgeMcpEndpoint {
                 bo.setQuery(query);
                 bo.setTopK(topK);
                 bo.setCacheable(Boolean.TRUE);
+                if (!documentIds.isEmpty()) {
+                    bo.setDocumentIds(documentIds);
+                }
                 for (KnowledgeSearchHitVo hit : knowledgeService.search(bo)) {
                     ObjectNode row = rows.addObject();
                     row.put("knowledge", kb.getName());
@@ -426,6 +461,42 @@ public class KnowledgeMcpEndpoint {
             row.put("description", StringUtils.defaultString(kb.getDescription()));
         }
         result.put("hint", "将 knowledgeId 传入 knowledge_search 可限定检索范围");
+        return result;
+    }
+
+    /**
+     * R5-6 分块浏览:按文档分页列出分块(只读,带页码与序号)
+     */
+    private ObjectNode knowledgeChunksTool(JsonNode args) {
+        if (!args.hasNonNull("documentId")) {
+            throw new IllegalArgumentException("documentId 不能为空");
+        }
+        long documentId = args.get("documentId").asLong();
+        int pageNum = Math.max(args.path("pageNum").asInt(1), 1);
+        int pageSize = Math.min(Math.max(args.path("pageSize").asInt(20), 1), 50);
+        var page = chunkMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(
+                pageNum, pageSize),
+            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.forgeagent.rag.domain.AgentKbChunk>()
+                .eq(com.forgeagent.rag.domain.AgentKbChunk::getDocumentId, documentId)
+                .and(w -> w.isNull(com.forgeagent.rag.domain.AgentKbChunk::getChunkRole)
+                    .or().ne(com.forgeagent.rag.domain.AgentKbChunk::getChunkRole, "p"))
+                .orderByAsc(com.forgeagent.rag.domain.AgentKbChunk::getChunkIndex));
+        ObjectNode result = objectMapper.createObjectNode();
+        result.put("documentId", String.valueOf(documentId));
+        result.put("total", page.getTotal());
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        ArrayNode rows = result.putArray("rows");
+        for (com.forgeagent.rag.domain.AgentKbChunk chunk : page.getRecords()) {
+            ObjectNode row = rows.addObject();
+            row.put("chunkId", String.valueOf(chunk.getId()));
+            row.put("chunkIndex", chunk.getChunkIndex());
+            if (chunk.getPageNo() != null) {
+                row.put("pageNo", chunk.getPageNo());
+            }
+            row.put("enabled", chunk.getEnabled() == null ? 1 : chunk.getEnabled());
+            row.put("content", chunk.getContent());
+        }
         return result;
     }
 

@@ -74,6 +74,13 @@ public class DocVisibilityResolver {
     }
 
     public DocScope resolve(Long knowledgeId) {
+        return resolve(knowledgeId, null);
+    }
+
+    /**
+     * @param onlyDocIds MCP filters 的文档白名单;非空时白名单之外的文档一律 hidden
+     */
+    public DocScope resolve(Long knowledgeId, List<Long> onlyDocIds) {
         List<AgentKnowledgeDocument> docs = documentMapper.selectList(
             new LambdaQueryWrapper<AgentKnowledgeDocument>()
                 .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId)
@@ -85,6 +92,7 @@ public class DocVisibilityResolver {
         }
         Date now = new Date();
         Set<Long> roleIds = currentRoleIds();
+        Set<Long> onlySet = onlyDocIds == null || onlyDocIds.isEmpty() ? null : new HashSet<>(onlyDocIds);
         List<Long> restrictedIds = docs.stream()
             .filter(d -> VISIBILITY_RESTRICTED.equals(d.getVisibility()))
             .map(AgentKnowledgeDocument::getId).toList();
@@ -92,7 +100,9 @@ public class DocVisibilityResolver {
 
         List<Long> hidden = new ArrayList<>();
         for (AgentKnowledgeDocument doc : docs) {
-            if (Integer.valueOf(1).equals(doc.getTrashed())) {
+            if (onlySet != null && !onlySet.contains(doc.getId())) {
+                hidden.add(doc.getId());
+            } else if (Integer.valueOf(1).equals(doc.getTrashed())) {
                 hidden.add(doc.getId());
             } else if (!PUBLISH_PUBLISHED.equals(doc.getPublishStatus() == null
                 ? PUBLISH_PUBLISHED : doc.getPublishStatus())) {
