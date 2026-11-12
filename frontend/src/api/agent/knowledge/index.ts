@@ -313,3 +313,30 @@ export const createKbCaseFromHit = (data: { knowledgeId: string | number; questi
     params: data
   });
 };
+
+/** 读取图片识别模型配置(按工作空间;workspaceId=0 为平台默认,API Key 只回显掩码) */
+export const getKbVlmConfig = (workspaceId: string | number) => {
+  return request({
+    url: '/agent/knowledge/vlm-config',
+    method: 'get',
+    params: { workspaceId }
+  });
+};
+
+/** 保存图片识别模型配置(apiKey 留空沿用已存密文) */
+export const saveKbVlmConfig = (data: { workspaceId: string | number; sourceType: string; modelName?: string; baseUrl?: string; apiKey?: string; enabled?: number }) => {
+  return request({
+    url: '/agent/knowledge/vlm-config',
+    method: 'put',
+    data
+  });
+};
+
+/** 图片识别模型连通性测试 */
+export const testKbVlmConfig = (data: { workspaceId: string | number; sourceType: string; modelName?: string; baseUrl?: string; apiKey?: string }) => {
+  return request({
+    url: '/agent/knowledge/vlm-config/test',
+    method: 'post',
+    data
+  });
+};

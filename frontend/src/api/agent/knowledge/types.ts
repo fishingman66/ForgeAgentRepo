@@ -19,6 +19,8 @@ export interface KnowledgeVO {
   reviewRequired?: number;
   /** 库级检索参数覆盖 JSON(R5-6) */
   retrievalOverrides?: string;
+  /** R5-5 图片描述库级开关(1=开启) */
+  vlmEnabled?: number;
   /** 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */
@@ -62,6 +64,8 @@ export interface KnowledgeForm {
   reviewRequired?: number;
   /** 库级检索参数覆盖 JSON(R5-6),留空跟随全局 */
   retrievalOverrides?: string;
+  /** R5-5 图片描述库级开关(1=开启) */
+  vlmEnabled?: number;
   /** 父子分块开关(1=先切父块再切子块) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */

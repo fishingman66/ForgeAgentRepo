@@ -20,6 +20,8 @@ import com.forgeagent.rag.service.document.DocumentCleaner;
 import com.forgeagent.rag.service.document.DocumentParser;
 import com.forgeagent.rag.service.document.KnowledgeFingerprints;
 import com.forgeagent.rag.service.document.DocumentParserFactory;
+import com.forgeagent.rag.service.document.ParsedDocument;
+import com.forgeagent.rag.service.document.KbImageDescriber;
 import com.forgeagent.rag.service.document.ParsedText;
 import com.forgeagent.rag.service.document.TextChunker;
 import com.forgeagent.rag.service.document.TokenEstimator;
@@ -98,6 +100,8 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
     private final AgentKnowledgeDocumentMapper documentMapper;
     private final AgentKbChunkMapper chunkMapper;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final KbImageDescriber imageDescriber;
+    private final com.forgeagent.rag.config.KnowledgeProperties knowledgeProperties;
     private final AgentChatAttachmentMapper attachmentMapper;
     private final EmbeddingFactory embeddingFactory;
     private final VectorStore vectorStore;
@@ -140,19 +144,24 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
         try {
             // 解析产物复用(R2-5):文档指纹与知识库当前解析指纹一致且产物可用时,
             // 跳过"解析+清洗"两步,重建成本从「重解析+重嵌」降到「重切+重嵌」
-            String parseFp = KnowledgeFingerprints.parseOf(kb.getCleanRules());
+            String parseFp = KnowledgeFingerprints.parseOf(kb.getCleanRules(),
+                KnowledgeFingerprints.vlmSignature(Boolean.TRUE.equals(knowledgeProperties.getVlmEnabled()),
+                    kb.getVlmEnabled(), knowledgeProperties.getVlmModel()));
             String cached = doc.getParseFingerprint() != null && doc.getParseFingerprint().equals(parseFp)
                 ? loadParsedText(documentId) : null;
             String text;
             ParsedText parsed = null;
             List<String> cleanErrors = new ArrayList<>();
             DocumentCleaner.CleanResult cleaned = null;
+            String imageNotice = null;
             if (cached != null && !cached.isBlank()) {
                 text = cached;
                 log.info("[知识库] 文档 {} 复用解析产物,跳过解析与清洗", documentId);
             } else {
                 byte[] bytes = Files.readAllBytes(Path.of(doc.getFilePath()));
-                parsed = parseWithTimeout(doc.getFileExt(), bytes);
+                ParsedDocument parsedDoc = parseWithTimeout(doc.getFileExt(), bytes);
+                log.info("[知识库] 文档 {} 解析出图片 {} 张", documentId, parsedDoc.images().size());
+                parsed = parsedDoc.text();
                 text = parsed.text();
                 if (text != null && text.length() > MAX_TEXT_CHARS) {
                     text = text.substring(0, MAX_TEXT_CHARS);
@@ -168,6 +177,15 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
                         cleaned.regexLines(), cleaned.piiLines(), cleanErrors);
                 }
                 text = cleaned.text();
+                // R5-5 图片描述:按 [[img:n]] 标记替换(开关关=剥离标记);失败只降级不阻断
+                if (parsedDoc.hasImages()) {
+                    KbImageDescriber.Result imgResult = imageDescriber.apply(text, parsedDoc.images(), kb, documentId);
+                    text = imgResult.text();
+                    if (imgResult.described() > 0 || imgResult.failed() > 0) {
+                        imageNotice = "图片描述 " + imgResult.described() + " 张"
+                            + (imgResult.failed() > 0 ? ",失败/跳过 " + imgResult.failed() + " 张" : "");
+                    }
+                }
             }
             if (text == null || text.isBlank()) {
                 // 扫描件没有文本层,直接失败并说明原因:标"成功但 0 块"运营根本发现不了
@@ -176,6 +194,9 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
                     : "文档解析结果为空");
             }
             String parseNotice = parsed != null ? parsed.warningSummary() : "";
+            if (imageNotice != null) {
+                parseNotice = joinNotices(parseNotice, imageNotice);
+            }
             if (cleaned != null && (cleaned.changed() || !cleanErrors.isEmpty())) {
                 StringBuilder cleanSummary = new StringBuilder();
                 if (cleaned.removedHeader() > 0 || cleaned.removedPageNo() > 0) {
@@ -365,12 +386,12 @@ public class KnowledgeDocProcessorImpl implements KnowledgeDocProcessor {
     /**
      * 带硬超时的解析:超时中断并失败,避免坏文件长期占用解析线程
      */
-    private ParsedText parseWithTimeout(String ext, byte[] bytes) throws Exception {
+    private ParsedDocument parseWithTimeout(String ext, byte[] bytes) throws Exception {
         DocumentParser parser = DocumentParserFactory.get(ext);
-        java.util.concurrent.CompletableFuture<ParsedText> future =
+        java.util.concurrent.CompletableFuture<ParsedDocument> future =
             java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                 try {
-                    return parser.parseRich(bytes);
+                    return parser.parseDocument(bytes);
                 } catch (Exception e) {
                     throw new java.util.concurrent.CompletionException(e);
                 }

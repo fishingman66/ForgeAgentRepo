@@ -57,4 +57,18 @@ class KnowledgeFingerprintsTest {
         assertNotEquals(missing, explicit);
         assertEquals(missing, KnowledgeFingerprints.chunkOf(null, null, null, null, null, null));
     }
+
+    @Test
+    void vlmSwitchParticipatesInParseFingerprint() {
+        // R5-5:开关/模型变化必须换指纹,否则改开关不会触发重建
+        String off = KnowledgeFingerprints.parseOf(null, "off");
+        String onA = KnowledgeFingerprints.parseOf(null, "on:vision-a");
+        String onB = KnowledgeFingerprints.parseOf(null, "on:vision-b");
+        assertNotEquals(off, onA);
+        assertNotEquals(onA, onB);
+        assertEquals(off, KnowledgeFingerprints.parseOf(null));
+        assertEquals("off", KnowledgeFingerprints.vlmSignature(false, 1, "vision-a"));
+        assertEquals("off", KnowledgeFingerprints.vlmSignature(true, 0, "vision-a"));
+        assertEquals("on:vision-a", KnowledgeFingerprints.vlmSignature(true, 1, "vision-a"));
+    }
 }

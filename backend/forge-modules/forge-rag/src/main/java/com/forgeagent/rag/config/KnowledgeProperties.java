@@ -164,6 +164,25 @@ public class KnowledgeProperties {
     private Integer kgExtractMaxChunks = 60;
 
     /**
+     * R5-5 图片描述:全局开关(还需库级 vlm_enabled 同时打开);vlm-model 取 agent_model.model_name,
+     * 必须是支持视觉输入的模型,未配置则只剥离标记不描述
+     */
+    private Boolean vlmEnabled = false;
+
+    private String vlmModel = "";
+
+    /**
+     * 参与描述的最小图片边长(像素),小于该值视为图标/水印
+     */
+    private Integer vlmMinPixels = 200;
+
+    /**
+     * 敏感配置加密密钥(图片识别模型 API Key 用):生产必须显式配置,
+     * 换密钥会导致既有密文无法解密(需重新保存配置)
+     */
+    private String secretKey = "forge-kb-secret-change-me";
+
+    /**
      * 精排调用硬超时(毫秒)。精排是增强项,模型抖动不该把整轮检索拖到几十秒;超时回退 RRF 粗排
      */
     private Integer rerankTimeoutMs = 1500;

@@ -42,14 +42,35 @@ public final class KnowledgeFingerprints {
      * @param cleanRulesJson 库级清洗规则 JSON(NULL/空白=默认规则)
      */
     public static String parseOf(String cleanRulesJson) {
+        return parseOf(cleanRulesJson, null);
+    }
+
+    /**
+     * 解析指纹(含 R5-5 图片描述开关):开关/模型变化必须触发重建,
+     * 否则会出现"一半图有描述一半没有"的脏索引
+     *
+     * @param vlmSignature 形如 {@code off} / {@code on:gpt-4o};null 等同 off
+     */
+    public static String parseOf(String cleanRulesJson, String vlmSignature) {
         List<String> errors = new ArrayList<>();
         CleanRules rules = CleanRules.parse(cleanRulesJson, errors);
+        String vlm = vlmSignature == null || vlmSignature.isBlank() ? "off" : vlmSignature;
         try {
-            return sha256(PARSE_PIPELINE_VERSION + "|clean:" + MAPPER.writeValueAsString(rules));
+            return sha256(PARSE_PIPELINE_VERSION + "|clean:" + MAPPER.writeValueAsString(rules)
+                + "|vlm:" + vlm);
         } catch (Exception e) {
             // record 序列化不会失败;防御性兜底退回原始串
-            return sha256(PARSE_PIPELINE_VERSION + "|raw:" + (cleanRulesJson == null ? "" : cleanRulesJson));
+            return sha256(PARSE_PIPELINE_VERSION + "|raw:" + (cleanRulesJson == null ? "" : cleanRulesJson)
+                + "|vlm:" + vlm);
         }
+    }
+
+    /**
+     * R5-5 图片描述签名:全局开关与库级开关同时为真才算开启;开启时模型名参与指纹
+     */
+    public static String vlmSignature(boolean globalEnabled, Integer kbEnabled, String model) {
+        boolean on = globalEnabled && Integer.valueOf(1).equals(kbEnabled);
+        return on ? "on:" + (model == null ? "" : model.trim()) : "off";
     }
 
     /**

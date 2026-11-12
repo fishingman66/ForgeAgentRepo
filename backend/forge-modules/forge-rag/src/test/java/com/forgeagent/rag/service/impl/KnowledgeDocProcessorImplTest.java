@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class KnowledgeDocProcessorImplTest {
 
     private final KnowledgeDocProcessorImpl processor =
-        new KnowledgeDocProcessorImpl(null, null, null, null, null, null, null, null);
+        new KnowledgeDocProcessorImpl(null, null, null, null, null, null, null, null, null, null);
 
     @Test
     void pageNoParsedFromPageMarkOnly() {

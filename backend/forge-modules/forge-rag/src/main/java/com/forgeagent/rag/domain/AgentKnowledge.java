@@ -103,6 +103,11 @@ private java.math.BigDecimal rerankThreshold;
     private String retrievalOverrides;
 
     /**
+     * R5-5 图片描述(库级开关):1=解析时对图片调视觉模型生成描述并注入正文
+     */
+    private Integer vlmEnabled;
+
+    /**
      * 分块大小(字符数)
      */
     private Integer chunkSize;

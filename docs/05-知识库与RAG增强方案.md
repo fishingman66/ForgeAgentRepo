@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 + R0 + R2 + R3 + R4 全部交付；R5-1/R5-2/R5-3/R5-4(URL)/R5-6 已交付，R5-5(OCR/多模态)与 S3/Confluence 真实接入按需** · 2026-11-12 · 适用版本 6.1.x
+> 状态：**R1~R4 与 R5-1~R5-6 全部交付（OCR 未做，改为视觉模型图片描述）；仅剩 S3/Confluence 真实接入按需** · 2026-11-12 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -833,6 +833,25 @@ agent_kb_query_log（R1-6）
 
 URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS 解析后拒私网/回环/链路本地、禁重定向）、S3 兼容对象存储增量同步、Confluence。统一为 `agent_kb_ext_source(type/config/status/last_sync_at)` + 条目表，失败重试走 R2-4 的补偿通道。
 
+### R5-5 图片描述（VLM，已交付；未接 Tesseract）
+
+方案决策：**不引入 Tesseract（tess4j + 语言包体积大、中文质量依赖数据包、本机无环境），改为"图片抽取 + 视觉模型描述进正文"**——描述文本能被现有文本检索命中，改造面最小。
+
+**实现**：
+- 解析层：`DocumentParser#parseDocument` 返回 `ParsedDocument(正文 + List<DocumentImage>)`；PDF 逐页抽 XObject（**递归进 Form XObject**，真实导出件常把图放在表单资源里；过滤 <200px 图标、内容 MD5 去重、单图像素上限 2000 万、单篇最多 20 张），docx 按段落锚点抽内嵌图片；图片位置在正文里写成 `[[img:n]]` 标记
+- 描述层：`KbImageDescriber` 按标记替换——开关关闭时标记整体剥离（正文与未开启完全一致）；开关开启但未配模型时只剥离并告警一次；描述成功写 `【图片描述 p3】…`，失败降级 `【图片 p3】（未生成描述）`，**任何失败都不阻断解析**；图片落盘 `fileDir/images/{docId}/` 供人工核对
+- 成本控制：全局 `rag.knowledge.vlm-enabled` + 库级 `vlm_enabled` 双开关（默认全关）；每篇 ≤20 张、最小 200px；**同图（MD5）描述 Redis 复用 30 天**，跨文档重复素材不重复烧钱
+- 指纹联动：`vlmSignature(全局开关, 库级开关, 模型名)` 参与 `parse_fingerprint`，改开关/换模型都会触发差异重建，不会留下"一半图有描述一半没有"的脏索引
+- 前端：知识库表单「图片描述」开关
+
+**踩坑记录**：① PDFBox `getXObjectNames()` 返回的是 `Iterable` 不是 `Set`（没有 `size()`）；② 图片可能藏在 Form XObject 里，只扫页面直属资源会漏图（pymupdf 导出的 PDF 就是这种）；③ 实体字段 `vlm_enabled` 是 `Integer`，判定开关必须 `Integer.valueOf(1).equals(...)`，用 `Boolean.TRUE.equals(...)` 恒为 false——这个 bug 表现为"开关看着开了但标记被静默剥离"，靠入口日志才定位。
+
+**验证**：单测 `PdfImageExtractionTest` 3（大图抽出+页号标记、小图标过滤、parseRich 兼容）+ `KbImageDescriberTest` 5（关闭/无模型/库级关/模型不存在/无标记）+ 指纹 1；forge-rag **170/170**；e2e `temp/r5c_verify.py` **15/15**（关闭态无标记 → 开启无模型明示告警并剥离 → 配模型后描述或明确降级，全程不阻断）；基线 93.33% / 0.8667 / 0.8841 **不降**。
+
+**图片识别模型按工作空间配置（2026-11-12 追加）**：新增 `agent_kb_vlm_config`（`workspace_id` 唯一，0=平台默认），支持两类来源——`PLATFORM` 复用平台 `agent_model` 的凭证，`CUSTOM` 填 baseUrl / API Key / ModelName（第三方 OpenAI 兼容）。API Key 用 AES-GCM 加密落库（`ENC:` 前缀，密钥 `rag.knowledge.secret-key` 派生），**任何接口只回显掩码**；编辑时 Key 留空即沿用旧密文。解析优先级：**工作空间行 > 平台默认行 > 全局 `vlm-model`**，`effectiveSource` 字段告诉界面当前实际用的是哪一份。前端在知识库页加「图片识别模型」入口（按空间切换、平台模型下拉 / 自定义三项、连通性测试）。单测 `KbSecretCipherTest` 5 + `KbVlmConfigResolverTest` 6；e2e `temp/r5d_verify.py` 16/16（密文落库、掩码回显、留空沿用、非法输入拒绝、连通失败不报 500、空间级优先）。
+
+**未做**：Tesseract OCR（可选 profile）；扫描件整页 VLM 兜底；图片独立向量空间（跨模态嵌入）。
+
 ### R5-5 OCR 与多模态
 
 先做"图片抽取 + VLM 描述进正文"（描述文本可被现有文本检索命中，改造面最小），再做"图片向量"（需要独立向量空间，参考项目就是独立索引）。OCR 依赖体积大（Tesseract 数据包 + 语言包），建议以**可选 profile** 引入，不默装。
@@ -859,6 +878,8 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `backend/sql/agent_kb_r4_trust.sql` | **已交付**：`agent_knowledge` + `fallback_answer_enabled`（库级零召回兜底/严格拒答）；`agent_eval_case` + `expected_refusal`（期望拒答用例）。幂等（information_schema + PREPARE，重跑验证过） |
 | `backend/sql/agent_kb_r5_acl.sql` | **已交付**：`agent_knowledge_document` + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed`/`trashed_at` + `idx_kb_doc_visible`；`agent_knowledge` + `review_required`；新表 `agent_kb_doc_acl`。幂等（information_schema + PREPARE，重跑验证过） |
 | `backend/sql/agent_kb_r5_scale.sql` | **已交付**：`agent_knowledge` + `retrieval_overrides`（库级参数覆盖）；新表 `agent_kb_kg_entity`（分块-实体映射）、`agent_kb_ext_source` / `agent_kb_ext_item`（外部源与条目）。幂等（重跑验证过） |
+| `backend/sql/agent_kb_r5_vlm.sql` | **已交付**：`agent_knowledge` + `vlm_enabled`（库级图片描述开关，默认 0）。幂等（重跑验证过） |
+| `backend/sql/agent_kb_vlm_config.sql` | **已交付**：新表 `agent_kb_vlm_config`（按工作空间的图片识别模型配置，API Key 密文存储）。幂等 |
 | `backend/sql/agent_kb_r5_graph.sql` | （按需）图谱辅助检索若启用，仅加指标表；图数据复用 `forge-kg` 现有两表 |
 
 > 脚本风格：**幂等**用 `create table if not exists` + `information_schema` 判断 + `PREPARE/EXECUTE`（MySQL 无 `ADD COLUMN IF NOT EXISTS`，直接 `ALTER` 重复执行会整脚本中断）+ 菜单权限 `insert ... where not exists`。Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 同步。
@@ -884,6 +905,8 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `graph.route-enabled` | false（dev true；已交付） | R5 |
 | `graph.max-hops` / `graph-entity-limit` / `graph-chunk-limit` | 2 / 10 / 20（已交付） | R5 |
 | `kg.extract-enabled` / `kg.extract-model` / `kg.extract-max-chunks` | false / 空 / 60（已交付） | R5 |
+| `vlm-enabled` / `vlm-model` / `vlm-min-pixels` | false / 空 / 200（已交付；库级 vlm_enabled 需同时打开） | R5 |
+| `secret-key` | forge-kb-secret-change-me（**生产必改**；图片识别 Key 加密用） | R5 |
 | `graph.route-enabled` | false（dev true） | R5 |
 
 ### 8.3 前端改动点（`frontend/src/views/agent/knowledge/index.vue` + 拆子组件）
@@ -993,4 +1016,4 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | R2 剩余 | — | 无(R2 全部完成;OCR/多模态解析归 R5) | — | 完成 |
 | R3 评测闭环 | **已交付**（2026-11-11） | span 证据 + 五指标 + 双跑门禁 + 查询日志闭环 + 质量议题（单轮/多轮分组无字段支撑未做；Wilson CI 已落） | 手工验算 + 基线对比（不降）+ e2e 34 项 | 已交付 |
 | R4 问答可信 | 待定 | 结构化资料块 + 引用校验 + 拒答策略 + 答案层评测 | 三类对抗用例 | 未启动 |
-| R5 治理与规模化 | **R5-1/R5-2 已交付**（2026-11-12）；R5-3~R5-6 按需 | 文档 ACL + 审核时效回收站（已交付）+ 图谱辅助检索 + 外部源 + OCR/多模态（按需） | ACL 正反/时间窗/回收站 e2e 28 项 + 基线不降 | 部分交付 |
+| R5 治理与规模化 | **R5-1~R5-6 已交付**（2026-11-12，OCR 改为 VLM 图片描述） | 文档 ACL + 审核时效回收站 + 图谱辅助检索 + URL 外部源与 SPI + 图片描述 + MCP filters/库级参数 | e2e 28 + 18 + 15 项 + 基线不降 | 已交付 |

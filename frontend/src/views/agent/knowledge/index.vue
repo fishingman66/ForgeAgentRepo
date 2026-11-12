@@ -32,6 +32,7 @@
           </div>
           <div class="toolbar-actions">
             <el-button v-hasPermi="['agent:knowledge:query']" plain icon="DataAnalysis" @click="handleEval">检索评测</el-button>
+            <el-button v-hasPermi="['agent:knowledge:query']" plain icon="Picture" @click="handleVlmConfig">图片识别模型</el-button>
             <el-button v-hasPermi="['agent:knowledge:list']" plain icon="Warning" @click="handleZeroHit">零命中查询</el-button>
             <el-button v-hasPermi="['agent:knowledge:add']" type="primary" plain icon="Plus" @click="handleAdd">新建知识库</el-button>
           </div>
@@ -126,6 +127,10 @@
           <el-input v-model="form.retrievalOverrides" type="textarea" :rows="3" style="width: 100%"
             placeholder='可选,JSON 覆盖库级检索参数(留空=跟随全局):{"topK":8,"searchMode":"hybrid","vectorWeight":1,"keywordWeight":1,"scoreThreshold":0.4,"rerank":true}' />
           <div class="form-tip">调用方显式传参仍优先;两路权重只放大/缩小 RRF 贡献的相对大小</div>
+        </el-form-item>
+        <el-form-item label="图片描述" prop="vlmEnabled">
+          <el-switch v-model="form.vlmEnabled" :active-value="1" :inactive-value="0" />
+          <div class="form-tip">开启后解析时对文档内图片调视觉模型生成描述并写入正文(需服务端同时配置 rag.knowledge.vlm-enabled 与 vlm-model;每篇最多 20 张,同图复用描述)</div>
         </el-form-item>
         <el-form-item label="分块单位" prop="chunkUnit">
           <el-select v-model="form.chunkUnit" style="width: 180px">
@@ -544,6 +549,60 @@
       <el-empty v-if="!zeroHitDialog.loading && zeroHitDialog.list.length === 0" description="暂无零命中记录" />
       <pagination v-model:page="zeroHitDialog.query.pageNum" v-model:limit="zeroHitDialog.query.pageSize" :total="zeroHitDialog.total" @pagination="loadZeroHit" />
     </el-dialog>
+    <!-- 图片识别模型配置(按工作空间) -->
+    <el-dialog v-model="vlmVisible" title="图片识别模型配置" width="620px" destroy-on-close>
+      <el-form label-width="120px">
+        <el-form-item label="配置范围">
+          <el-select v-model="vlmWorkspaceId" filterable style="width: 100%" @change="loadVlmConfig">
+            <el-option label="平台默认(所有空间未单独配置时生效)" :value="0" />
+            <el-option v-for="w in workspaceOptions" :key="w.id" :label="w.name" :value="w.id" />
+          </el-select>
+          <div class="form-tip">
+            生效优先级:当前空间配置 &gt; 平台默认 &gt; 全局 vlm-model;当前实际来源
+            <el-tag size="small" :type="vlmConfig.effectiveSource === 'NONE' ? 'danger' : 'success'">
+              {{ vlmConfig.effectiveSource || 'NONE' }}
+            </el-tag>
+          </div>
+        </el-form-item>
+        <el-form-item label="模型来源">
+          <el-radio-group v-model="vlmSourceType">
+            <el-radio value="PLATFORM">平台已配置模型</el-radio>
+            <el-radio value="CUSTOM">第三方 OpenAI 兼容</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="vlmSourceType === 'PLATFORM'" label="模型">
+          <el-select v-model="vlmModelName" filterable style="width: 100%" placeholder="选择支持视觉输入的平台模型">
+            <el-option v-for="m in vlmModels" :key="m.id" :label="m.modelName" :value="m.modelName" />
+          </el-select>
+          <div class="form-tip">复用平台模型配置里的 baseUrl 与 API Key(模型须支持图片输入)</div>
+        </el-form-item>
+        <template v-else>
+          <el-form-item label="Base URL">
+            <el-input v-model="vlmBaseUrl" placeholder="如 https://api.openai.com/v1" />
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input v-model="vlmApiKey" type="password" show-password
+              :placeholder="vlmConfig.hasApiKey ? '已配置(' + vlmConfig.apiKeyMasked + '),留空不修改' : '填入 API Key'" />
+          </el-form-item>
+          <el-form-item label="Model Name">
+            <el-input v-model="vlmModelName" placeholder="如 gpt-4o-mini / qwen-vl-max" />
+          </el-form-item>
+        </template>
+        <el-form-item label="启用">
+          <el-switch v-model="vlmEnabled" :active-value="1" :inactive-value="0" />
+          <div class="form-tip">关闭后忽略本条配置,继续向下回退(平台默认 → 全局 vlm-model)</div>
+        </el-form-item>
+        <el-form-item v-if="vlmMsg">
+          <el-alert :title="vlmMsg" :type="vlmMsgOk ? 'success' : 'error'" :closable="false" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button :loading="vlmTesting" @click="handleVlmTest">测试连接</el-button>
+        <el-button @click="vlmVisible = false">取消</el-button>
+        <el-button type="primary" :loading="vlmSaving" @click="handleVlmSave">保存</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -555,8 +614,10 @@ import {
   updateKnowledgeChunk, changeKnowledgeChunkEnabled, listKnowledgeZeroHit, rebuildKnowledgeIndex,
   rebuildStaleKnowledge, getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns,
   pageKbQualityIssues, registerKbQualityIssue, changeKbQualityIssueStatus,
-  restoreKnowledgeDocument, updateDocGovernance, reviewKnowledgeDocument
+  restoreKnowledgeDocument, updateDocGovernance, reviewKnowledgeDocument,
+  getKbVlmConfig, saveKbVlmConfig, testKbVlmConfig
 } from '@/api/agent/knowledge';
+import { listModel } from '@/api/agent/model';
 import { listRole } from '@/api/system/role';
 import { ElMessageBox } from 'element-plus';
 import type {
@@ -596,7 +657,7 @@ const loadWorkspaces = async () => {
 const dialog = reactive({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
-const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, reviewRequired: 0, retrievalOverrides: '', parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
+const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, reviewRequired: 0, retrievalOverrides: '', vlmEnabled: 0, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
 const form = ref<KnowledgeForm>({ ...initForm });
 
 const rules = {
@@ -631,6 +692,83 @@ const govDialog = reactive({
     clearTimeWindow: false
   }
 });
+
+/** 图片识别模型配置(按工作空间) —— 扁平 ref,避免嵌套对象 + v-model 触发类型误判 */
+const vlmVisible = ref(false);
+const vlmSaving = ref(false);
+const vlmTesting = ref(false);
+const vlmModels = ref<Array<{ id: number | string; modelName: string }>>([]);
+const vlmConfig = ref<Record<string, any>>({});
+const vlmMsg = ref('');
+const vlmMsgOk = ref(false);
+const vlmWorkspaceId = ref<number | string>(0);
+const vlmSourceType = ref('PLATFORM');
+const vlmModelName = ref('');
+const vlmBaseUrl = ref('');
+const vlmApiKey = ref('');
+const vlmEnabled = ref(1);
+
+const handleVlmConfig = async () => {
+  vlmVisible.value = true;
+  vlmMsg.value = '';
+  vlmWorkspaceId.value = queryParam.value.workspaceId || 0;
+  try {
+    const res = await listModel({ pageNum: 1, pageSize: 200, keyword: '', status: '' });
+    vlmModels.value = (res.data?.rows || []).map((m: any) => ({ id: m.id, modelName: m.modelName }));
+  } catch (e) {
+    // 模型列表不可用时仍可配置自定义模型
+  }
+  loadVlmConfig();
+};
+
+const loadVlmConfig = async () => {
+  vlmApiKey.value = '';
+  vlmMsg.value = '';
+  const res = await getKbVlmConfig(vlmWorkspaceId.value);
+  const cfg = res.data || {};
+  vlmConfig.value = cfg;
+  vlmSourceType.value = cfg.sourceType || 'PLATFORM';
+  vlmModelName.value = cfg.modelName || '';
+  vlmBaseUrl.value = cfg.baseUrl || '';
+  vlmEnabled.value = cfg.enabled === 0 ? 0 : 1;
+};
+
+const handleVlmTest = async () => {
+  vlmTesting.value = true;
+  vlmMsg.value = '';
+  try {
+    const res = await testKbVlmConfig({
+      workspaceId: vlmWorkspaceId.value,
+      sourceType: vlmSourceType.value,
+      modelName: vlmModelName.value,
+      baseUrl: vlmBaseUrl.value,
+      apiKey: vlmApiKey.value
+    });
+    const data = res.data || {};
+    vlmMsgOk.value = !!data.ok;
+    vlmMsg.value = data.message || (data.ok ? '连通正常' : '连通失败');
+  } finally {
+    vlmTesting.value = false;
+  }
+};
+
+const handleVlmSave = async () => {
+  vlmSaving.value = true;
+  try {
+    await saveKbVlmConfig({
+      workspaceId: vlmWorkspaceId.value,
+      sourceType: vlmSourceType.value,
+      modelName: vlmModelName.value,
+      baseUrl: vlmBaseUrl.value,
+      apiKey: vlmApiKey.value,
+      enabled: vlmEnabled.value
+    });
+    proxy?.$modal.msgSuccess('配置已保存');
+    loadVlmConfig();
+  } finally {
+    vlmSaving.value = false;
+  }
+};
 
 const chunkDialog = reactive({ visible: false, title: '', loading: false, documentId: 0 as number | string, list: [] as KnowledgeChunkVO[] });
 const chunkEditDialog = reactive({ visible: false, saving: false, id: 0 as number | string, content: '' });
@@ -701,6 +839,7 @@ const handleEdit = (row: KnowledgeVO) => {
     fallbackAnswerEnabled: row.fallbackAnswerEnabled === null || row.fallbackAnswerEnabled === undefined ? 1 : Number(row.fallbackAnswerEnabled),
     reviewRequired: row.reviewRequired === null || row.reviewRequired === undefined ? 0 : Number(row.reviewRequired),
     retrievalOverrides: row.retrievalOverrides || '',
+    vlmEnabled: row.vlmEnabled === null || row.vlmEnabled === undefined ? 0 : Number(row.vlmEnabled),
     parentChunkEnabled: row.parentChunkEnabled || '0',
     parentChunkSize: row.parentChunkSize || 2000,
     chunkUnit: row.chunkUnit || 'char',

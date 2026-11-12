@@ -207,7 +207,8 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             entity.setChunkOverlap(tokenUnit ? 60 : 50);
         }
         // 配置指纹(R2-5):建库即定版,后续改配置靠指纹比对发现"哪些文档过期"
-        entity.setParseFingerprint(com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(entity.getCleanRules()));
+        entity.setParseFingerprint(com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(
+            entity.getCleanRules(), vlmSig(entity.getVlmEnabled())));
         entity.setChunkFingerprint(com.forgeagent.rag.service.document.KnowledgeFingerprints.chunkOf(
             entity.getChunkUnit(), entity.getSplitStrategy(), entity.getChunkSize(),
             entity.getChunkOverlap(), entity.getParentChunkEnabled(), entity.getParentChunkSize()));
@@ -277,7 +278,9 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             ? update.getParentChunkEnabled() : old.getParentChunkEnabled();
         Integer effParentSize = update.getParentChunkSize() != null
             ? update.getParentChunkSize() : old.getParentChunkSize();
-        String newParseFp = com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(effCleanRules);
+        Integer effVlm = update.getVlmEnabled() != null ? update.getVlmEnabled() : old.getVlmEnabled();
+        String newParseFp = com.forgeagent.rag.service.document.KnowledgeFingerprints.parseOf(
+            effCleanRules, vlmSig(effVlm));
         String newChunkFp = com.forgeagent.rag.service.document.KnowledgeFingerprints.chunkOf(
             effUnit, effStrategy, effSize, effOverlap, effParentEnabled, effParentSize);
         boolean fingerprintsChanged = !Objects.equals(newParseFp, old.getParseFingerprint())
@@ -1103,9 +1106,17 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
     }
 
     /**
-     * 检索缓存键里的图路标记:图路开关变化后旧缓存不得复用
+     * R5-5 图片描述签名(全局开关 + 库级开关 + 模型名),参与解析指纹
      */
-    private String graphRouteCacheFlag() {
+    private String vlmSig(Integer kbEnabled) {
+        return com.forgeagent.rag.service.document.KnowledgeFingerprints.vlmSignature(
+            Boolean.TRUE.equals(knowledgeProperties.getVlmEnabled()), kbEnabled,
+            knowledgeProperties.getVlmModel());
+    }
+
+    /**
+     * 检索缓存键里的图路标记:图路开关变化后旧缓存不得复用
+     */    private String graphRouteCacheFlag() {
         return Boolean.TRUE.equals(knowledgeProperties.getGraphRouteEnabled()) ? "1" : "0";
     }
 

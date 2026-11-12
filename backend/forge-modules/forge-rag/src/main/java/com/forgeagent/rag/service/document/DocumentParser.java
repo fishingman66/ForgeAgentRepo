@@ -26,4 +26,12 @@ public interface DocumentParser {
     default ParsedText parseRich(byte[] bytes) throws Exception {
         return ParsedText.of(parse(bytes));
     }
+
+    /**
+     * R5-5:解析正文 + 图片(含位置标记)。默认不支持图片,等价于 {@link #parseRich}。
+     * PDF/docx 覆盖本方法产出 {@code [[img:n]]} 标记与对应图片列表。
+     */
+    default ParsedDocument parseDocument(byte[] bytes) throws Exception {
+        return ParsedDocument.of(parseRich(bytes));
+    }
 }

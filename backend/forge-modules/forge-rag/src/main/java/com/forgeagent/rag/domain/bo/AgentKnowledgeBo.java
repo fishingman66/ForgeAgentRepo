@@ -95,6 +95,11 @@ private java.math.BigDecimal rerankThreshold;
     private String retrievalOverrides;
 
     /**
+     * R5-5 图片描述库级开关(1=开启;需全局 rag.knowledge.vlm-enabled 同时开启)
+     */
+    private Integer vlmEnabled;
+
+    /**
      * 分块大小(字符数)
      */
     @Min(value = 100, message = "分块大小不能小于 100", groups = {AddGroup.class, EditGroup.class})
