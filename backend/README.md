@@ -12,24 +12,34 @@ backend
 ├── forge-api              # 系统 API（跨模块 DTO 与服务接口）
 ├── forge-common           # 公共设施（core / mybatis / redis / satoken / web / oss / json / excel 等）
 ├── forge-extend           # 独立附属进程（monitor-admin 监控 / snailjob-server 调度）
-├── forge-modules
-│   ├── forge-agent-core   # 共享内核：Agent / 模型 / 空间成员 / 附件实体与映射、权限助手、ResourceAccessGuard、配置缓存、模型工厂
+├── forge-modules          # 12 个业务模块，依赖单向，无环；每个模块各有独立 README
+│   ├── forge-agent-core   # 共享内核：Agent/模型/空间成员/附件实体与映射、权限助手、ResourceAccessGuard、配置缓存、模型工厂
 │   ├── forge-agent        # Agent 平台业务：工作空间、编排、对话运行、市场、触发器、审计计量
 │   │   └── service/workflow  # 图校验器 WorkflowGraphValidator / 表达式引擎 WorkflowExpressionEngine（纯逻辑，可脱离 Spring 单测）
-│   ├── forge-rag          # 知识库检索增强：文档摄取、分块向量化、混合检索与重排、MCP 检索端点
-│   ├── forge-memory       # 长期记忆：跨会话记忆沉淀、对话注入、异步抽取
-│   ├── forge-system       # 系统管理
-│   ├── forge-workflow     # 工作流（WarmFlow）
-│   ├── forge-job          # 定时任务（SnailJob）
-│   ├── forge-gen          # 代码生成
-│   ├── forge-customer-service  # 智能客服域（C0~C4 文本 + A1~A5 坐席辅助）：见 [模块 README](forge-modules/forge-customer-service/README.md)
+│   ├── forge-rag          # 知识库与 RAG：摄取硬化 / 清洗 / 分块 / 混合检索 / 评测 / 治理 / 图谱 / 外部源 / 图片描述 / MCP：见 [模块 README](forge-modules/forge-rag/README.md)
+│   ├── forge-kg           # 知识图谱：零业务依赖、MySQL 两表存图 + Neo4j SPI：见 [模块 README](forge-modules/forge-kg/README.md)
+│   ├── forge-memory       # 六层长期记忆（L0~L5）：见 [模块 README](forge-modules/forge-memory/README.md)
+│   ├── forge-system       # 系统管理基座（用户/角色/菜单/字典/OSS/通知等）：见 [模块 README](forge-modules/forge-system/README.md)
+│   ├── forge-workflow     # OA 审批工作流（WarmFlow + LiteFlow）：见 [模块 README](forge-modules/forge-workflow/README.md)
+│   ├── forge-job          # 定时任务示例（SnailJob）：见 [模块 README](forge-modules/forge-job/README.md)
+│   ├── forge-gen          # 代码生成（FreeMarker 模板）：见 [模块 README](forge-modules/forge-gen/README.md)
+│   ├── forge-customer-service  # 智能客服域（C0~C4 文本 + A1~A5 坐席辅助 + P0~P3 增强 + 图谱维护）：见 [模块 README](forge-modules/forge-customer-service/README.md)
 │   ├── forge-callcenter        # 语音呼叫中心（V1~V2）：见 [模块 README](forge-modules/forge-callcenter/README.md)
 │   └── forge-callcenter-common # 零业务依赖契约层（V0.5，仅 JDK）：见 [模块 README](forge-modules/forge-callcenter-common/README.md)
 ├── script/sql             # 基座初始化 SQL（mysql/ 与 postgres/ 两组：forge_vue / forge_workflow / forge_job）
-└── sql                    # Agent 平台初始化 SQL（agent_*.sql，含客服域 agent_cs_*.sql 与语音域 agent_cc_*.sql，MySQL 方言）
+└── sql                    # Agent 平台初始化 SQL（78 个 agent_*.sql / forge_kg_core.sql，含客服域 agent_cs_* 与语音域 agent_cc_*，MySQL 方言）
 ```
 
-分层约定：`forge-agent-core` 沉淀被多个业务模块共享的实体与领域服务，`forge-agent` 只做平台编排，两者依赖方向单向；`forge-common` 不感知任何业务。客服域依赖方向严格单向：`forge-callcenter → forge-customer-service → forge-callcenter-common`（公共契约层编译期仅 JDK，出现任何业务模块依赖即视为破坏）。`ResourceAccessGuard`（agent-core）是工具 / 数据源 / 模型三类资源「平台共享 / 空间私有」双模式的唯一可见性入口，列表查询把 `(workspace_id IS NULL OR workspace_id IN (...))` 下推到 SQL，免登录链路以工作流归属 Agent 的空间作为 `callerWorkspaceId`。
+分层约定：`forge-agent-core` 沉淀被多个业务模块共享的实体与领域服务，`forge-agent` 只做平台编排，两者依赖方向单向；`forge-common` 不感知任何业务。领域模块依赖方向：
+
+```
+callcenter → customer-service → callcenter-common(仅 JDK)
+          ↘ kg ← rag ← agent
+memory → kg / rag / agent-core
+customer-service → kg
+```
+
+`forge-kg` 与 `forge-callcenter-common` 都是零业务依赖模块：`kg` 只依赖 common-core / common-mybatis，`callcenter-common` 编译期只有 JDK。出现任何反向业务依赖即视为破坏。`ResourceAccessGuard`（agent-core）是工具 / 数据源 / 模型三类资源「平台共享 / 空间私有」双模式的唯一可见性入口，列表查询把 `(workspace_id IS NULL OR workspace_id IN (...))` 下推到 SQL，免登录链路以工作流归属 Agent 的空间作为 `callerWorkspaceId`。
 
 ### 客服域与呼叫中心要点
 
@@ -81,6 +91,24 @@ backend
 - **意图路由**：`agent_cs_agent_route` 把意图映射到专家 Agent（退款走售后、物流走订单），渠道级优先于空间级、同级按 priority；**会话首条消息判定一次并锁定**（`agent_routed`），目标不存在 / 停用 / 跨空间一律回落渠道默认。
 - **坐席实时流**：`GET /conversations/{cid}/stream?after=` 用 SSE 替代 2 秒轮询，复用 `RunEventBuffer` 游标重放，15 秒心跳，单连接 10 分钟到期由前端带游标重连；连续失败三次才退回轮询。
 
+### 知识库 / RAG（R1~R5 全部交付）
+
+`forge-rag` 现有 125 个主类、6 个控制器，按子包分层：`document`（解析 / 清洗 / 分块 / 抽图 / 描述）、`embedding`、`vector`（Milvus + MySQL 双后端 + 集合分片）、`rerank`、`retrieve`（回执 / 阈值 / 父子偏移）、`eval`（证据 / 指标 / 门禁）、`governance`（可见性 / 回收站）、`graph`（图谱第三路）、`ext`（外部源 SPI + SSRF）、`support`（密钥加密 / 模型解析 / 参数覆盖）、`impl`。
+
+- **R1 检索内核**：检索降级回执 `SearchOutcome`、阈值按执行阶段（RERANK / COSINE / NONE）判定、向量维度按集合分片、跨库 RRF 融合、精排 1500ms 硬超时 + 专用池。
+- **R2 摄取与索引**：解析超时熔断与恶意文件拦截、清洗层（页眉页脚 / NFKC / 正则 / PII / 空白归一）、分块 char|token × 结构感知|定长、索引代次（重建不断检）、向量写失败定时补偿、配置指纹（parse / chunk 双指纹）+ 差异重建 + 解析产物复用。
+- **R3 评测闭环**：证据标注 span 判定、五指标 + Wilson95%、双跑对比与重建门禁（ε 容差三态）、零命中 → 用例 → 质量问题 3 态闭环。
+- **R4 问答可信度**：结构化资料块注入、`AnswerCitationValidator` 引用硬门禁、库级零召回兜底 / 严格拒答、答案层五维 LLM 裁判接 `agent_eval`。
+- **R5 治理与规模化**：`DocVisibilityResolver` 将治理谓词 + ACL 角色求交算成 hidden 集并**检索前下推**（全文 `NOT IN` / Milvus `not in` / MySQL 向量列 `notIn`），缓存键带可见性签名；回收站软删 + 30 天物理清理；图谱第三路（异步抽实体、≤2 跳、只走 RRF）；URL 外部源真抓取 + SSRF 防护 + S3/Confluence SPI 骨架；MCP 3 工具（`knowledge_search` 支持 `filters.documentIds`、`knowledge_list`、`knowledge_chunks`）；库级 `retrieval_overrides`；PDF/docx 抽图 + 视觉模型描述（双开关默认关、每篇 ≤20 张、失败不阻断）。
+- **图片识别模型按工作空间配置**：`agent_kb_vlm_config`（`workspace_id=0` 为平台默认），PLATFORM / CUSTOM 两类来源，API Key 经 `KbSecretCipher`（AES-GCM，`rag.knowledge.secret-key`）加密落库，任何接口只回显掩码；`KbVlmConfigResolver` 优先级 空间行 > 平台默认行 > 全局 `vlm-model`。端点 `GET/PUT /agent/knowledge/vlm-config`、`POST /agent/knowledge/vlm-config/test`。
+
+**端点补充**：`/agent/knowledge/doc`（含 `restore/{ids}`、`governance/{id}`、`review/{id}`、`chunks/{documentId}`）、`/agent/knowledge/ext-source`、`/agent/kb/eval`（含 `fingerprint` / `compare` / `gate`）、`/agent/kb/quality`（含 `case-from-hit`）、`/mcp`（3 工具，已在 `security.excludes` 放行）。
+
+### 长期记忆与知识图谱
+
+- **六层记忆**（`forge-memory`）：L0 `ContextBudgetAllocator` 预算分配 / L1 `RunWorkingMemory` + `WorkingMemoryGuard` 装饰器 / L2 `SessionSummaryService` 水位 CAS 滚动摘要 / L3 `MemoryVectorService` MySQL 向量列语义检索 / L4 `agent_message_archive` 归档 / L5 遗忘（confirm=FORGET 级联记忆含向量 → 图谱 → 归档）、配额与 TTL。端点在 `/agent/memory`（含 `preview` / `search` / `graph/*` / `governance/run` / `user/{userId}/forget`）。
+- **知识图谱**（`forge-kg`，零业务依赖）：`KgScope(scope_type, scope_id, user_id)` 三元组，`user_id=0` 表范围共享级；`KgStore` SPI + `KgService` 门面，MySQL 两表 `kg_node` / `kg_edge` 为默认后端，生产换 Neo4j 只需注册一个 `backend()="neo4j"` 的 Bean。消费方：记忆注入「关联背景」、客服领域维护与检索扩展（`CsKgQueryExpander`）、RAG 图谱第三路（`KbGraphRetriever`）。
+
 ## 关键配置
 
 | 配置 | 默认值 | 说明 |
@@ -93,6 +121,18 @@ backend
 | `agent.customer-service.*` | 见 `CsModuleProperties` | 客服域开关、SSE 通道、访客令牌 TTL、限流、留存天数、PII 脱敏开关、渠道密钥主密钥与回调时间窗 |
 | `agent.callcenter.*` | 见 `CallcenterProperties` | 呼叫中心开关、供应商（AICC_MOCK / AICC）、回调密钥与时间窗、录音存储（local-fs / oss）与留存天数、音频出域开关、D8 规模（坐席 / 并发 / 月分钟预算）、号码与中继实现 |
 | `rag.knowledge.vector-store` | `milvus` | 向量存储实现：`milvus`（生产）/ `mysql`（本地开发，向量存分块表 BLOB + 应用层余弦；dev 配置已设为 mysql） |
+| `rag.knowledge.mcp-enabled` / `mcp-token` | `false` / 空 | MCP 检索端点开关与令牌；`/mcp`、`/mcp/**` 已在 `security.excludes` 放行，令牌空时仅建议内网 |
+| `rag.knowledge.gate.required` | `false` | 重建门禁，开启后重建索引 / 差异重建前按评测指标判决（BLOCKED 拒绝） |
+| `rag.knowledge.citation-validate-enabled` | `true` | 引用校验硬门禁（越界 `[n]` 拒发） |
+| `rag.knowledge.graph-route-enabled` / `graph-max-hops` | `false` / `2` | 图谱第三路开关与最大跳数 |
+| `rag.knowledge.kg-extract-enabled` / `kg-extract-model` | `false` / 空 | 文档换代事件异步抽实体（模型填 `agent_model.model_name`） |
+| `rag.knowledge.vlm-enabled` / `vlm-model` | `false` / 空 | 图片描述全局开关与兜底模型（库级 `vlm_enabled` 需同时开） |
+| `rag.knowledge.secret-key` | `forge-kb-secret-change-me` | **VLM 配置 API Key 的 AES-GCM 派生密钥，生产必须替换**；换密钥后既有密文须重新保存 |
+| `rag.knowledge.trash-cleanup-enabled` / `trash-retention-days` | `true` / `30` | 回收站超期物理清理 |
+| `rag.knowledge.sync-compensation-*` | `true` / `200` / `5` | 向量写失败定时补偿开关 / 批量 / 最大重试 |
+| `memory.vector.*` | `enabled=false`, `backend=mysql` | L3 语义检索；`model` 生产须指向真实嵌入模型（`local-hash` 是伪向量） |
+| `memory.governance.*` | `enabled=false` | L4/L5 归档、配额、TTL；`scan-ms` 必须 > 0，关闭用 `enabled` |
+| `kg.*` | `enabled=false`, `backend=mysql` | 图谱总开关 / 后端 / 扫描上限 / 冲突词表扩展 |
 
 ## 构建与启动
 
@@ -107,27 +147,36 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
+后端共 **442 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+
 ```bash
-# forge-agent 模块：表达式引擎 11 + 图校验器 21 + 资源域可见性守卫 8 = 40 用例
-mvn -Pdev test "-Dtest=ResourceAccessGuardTest,WorkflowExpressionEngineTest,WorkflowGraphValidatorTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" -pl forge-modules/forge-agent -am
-# forge-rag 模块：MCP 检索端点协议一致性 15 用例
-mvn -Pdev test "-Dtest=KnowledgeMcpEndpointTest" "-Dsurefire.failIfNoSpecifiedTests=false" \
-  "-Dmaven.test.skip=false" -pl forge-modules/forge-rag -am
-# 智能客服域：customerservice 19 类 = 74 用例（含 A1~A5、P0~P3 增强）
-mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" \
+# Agent 平台 73：检索链路与引用门禁 25 + 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算/工作记忆 8
+mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
+# 知识库/RAG 181：30 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
+mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
+# 智能客服域 92：22 个测试类（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
+mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
-# 契约层：3 类 = 13 用例
+# 契约层 13：事件常量 8 / 验签 3 / PII 脱敏 2
 mvn -Pdev test "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am
-# 呼叫中心：网关 / 状态机 / 指纹 / 录音存储 / 业务绑定 5 类 = 19 用例
+# 呼叫中心 19：网关验签 5 / 状态机 5 / 指纹 3 / 录音存储 3 / 业务绑定 3
 mvn -Pdev test "-Dtest=AiccGatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" -pl forge-modules/forge-callcenter -am
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-callcenter -am
+# 知识图谱 20：门面 9 + MySQL 存图 11
+mvn -Pdev test "-Dtest=KgServiceTest,MysqlKgStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" \
+  "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-kg -am
+# 长期记忆 44：服务实现 19 / 向量 8 / 摘要范围 3 / 图注入 5 / 治理 9
+mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,MemoryScopeTest,MemoryGraphInjectionTest,MemoryGovernanceServiceTest" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-memory -am
+
+# 前端（类型检查已接入构建门禁）
+cd ../frontend && pnpm typecheck && pnpm test:unit && pnpm build
 ```
 
-三点注意：根 pom 默认 `maven.test.skip=true`（如上覆盖）；surefire 按 `@Tag` 过滤（客服域与呼叫中心的测试类均已标 `@Tag("dev")`，新增测试先加注解再写断言，否则被静默过滤呈现 EXIT=0 假绿）；PowerShell 下含点号的 `-D` 参数需加引号。`forge-agent` 模块的测试依赖为 `spring-boot-starter-test`（test scope），客服契约层与呼叫中心同款。验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，不认 EXIT=0。
+三点注意：surefire 按 `@Tag("dev")` 过滤（**所有测试类均已标注解**，新增测试先加注解再写断言，否则被静默过滤呈现 EXIT=0 假绿）；PowerShell 下含点号的 `-D` 参数需加引号，多个 `-D` 建议用 Python `subprocess.run(argv)` 传参（模板 `temp/run_mvn.py`）；多模块 `-Dtest=X -pl` 需 `-Dsurefire.failIfNoSpecifiedTests=false`。验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，**不认 EXIT=0**——报告目录只有 `*.dumpstream` 就是假绿。
 
 ## 运行保障约定
 
@@ -143,7 +192,9 @@ mvn -Pdev test "-Dtest=AiccGatewayTest,CallStateMachineTest,CallFingerprintsTest
 见根目录 README「快速开始」与「上线前必改清单」。Agent 平台表结构与菜单在 `sql/agent_*.sql`：
 
 - **新库初始化**按根 README 的字母序通配导入即可；**存量库升级只执行新增脚本，不要重跑全量**——字母序不等于依赖序，重跑旧脚本会把增量修改冲掉（典型：重跑 `agent_mcp.sql` 会 drop 重建 `agent_approval` 并带回 `session_id NOT NULL`）；
-- 新增脚本一律使用 information_schema 判断的幂等写法（存储过程模式参照 `sql/agent_g_series.sql`、`sql/agent_resource_scope.sql`）；客服域（`agent_cs_c0~c5.sql`）、坐席辅助（`agent_cs_a2/a3/a5.sql`，A4 无表变更）、P0~P3 增强（`agent_cs_p0/p1/p2/p2b/p3.sql`）、向量本地化（`agent_kb_local_vector.sql`）与语音域（`agent_cc_c0~c1.sql`）全部为幂等脚本，可重复执行；
+- 新增脚本一律使用 information_schema 判断的幂等写法（存储过程模式参照 `sql/agent_g_series.sql`、`sql/agent_resource_scope.sql`）；客服域（`agent_cs_c0~c5.sql`）、坐席辅助（`agent_cs_a2/a3/a5.sql`，A4 无表变更）、P0~P3 增强（`agent_cs_p0/p1/p2/p2b/p3.sql`）、语音域（`agent_cc_c0~c1.sql`）、知识库 R1~R5（`agent_kb_r1_retrieval.sql`、`agent_kb_r2_ingest.sql`、`agent_kb_r2_chunking.sql`、`agent_kb_r2_clean.sql`、`agent_kb_r5_fingerprint.sql`、`agent_kb_r3_eval.sql`、`agent_kb_r3_quality.sql`、`agent_kb_r4_trust.sql`、`agent_kb_r5_acl.sql`、`agent_kb_r5_scale.sql`、`agent_kb_r5_vlm.sql`）与 `agent_kb_vlm_config.sql`、`agent_kb_local_vector.sql` 全部幂等，可重复执行；
+- 记忆与图谱脚本：`agent_p2_memory.sql`、`agent_p3_m1_session.sql`、`agent_p3_m2_memory_vector.sql`、`agent_p3_m4_memory_governance.sql`、`forge_kg_core.sql`、`agent_cs_kg_menu.sql`；
+- `deploy/docker/mysql/init/01-schema.sql` 覆盖**框架基座 + Agent 平台 + 知识库 RAG** 的表结构与全部增量列（新库这几部分无需逐个执行脚本）；**客服域 `agent_cs_*`、语音域 `agent_cc_*`、图谱 `kg_node`/`kg_edge`、记忆归档 `agent_message_archive`/`agent_memory_archive`、评测门禁 `agent_eval_*` / `release_gate_*` / `agent_prompt_*` / `agent_version` 等 49 张业务域表尚未同步进该 schema**，启用对应模块前须单独执行 `sql/` 下的增量脚本。默认关闭的客服 / 语音模块不执行不影响启动；
 - **存量库启用资源域双模式**：单独执行 `sql/agent_resource_scope.sql`（三表加 `workspace_id` 与索引，自带幂等过程，可重复运行），现有资源保持平台共享；新库已由 `deploy/docker/mysql/init/01-schema.sql` 直接带列；
 - 应用启动时 `WorkflowSchemaGuard` 会自检工作流相关表结构，缺失时输出 WARN 与脚本路径指引。
 

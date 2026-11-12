@@ -20,6 +20,7 @@
 - **事件常量变化必须同步契约单测**：`CsContractConstantsTest` 锁定 `TEXT_EVENTS` / `VOICE_EVENTS` / `ALL_EVENTS` 的成员与数量，加常量不更新断言会直接红。
 - **信封字段只增不改**：追加走 record 组件顺序追加（序列化兼容）；payload 结构由各域自行演进，但对外只增字段。
 - **不做业务判断**：这里只放协议与纯函数。需要查库、需要 Spring 的东西一律留在业务模块。
+- **PII 正则双向同步**：`CsPiiMasker` 的四类脱敏正则与 `forge-rag` 的 `KbPiiMasker` 逐字一致，改动必须两边同时改，否则同一份语料在客服链路与知识库清洗链路的打码结果会分叉。
 
 ## 测试
 
@@ -28,9 +29,11 @@
 ```bash
 mvn -Pdev test \
   "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am
 ```
+
+> 根 pom 默认 `maven.test.skip=true`，两个覆盖参数必须同时写；验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。
 
 | 测试 | 覆盖 |
 | --- | --- |

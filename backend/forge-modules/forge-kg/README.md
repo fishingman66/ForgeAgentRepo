@@ -8,11 +8,14 @@
 
 | 业务域 | 范围 | 典型用途 |
 | --- | --- | --- |
-| 长期记忆（forge-memory） | `KgScope.agent(agentId, userId)` | 把对话沉淀的离散事实连起来，注入时补充「关联背景」、标注矛盾说法 |
-| 智能客服（forge-customer-service） | `KgScope.workspace(workspaceId, null)` | 领域知识（产品、故障、话术、意图关系）的人工维护与召回 |
+| 长期记忆（forge-memory） | `KgScope.agent(agentId, userId)` | 把对话沉淀的离散事实连起来，注入时补充「关联背景」、标注矛盾说法；L5 用户遗忘级联 `deleteScope` |
+| 智能客服（forge-customer-service） | `KgScope.workspace(workspaceId, null)`（落库 `userId=0`） | 领域知识（产品、故障、话术、意图关系）的人工维护与召回；`CsKgQueryExpander` 检索词扩展 |
+| 知识库 / RAG（forge-rag） | 分块来源映射 `agent_kb_kg_entity` | R5-3 图谱第三路：文档换代后异步抽实体/关系，检索时种子实体 ≤2 跳扩展，只贡献 RRF 名次分 |
 | 其他域 | `KgScope.of(类型, id, userId)` | 渠道级知识等，接口不限定 |
 
-依赖方向：`memory → kg`、`customer-service → kg`，两个业务域互不依赖；`kg` 不反向依赖任何业务模块。
+依赖方向：`memory → kg`、`customer-service → kg`、`rag → kg`，三个业务域互不依赖；`kg` 不反向依赖任何业务模块（只依赖 `forge-common-core` / `forge-common-mybatis`）。
+
+**20 个单元测试 / 2 类**（`KgServiceTest` 9 + `MysqlKgStoreTest` 11），全部 `@Tag("dev")`。
 
 ## 结构
 
@@ -133,6 +136,16 @@ memory:                      # 记忆侧自用参数（forge-memory）
 ## 已知边界
 
 - 文本→实体匹配是「压平后包含匹配」，刻意不做分词（实体名本身就是抽取出的短词，中文场景零依赖够用）；压平后长度 < 2 的实体不参与匹配，避免单字误命中。
-- 冲突判定是确定性词表（`KgConflictPairs`），不做语义推断。
-- 记忆删除 → 边减权、节点半衰、用户遗忘级联清理属于 M4（`KgStore.deleteScope` 已预留）。
-- 实体类型暂统一 `entity`，类型细分等出现真实检索需求再做。
+- 冲突判定是确定性词表（`KgConflictPairs` + `kg.extra-conflict-pairs`），不做语义推断。
+- **M4 已交付**：记忆删除 → 边减权 / 节点半衰、用户级遗忘（`DELETE /agent/memory/user/{userId}/forget?confirm=FORGET`）级联 `deleteScope` 清图谱，配合归档表与配额淘汰一起完成 L5 治理。
+- R5-3 图谱第三路的**抽取与打分逻辑在 `forge-rag`**（`service/graph/`），本模块只提供 `ingest` / `neighbors` 原料，保持零业务依赖；抽取开关 `rag.knowledge.kg-extract-enabled` 默认关。
+- 实体类型暂统一 `entity`，类型细分等出现真实检索需求再做；Neo4j 后端实现仍待按需接入（SPI 已就绪）。
+
+## 测试
+
+```bash
+mvn -Pdev test "-Dtest=KgServiceTest,MysqlKgStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" \
+  "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-kg -am
+```
+
+覆盖：门面（开关 / 后端选择 / 写入收口 / 召回降级 / 冲突判定 / 共享级读取）9 用例、MySQL 存图（幂等 upsert / 唯一键 / 跨范围删除拒绝 / 权重累加）11 用例。验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。

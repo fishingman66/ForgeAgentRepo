@@ -83,9 +83,11 @@ GET  /agent/customerservice/calls/call-seats       坐席就绪态
 ```bash
 mvn -Pdev test \
   "-Dtest=AiccGatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter -am
 ```
+
+> 根 pom 默认 `maven.test.skip=true`，两个覆盖参数必须同时写；验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。
 
 | 测试 | 覆盖 |
 | --- | --- |

@@ -1,24 +1,24 @@
 # forge-customer-service · 智能客服域
 
-文本客服（C0~C4）与坐席辅助（A1~A5）的完整实现：访客免登录接入、七态工单与 ACD、流式 SSE、CSAT / 质检 / FAQ 数据飞轮、合规擦除，以及基于对话内容与语音转写的坐席话术推荐、意图打标、建议动作与效果度量。
+文本客服（C0~C4）、坐席辅助（A1~A5）、运营增强（P0~P3）与知识图谱领域能力的完整实现：访客免登录接入、七态工单与 ACD、流式 SSE、CSAT / 质检 / FAQ 数据飞轮、合规擦除，以及基于对话内容与语音转写的坐席话术推荐、意图打标、建议动作与效果度量；另有客服域知识图谱维护页与检索词扩展。
 
-模块开关 `agent.customer-service.enabled`（默认 `false`），关闭时全部 Bean 与端点不装配，主应用行为零变化。
+模块开关 `agent.customer-service.enabled`（默认 `false`），关闭时全部 Bean 与端点不装配，主应用行为零变化。**92 个单元测试 / 22 类**。
 
 ## 包结构
 
 ```
 com.forgeagent.customerservice
-├── controller       # 7 个控制器：访客入口 / 渠道回调 / 坐席工作台 / 运营 / 坐席辅助 / 意图 / 健康检查
-├── service          # 16 个服务：工单、访客、渠道守卫、检索、质检、CSAT、指标、模板、坐席辅助（推荐/动作/度量/意图）
+├── controller       # 9 个控制器：访客入口 / 渠道回调 / 坐席工作台 / 运营 / 坐席辅助 / 意图 / 图谱维护 / OpenAI 兼容 / 健康检查
+├── service          # 工单、访客、渠道守卫、检索、质检、CSAT、指标、模板、坐席辅助、知识缺口、badcase、成本、配额、图谱维护与检索扩展
 ├── transport        # SseRealtimeTransport：RunEventBuffer 上的游标重放实现
 ├── channel          # 渠道适配（网页挂件 / 公众号 / 企微 / H5 / OpenAPI）
 ├── compliance       # PII 脱敏策略、多语种兜底、擦除与留存、密钥加解密、审计
-├── domain / mapper  # 18 个实体 + 17 个 Mapper（表前缀 agent_cs_*）
+├── domain / mapper  # 实体 + Mapper（表前缀 agent_cs_*）
 ├── event            # CsVisitorMessageSavedEvent（A1 推荐触发源）、擦除事件监听
 └── config           # CsModuleProperties、条件装配、生产就绪校验
 ```
 
-依赖方向：本模块依赖 `forge-callcenter-common`（事件信封 / 通道接口 / PII / 事件常量），**不可反向依赖 `forge-callcenter`**。跨模块入参一律用基本类型（如 `SeatAssistService.VoiceAssistInput`），避免循环依赖。
+依赖方向：本模块依赖 `forge-callcenter-common`（事件信封 / 通道接口 / PII / 事件常量）与 `forge-kg`（图谱门面），并通过 `forge-agent` 的 `api.customerservice` 契约包单向依赖 Agent 执行域；**不可反向依赖 `forge-callcenter`**。跨模块入参一律用基本类型（如 `SeatAssistService.VoiceAssistInput`），避免循环依赖。
 
 ## 三类入口
 
@@ -80,6 +80,16 @@ com.forgeagent.customerservice
 **为什么路由只在首条消息生效**：客服会话与 `agent_session` 一对一绑定，而 `ChatSendBo.agentId` 仅在 `sessionId` 为空时用于建会话。每轮换 Agent 等于每轮换会话、上下文全断——所以首个消息判定一次后锁定，`agent_routed=1` 之后的轮次直接复用。
 
 **前端实时通道**：`ChatPanel` 优先用 `fetch + ReadableStream` 读 SSE（`EventSource` 带不了 `Authorization` 头，只能把 token 放 URL），连续三次连不上才退回 2 秒轮询。
+
+## 知识图谱领域能力（P3 / M3~M4）
+
+本模块是 `forge-kg` 的业务消费方之一（另两处：`forge-memory` 注入「关联背景」、`forge-rag` 图谱第三路）。图谱本体零业务依赖，客服侧负责空间隔离、维护入口、PII 打码与效果观测。
+
+- **维护端点** `/agent/customerservice/knowledge/graph/*`：`GET /relations`（权重降序 + 冲突标注）、`GET /conflicts`（反义关系两两一组，审核=删错误侧）、`POST /relations`（手工登记三元组，幂等 upsert）、`DELETE /relations/{id}`（跨范围拒绝）、`GET /nodes`（空间实体 TOP）。范围由登录坐席所属空间解析（`CsWorkspaceResolver`），**不接收 workspaceId 参数**，防跨空间读写。前端维护页 `frontend/src/views/customerservice/KnowledgeGraph.vue`（菜单 40012）。
+- **检索扩展**：`CsKgQueryExpander` 把访客口语命中的实体扩展成邻接实体词拼进知识检索 query（只扩检索词，不动 FAQ 匹配），开关 `agent.customer-service.kg-expand-enabled` 默认关、`kg-expand-max-terms` 默认 3；冲突词表可用 `kg.extra-conflict-pairs` 扩展客服语料。
+- **效果指标**：`agent_cs_kg_expand_metric` 按日聚合 + `GET /expand-metrics` 端点 + 前端对比卡（扩展侧 vs 未扩展侧零命中率）。**这是观测口径，不是 A/B 实验**，不要当作因果结论。
+
+> 维护数据落在「登录坐席所属空间」，与 Agent 所属空间不一定一致；清理测试数据要按坐席空间来。
 
 ## 坐席辅助（A1~A5）
 推荐的两条触发链都汇聚到 `SeatAssistService.generate`，差别只在输入来源与前置判定：
@@ -147,6 +157,14 @@ com.forgeagent.customerservice
   GET/POST/DELETE /agent/customerservice/agent-routes           意图→专家 Agent 路由(P3)
   GET    /agent/customerservice/conversations/{cid}/stream?after= 坐席 SSE 实时流(P3)
   POST   /chat-api/{code}/v1/chat/completions                   OpenAI 兼容入口(P3,免登录)
+
+知识图谱(P3/M3~M4)
+  GET    /agent/customerservice/knowledge/graph/relations      领域关系列表(带冲突标注)
+  POST   /agent/customerservice/knowledge/graph/relations      手工登记三元组(幂等)
+  DELETE /agent/customerservice/knowledge/graph/relations/{id} 删除关系(跨范围拒绝)
+  GET    /agent/customerservice/knowledge/graph/conflicts      反义冲突盘点
+  GET    /agent/customerservice/knowledge/graph/nodes          空间实体 TOP
+  GET    /agent/customerservice/expand-metrics                 检索扩展效果日指标(观测口径)
 ```
 
 ## 数据表
@@ -162,8 +180,9 @@ com.forgeagent.customerservice
 | P2 增强 | `agent_cs_cost_daily`（会话日成本）、`agent_cs_dead_letter`（死信）；附件复用平台 `agent_chat_attachment` |
 | P3 增强 | `agent_cs_agent_route`（意图 → 专家 Agent）；会话表加 `agent_routed` |
 | 合规 | `agent_cs_audit_log` |
+| 图谱（M4） | `agent_cs_kg_expand_metric`（检索扩展日指标）；图谱本体 `kg_node` / `kg_edge` 属 `forge-kg`，菜单脚本 `agent_cs_kg_menu.sql` |
 
-SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql` + `agent_cs_a2.sql`（来源与通话追溯）、`agent_cs_a3.sql`（意图表 + 菜单 40010）、`agent_cs_a5.sql`（日指标表 + 回流列 + 菜单 40011）。A4 无表结构变更。
+SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql` + `agent_cs_a2.sql`（来源与通话追溯）、`agent_cs_a3.sql`（意图表 + 菜单 40010）、`agent_cs_a5.sql`（日指标表 + 回流列 + 菜单 40011）、`agent_cs_p0/p1/p2/p2b/p3.sql`（P0~P3 增强）、`agent_cs_kg_menu.sql`（图谱维护页菜单）。A4 无表结构变更。`forge_kg_core.sql` 提供图谱两表。
 
 ## 配置
 
@@ -200,15 +219,19 @@ SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql
 | `quota-enabled` / `quota-daily-token-limit` | `false` / `0` | 配额开关与空间当日 token 上限（0=不限） |
 | `quota-action` | `WARN` | 超额处置：WARN / BLOCK |
 | `cost-per-1k-tokens` | `0` | 参考单价（元/千 token），0 表示不折算金额 |
+| `kg-expand-enabled` | `false` | 图谱检索词扩展开关 |
+| `kg-expand-max-terms` | `3` | 单次扩展的最大邻接实体词数 |
+
+图谱本体配置在 `kg.*`（总开关 / 后端 / 扫描上限 / `extra-conflict-pairs` 冲突词表扩展），见 [forge-kg/README](../forge-kg/README.md)。
 
 ## 测试
 
-19 类 74 用例，全部标 `@Tag("dev")`：
+22 类 **92 用例**，全部标 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test \
-  "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest" \
-  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" \
+  "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
+  "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
 ```
 
@@ -217,7 +240,11 @@ mvn -Pdev test \
 - P1 相关：`CsSemanticCacheServiceTest`（三道闸门与相似度 5）、`CsSlotFillingServiceTest`（槽位抽取 3）、`CsKnowledgeGapServiceTest`（优先级 1）。
 - P2 相关：`CsCostServiceTest`（金额换算与缺价口径 3）。
 - P3 相关：`CsAgentRouteServiceTest`（路由匹配 5）。
-- 新增测试必须加 `@Tag("dev")`：根 pom `maven.test.skip=true` + surefire `<groups>${profiles.active}</groups>`，缺注解会被静默过滤（EXIT=0 但 0 tests）。
+- 图谱相关：`CsKnowledgeGraphServiceTest`（维护与范围隔离 7）、`CsKgQueryExpanderTest`（实体扩展 7）、`CsKgExpandMetricServiceTest`（日指标 4）。
+- 基础与渠道相关：`WechatMpChannelAdapterTest`(3)、`CsLocalePolicyTest`(3)、`CsSecretCipherTest`(3)、`CsModulePropertiesTest`(2)、`CsTicketStatusTest`(3)、`CsChannelGuardTest`(3)、`CsKnowledgeAnswerServiceTest`(2)，共 19。
+
+以上分组合计 **92 用例**（22 类）。
+- 新增测试必须加 `@Tag("dev")`：根 pom `maven.test.skip=true` + surefire `<groups>${profiles.active}</groups>`，缺注解会被静默过滤（EXIT=0 但 0 tests）。还必须同时写 `-DskipTests=false`，只覆盖前者 test-compile 与执行都会被跳过。
 - 验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，不认 EXIT=0。
 
 ## 端到端验证脚本
