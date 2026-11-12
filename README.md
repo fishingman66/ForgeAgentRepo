@@ -42,7 +42,9 @@ docker compose up -d
 
 默认管理员：`admin / admin123`。
 
-> **Docker 新库的表结构边界**：`01-schema.sql` 覆盖框架基座与 Agent 平台 / 知识库 RAG 的表结构；客服域（`agent_cs_*`）、语音域（`agent_cc_*`）、图谱（`kg_node` / `kg_edge`）、记忆归档与评测门禁等模块的建表脚本仍在 `backend/sql/` 下，启用对应模块前需按 [backend/README.md「数据初始化」](backend/README.md) 的清单执行（脚本幂等）。默认关闭的客服 / 语音模块不执行不影响启动。
+> **Docker 新库表结构与种子已补齐**（2026-11-12）：`01-schema.sql` 现含全部 **128 张表**，与 `forge-vue` 开发库的表/列完全对齐（含客服 `agent_cs_*`、语音 `agent_cc_*`、图谱 `kg_node`/`kg_edge`、记忆归档与评测门禁）。全部 `CREATE TABLE IF NOT EXISTS`、增量列直接写进建表定义，可重复执行；中文注释乱码已修复。`02-seed.sql` 含 **261 条菜单**（含智能客服 12 个页面入口与知识库「检索日志」，否则表有了但导航里没入口），`03-demo.sql` 的演示账号/空间/Agent 可重复执行。`backend/sql/` 下 78 个幂等增量脚本仍用于**存量库升级**，新库（含 Docker）无需逐个执行。
+>
+> **演示环境每日重置**：`.env` 里 `DEMO_ENABLED=true` 会开启后端写保护并在登录页展示「演示账号一键登录」；配合 `bash demo/reset-demo.sh`（建议 crontab `0 4 * * *`）清空 demo 账号与演示空间产生的运行时数据、恢复演示种子、清空 Redis。清理范围与保留项见脚本头部注释。
 
 ### 方式二：本地开发
 
