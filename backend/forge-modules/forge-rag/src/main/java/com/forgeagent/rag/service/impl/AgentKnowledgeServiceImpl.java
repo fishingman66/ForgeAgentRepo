@@ -95,6 +95,7 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
     private final AgentWorkspaceMemberMapper workspaceMemberMapper;
     private final EmbeddingFactory embeddingFactory;
     private final VectorStore vectorStore;
+    private final com.forgeagent.rag.service.governance.DocVisibilityResolver visibilityResolver;
     private final LlmRerankService llmRerankService;
     private final ApiRerankService apiRerankService;
     private final KnowledgeProperties knowledgeProperties;
@@ -540,13 +541,24 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             ? 50 : Math.max(knowledgeProperties.getRerankCandidateLimit(), topK);
         int recall = rerank ? Math.min(Math.max(topK * 4, 20), rerankLimit) : topK;
 
+        // R5-1/R5-2 可见性范围:治理谓词(回收站/发布态/生效窗口) + ACL 角色求交,
+        // 一次算出 hidden 集,后面两条召回路线都下推(绝不召回后过滤,否则侵蚀 topK)
+        com.forgeagent.rag.service.governance.DocVisibilityResolver.DocScope scope =
+            visibilityResolver.resolve(kb.getId());
+        List<Long> hiddenDocIds = scope.hiddenDocIds();
+        String scopeSignature = hiddenDocIds.isEmpty() ? "all"
+            : org.springframework.util.DigestUtils.md5DigestAsHex(
+                hiddenDocIds.stream().sorted().map(String::valueOf)
+                    .collect(Collectors.joining(",")).getBytes(StandardCharsets.UTF_8));
+
         // 对话链路结果缓存(默认 60s):高频重复提问省一次 embedding+rerank 调用;
-        // 命中测试 cacheable=false 不走缓存,保证分块编辑/禁用后实时可见
+        // 命中测试 cacheable=false 不走缓存,保证分块编辑/禁用后实时可见;
+        // 缓存键必须带可见性签名,否则不同角色的结果会互相串号(ACL 泄露)
         String cacheKey = null;
         if (Boolean.TRUE.equals(bo.getCacheable()) && Boolean.TRUE.equals(knowledgeProperties.getRagCacheEnabled())) {
             cacheKey = "agent:kb:search:" + kb.getId() + ":" + org.springframework.util.DigestUtils.md5DigestAsHex(
                 (bo.getQuery() + '|' + topK + '|' + mode + '|' + rerank + '|' + kb.getScoreThreshold()
-                    + '|' + kb.getRerankThreshold())
+                    + '|' + kb.getRerankThreshold() + '|' + scopeSignature)
                     .getBytes(StandardCharsets.UTF_8));
             try {
                 List<KnowledgeSearchHitVo> cached = RedisUtils.getCacheObject(cacheKey);
@@ -566,24 +578,38 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         // 向量库不可用时降级为关键词召回,不阻断检索
         List<VectorStore.VectorHit> vectorHits = List.of();
         if ("vector".equals(mode) || "hybrid".equals(mode)) {
-            try {
-                EmbeddingService embedding = embeddingFactory.forKnowledge(kb);
-                float[] queryVector = embedding.embed(List.of(bo.getQuery())).get(0);
-                vectorHits = vectorStore.search(kb.getId(), queryVector, Math.min(recall * 2, 100));
-            } catch (Exception e) {
-                degraded.add(DegradedReason.VECTOR_ROUTE_UNAVAILABLE);
-                log.warn("[知识库] 向量召回失败,降级为关键词召回: {}", e.getMessage());
+            if (scope.vectorFilterOverflow()) {
+                // hidden 与允许列表都超限:宁可少一路召回,也不做后置过滤(会击穿 ACL)
+                degraded.add(DegradedReason.DOC_SCOPE_FILTER_OVERFLOW);
+                log.warn("[知识库] {} 不可见文档过多,本次跳过向量路(hidden={})",
+                    kb.getId(), hiddenDocIds.size());
                 if ("vector".equals(mode)) {
                     mode = "keyword";
+                }
+            } else {
+                VectorStore.DocFilter filter = hiddenDocIds.isEmpty() ? null
+                    : scope.visibleDocIds() != null
+                    ? new VectorStore.DocFilter(scope.visibleDocIds(), true)
+                    : new VectorStore.DocFilter(hiddenDocIds, false);
+                try {
+                    EmbeddingService embedding = embeddingFactory.forKnowledge(kb);
+                    float[] queryVector = embedding.embed(List.of(bo.getQuery())).get(0);
+                    vectorHits = vectorStore.search(kb.getId(), queryVector, Math.min(recall * 2, 100), filter);
+                } catch (Exception e) {
+                    degraded.add(DegradedReason.VECTOR_ROUTE_UNAVAILABLE);
+                    log.warn("[知识库] 向量召回失败,降级为关键词召回: {}", e.getMessage());
+                    if ("vector".equals(mode)) {
+                        mode = "keyword";
+                    }
                 }
             }
         }
 
-        // 关键词召回(全文索引精确匹配,SQL 层已过滤禁用分块)
+        // 关键词召回(全文索引精确匹配,SQL 层已过滤禁用分块/不可见文档)
         List<Map<String, Object>> keywordHits = List.of();
         if ("keyword".equals(mode) || "hybrid".equals(mode)) {
             try {
-                keywordHits = chunkMapper.searchByKeyword(kb.getId(), bo.getQuery(), recall);
+                keywordHits = chunkMapper.searchByKeyword(kb.getId(), bo.getQuery(), recall, hiddenDocIds);
             } catch (Exception e) {
                 degraded.add(DegradedReason.KEYWORD_ROUTE_FAILED);
                 log.warn("[知识库] 关键词召回失败,本次仅用向量路: {}", e.getMessage());
@@ -608,9 +634,16 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
         }
         final Map<Long, AgentKbChunk> chunkMap = loaded.chunks();
         final Map<Long, AgentKnowledgeDocument> docMap = loaded.docs();
-        vectorHits = vectorHits.stream().filter(h -> chunkMap.containsKey(h.id())).toList();
-        keywordHits = keywordHits.stream()
-            .filter(h -> chunkMap.containsKey(((Number) h.get("id")).longValue())).toList();
+        // 纵深防御:即使某条召回路线漏了过滤(或读到了缓存),这里再按 hidden 集裁一次
+        final Set<Long> hiddenSet = new HashSet<>(hiddenDocIds);
+        vectorHits = vectorHits.stream().filter(h -> {
+            AgentKbChunk c = chunkMap.get(h.id());
+            return c != null && !hiddenSet.contains(c.getDocumentId());
+        }).toList();
+        keywordHits = keywordHits.stream().filter(h -> {
+            AgentKbChunk c = chunkMap.get(((Number) h.get("id")).longValue());
+            return c != null && !hiddenSet.contains(c.getDocumentId());
+        }).toList();
         if (chunkMap.isEmpty()) {
             return new SearchOutcome(List.of(), degraded, null, vectorHitCount, keywordHitCount,
                 System.currentTimeMillis() - startedAt);

@@ -116,6 +116,11 @@ public class MysqlVectorStore implements VectorStore {
 
     @Override
     public List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK) {
+        return search(knowledgeId, queryVector, topK, null);
+    }
+
+    @Override
+    public List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK, DocFilter filter) {
         if (knowledgeId == null || queryVector == null || queryVector.length == 0 || topK <= 0) {
             return List.of();
         }
@@ -126,6 +131,11 @@ public class MysqlVectorStore implements VectorStore {
             // 父块只提供上下文,不参与召回
             .and(w -> w.isNull(AgentKbChunk::getChunkRole).or().ne(AgentKbChunk::getChunkRole, "p"))
             .isNotNull(AgentKbChunk::getEmbedding)
+            // R5-1/R5-2:文档可见性下推到 SQL,不做召回后过滤
+            .in(filter != null && filter.include() && filter.ids() != null && !filter.ids().isEmpty(),
+                AgentKbChunk::getDocumentId, filter == null || filter.ids() == null ? List.of() : filter.ids())
+            .notIn(filter != null && !filter.include() && filter.ids() != null && !filter.ids().isEmpty(),
+                AgentKbChunk::getDocumentId, filter == null || filter.ids() == null ? List.of() : filter.ids())
             .select(AgentKbChunk::getId, AgentKbChunk::getDocumentId, AgentKbChunk::getEmbedding,
                 AgentKbChunk::getEmbeddingDim, AgentKbChunk::getGeneration)
             .last("limit " + SCAN_LIMIT));

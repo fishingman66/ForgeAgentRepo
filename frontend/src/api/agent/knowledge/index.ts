@@ -1,4 +1,4 @@
-import type { KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentQuery, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchForm, KnowledgeSearchHitVO, KnowledgeZeroHitQuery, KnowledgeZeroHitVO, KbEvalCaseVO, KbEvalRunVO, KbQualityIssueVO, KbRebuildProgressVO } from '@/api/agent/knowledge/types';
+import type { KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentQuery, KnowledgeDocumentVO, DocGovernanceForm, KnowledgeChunkVO, KnowledgeSearchForm, KnowledgeSearchHitVO, KnowledgeZeroHitQuery, KnowledgeZeroHitVO, KbEvalCaseVO, KbEvalRunVO, KbQualityIssueVO, KbRebuildProgressVO } from '@/api/agent/knowledge/types';
 import type { PageResult } from '@/api/types';
 import type { AxiosPromise } from '@/utils/api-types';
 import request from '@/utils/request';
@@ -94,6 +94,32 @@ export const listKnowledgeDocument = (query: KnowledgeDocumentQuery): AxiosPromi
     url: '/agent/knowledge/doc/list',
     method: 'get',
     params: query
+  });
+};
+
+/** 从回收站恢复文档(R5-2) */
+export const restoreKnowledgeDocument = (ids: string | number | Array<string | number>) => {
+  return request({
+    url: '/agent/knowledge/doc/restore/' + ids,
+    method: 'put'
+  });
+};
+
+/** 文档治理设置(R5-1 可见性/授权 + R5-2 发布态/时间窗) */
+export const updateDocGovernance = (id: string | number, data: DocGovernanceForm) => {
+  return request({
+    url: '/agent/knowledge/doc/governance/' + id,
+    method: 'put',
+    data
+  });
+};
+
+/** 审核待审文档(R5-2) */
+export const reviewKnowledgeDocument = (id: string | number, approve: boolean, reason?: string) => {
+  return request({
+    url: '/agent/knowledge/doc/review/' + id,
+    method: 'put',
+    params: { approve, reason }
   });
 };
 

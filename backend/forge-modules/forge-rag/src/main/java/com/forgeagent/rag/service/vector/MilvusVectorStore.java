@@ -159,6 +159,11 @@ public class MilvusVectorStore implements VectorStore {
 
     @Override
     public List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK) {
+        return search(knowledgeId, queryVector, topK, null);
+    }
+
+    @Override
+    public List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK, DocFilter filter) {
         int dim = queryVector == null ? 0 : queryVector.length;
         if (knowledgeId == null || dim <= 0 || topK <= 0) {
             return List.of();
@@ -172,7 +177,13 @@ public class MilvusVectorStore implements VectorStore {
         for (float v : queryVector) {
             vec.add(v);
         }
-        req.put("filter", "knowledge_id == " + knowledgeId);
+        StringBuilder filterExpr = new StringBuilder("knowledge_id == ").append(knowledgeId);
+        if (filter != null && filter.ids() != null && !filter.ids().isEmpty()) {
+            filterExpr.append(filter.include() ? " and document_id in [" : " and document_id not in [")
+                .append(filter.ids().stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .append(']');
+        }
+        req.put("filter", filterExpr.toString());
         req.put("limit", topK);
         ArrayNode outputFields = req.putArray("outputFields");
         outputFields.add("id").add("document_id");

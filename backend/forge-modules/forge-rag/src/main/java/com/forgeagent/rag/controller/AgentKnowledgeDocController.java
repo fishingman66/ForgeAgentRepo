@@ -40,12 +40,15 @@ public class AgentKnowledgeDocController extends BaseController {
 
     /**
      * 分页查询知识库文档
+     *
+     * @param trashed true=只看回收站(R5-2)
      */
     @SaCheckPermission("agent:knowledgeDoc:list")
     @GetMapping("/list")
     public R<PageResult<AgentKnowledgeDocumentVo>> list(@Validated PageQuery pageQuery,
-                                                        @NotNull(message = "知识库ID不能为空") Long knowledgeId) {
-        return R.ok(documentService.queryPageList(knowledgeId, pageQuery));
+                                                        @NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                                        Boolean trashed) {
+        return R.ok(documentService.queryPageList(knowledgeId, pageQuery, trashed));
     }
 
     /**
@@ -70,13 +73,47 @@ public class AgentKnowledgeDocController extends BaseController {
     }
 
     /**
-     * 删除文档(级联删除分块与向量)
+     * 删除文档(R5-2:移入回收站,保留期内可恢复)
      */
     @SaCheckPermission("agent:knowledgeDoc:remove")
     @Log(title = "知识库文档", businessType = BusinessType.DELETE)
     @DeleteMapping("/{ids}")
     public R<Void> remove(@NotEmpty(message = "主键不能为空") @PathVariable Long[] ids) {
         return toAjax(documentService.deleteByIds(List.of(ids)));
+    }
+
+    /**
+     * 从回收站恢复(R5-2)
+     */
+    @SaCheckPermission("agent:knowledgeDoc:remove")
+    @Log(title = "知识库文档恢复", businessType = BusinessType.UPDATE)
+    @PutMapping("/restore/{ids}")
+    public R<Void> restore(@NotEmpty(message = "主键不能为空") @PathVariable Long[] ids) {
+        return toAjax(documentService.restore(List.of(ids)));
+    }
+
+    /**
+     * 文档治理设置(R5-1 可见性与角色授权 / R5-2 发布态与生效过期窗口)
+     */
+    @SaCheckPermission("agent:knowledgeDoc:edit")
+    @Log(title = "知识库文档治理", businessType = BusinessType.UPDATE)
+    @PutMapping("/governance/{id}")
+    public R<Void> governance(@NotNull(message = "主键不能为空") @PathVariable Long id,
+                              @org.springframework.web.bind.annotation.RequestBody
+                              com.forgeagent.rag.domain.bo.DocGovernanceBo bo) {
+        return toAjax(documentService.updateGovernance(id, bo));
+    }
+
+    /**
+     * 审核待审文档(R5-2):approve=true 发布,false 驳回(附原因)
+     */
+    @SaCheckPermission("agent:knowledgeDoc:edit")
+    @Log(title = "知识库文档审核", businessType = BusinessType.UPDATE)
+    @PutMapping("/review/{id}")
+    public R<Void> review(@NotNull(message = "主键不能为空") @PathVariable Long id,
+                          @NotNull(message = "审核结论不能为空") Boolean approve,
+                          String reason) {
+        return toAjax(documentService.review(id, approve, reason));
     }
 
     /**

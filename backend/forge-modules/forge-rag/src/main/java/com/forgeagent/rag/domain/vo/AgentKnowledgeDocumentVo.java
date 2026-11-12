@@ -64,6 +64,46 @@ public class AgentKnowledgeDocumentVo implements Serializable {
     private Integer configStale;
 
     /**
+     * 处理提示(向量补偿/扫描件/审核驳回原因等)
+     */
+    private String notice;
+
+    /**
+     * 可见性(R5-1):INHERIT / RESTRICTED
+     */
+    private String visibility;
+
+    /**
+     * 发布态(R5-2):DRAFT/PENDING_REVIEW/PUBLISHED/REJECTED
+     */
+    private String publishStatus;
+
+    /**
+     * 生效时间
+     */
+    private Date effectiveAt;
+
+    /**
+     * 过期时间
+     */
+    private Date expiresAt;
+
+    /**
+     * 回收站(1=已入回收站)
+     */
+    private Integer trashed;
+
+    /**
+     * 入回收站时间
+     */
+    private Date trashedAt;
+
+    /**
+     * 命中当前可见性口径(前端灰显用;列表接口不计算,治理接口按需返回)
+     */
+    private Boolean visibleNow;
+
+    /**
      * 创建时间
      */
     private Date createTime;

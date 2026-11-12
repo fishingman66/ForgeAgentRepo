@@ -15,7 +15,7 @@
 | --- | --- |
 | 智能体开发 | 可视化编排（DAG 校验、试运行、版本快照与回滚）、ReAct 内核驱动、结构化输出、多模态图片输入 |
 | 知识库 | 文档摄取硬化（解析超时熔断、zip 炸弹/恶意文件拦截、扫描件识别与明确报错）、清洗层（页眉页脚/页码检测、NFKC、正则替换、PII 脱敏、空白归一，规则按库配置且参与指纹）、分块 token/字符双计价 × 结构感知/定长双策略、父子分块与偏移定位、向量 + 全文关键词混合检索（跨库 RRF 融合）、重排序双路由（Reranker API / LLM 打分，1500ms 硬超时回退）、索引代次化（重建期间旧索引照常可查）、向量写失败定时补偿（不再让文档整单失败）；向量库可切 Milvus（生产）与 MySQL 向量列（本地开发，不装 Milvus 也能跑通全链路） |
-| 知识库治理 | 配置指纹（解析/分块双指纹）：改配置只标脏不自动重建，`reindex-stale` 差异重建 + **解析产物复用**（改分块参数只重切不重解析）；证据标注评测（span 覆盖判定，跨块区间并集防低估，阈值 0.5）+ 五指标（HitRate / Recall / Precision / MRR / NDCG@K + Wilson95% 置信区间仅展示）；双跑对比与重建门禁（ε 容差三态判决 PASSED / BLOCKED / LOG_ONLY，语料指纹不可比自动降级为仅记录）；零命中 → 评测用例 → 质量问题闭环（质量问题 3 态流转、复发自动 reopen、调试页一键生成用例） |
+| 知识库治理 | 配置指纹（解析/分块双指纹）：改配置只标脏不自动重建，`reindex-stale` 差异重建 + **解析产物复用**（改分块参数只重切不重解析）；证据标注评测（span 覆盖判定，跨块区间并集防低估，阈值 0.5）+ 五指标（HitRate / Recall / Precision / MRR / NDCG@K + Wilson95% 置信区间仅展示）；双跑对比与重建门禁（ε 容差三态判决 PASSED / BLOCKED / LOG_ONLY，语料指纹不可比自动降级为仅记录）；零命中 → 评测用例 → 质量问题闭环（质量问题 3 态流转、复发自动 reopen、调试页一键生成用例）；**文档级 ACL**（文档 visibility + 角色授权，检索前下推到全文 SQL 与向量 filter，绝不召回后过滤，缓存按可见性隔离）+ **内容治理**（上传需审核 → 待审/发布/驳回、生效与过期窗口、回收站软删与 30 天清理，治理动作 O(1) 不碰向量库） |
 | 问答可信度 | 对话检索注入结构化资料块（JSON 引用列表 + 合法编号清单写进 prompt，尖括号统一转义防伪分隔符/伪指令）；**引用校验硬门禁**（只认 Markdown 文本节点的 `[n]`，越界拒绝——非流式抛错、流式发 error 终态不发 done，不改写不裁剪）；库级零召回兜底开关（默认允许通用知识回答须声明；严格模式一律拒答，金融/医疗场景）；答案层五维 LLM 裁判接 agent_eval（correctness / faithfulness / completeness / citation_correctness / refusal_correctness，均分 ≥4 通过，只跑有参考答案或期望拒答的用例） |
 | 对话运行 | SSE 流式输出、Token 预算双重拦截、多轮查询改写、回答引用溯源、消息重新生成与反馈 |
 | 协作与分发 | 智能体市场（安装 / 评分 / 审核流）、团队接力（多智能体逐棒流式）、长期记忆沉淀与注入 |
@@ -65,7 +65,7 @@
 - **度量**：推荐条数口径的采纳率（一条推荐多次动作只算一条采纳）、意图覆盖、动作执行与回流量；零采纳回流把「同会话最近 3 条全未采纳」的推荐原文生成待审 FAQ，运营补答案后审核生效（A5）
 - **可见性**：坐席工作台的会话面板消费事件流（`cs_seat_suggest` 出卡片、`call.transcript` 出转写），运营侧新增「意图管理」与「辅助看板」两页
 
-**SQL**：`backend/sql/agent_cs_c0~c5.sql`（文本域）、`agent_cs_a2/a3/a5.sql`（坐席辅助，A4 无表变更）、`agent_cs_p0/p1/p2/p2b/p3.sql`（P0~P3 增强）、`agent_kb_local_vector.sql`（本地向量列）与 `agent_cc_c0~c1.sql`（语音域）均为幂等增量脚本，可重复执行；知识库/RAG 线为 `agent_kb_r1_retrieval.sql`（检索日志与阈值口径）、`agent_kb_r2_chunking.sql`（分块单位/策略）、`agent_kb_r2_clean.sql`（清洗规则）、`agent_kb_r5_fingerprint.sql`（配置指纹与解析产物）、`agent_kb_r3_eval.sql`（证据评测与门禁列）、`agent_kb_r3_quality.sql`（质量问题闭环表）、`agent_kb_r4_trust.sql`（零召回兜底/严格拒答 + 期望拒答用例，幂等）；长期记忆与知识图谱的脚本见下一节「相关 SQL」。详细方案文档见 `docs/`（检索内核、摄取硬化、评测闭环均有对应章节与交付记录）。
+**SQL**：`backend/sql/agent_cs_c0~c5.sql`（文本域）、`agent_cs_a2/a3/a5.sql`（坐席辅助，A4 无表变更）、`agent_cs_p0/p1/p2/p2b/p3.sql`（P0~P3 增强）、`agent_kb_local_vector.sql`（本地向量列）与 `agent_cc_c0~c1.sql`（语音域）均为幂等增量脚本，可重复执行；知识库/RAG 线为 `agent_kb_r1_retrieval.sql`（检索日志与阈值口径）、`agent_kb_r2_chunking.sql`（分块单位/策略）、`agent_kb_r2_clean.sql`（清洗规则）、`agent_kb_r5_fingerprint.sql`（配置指纹与解析产物）、`agent_kb_r3_eval.sql`（证据评测与门禁列）、`agent_kb_r3_quality.sql`（质量问题闭环表）、`agent_kb_r4_trust.sql`（零召回兜底/严格拒答 + 期望拒答用例，幂等）、`agent_kb_r5_acl.sql`（文档 ACL 与内容治理，幂等）；长期记忆与知识图谱的脚本见下一节「相关 SQL」。详细方案文档见 `docs/`（检索内核、摄取硬化、评测闭环均有对应章节与交付记录）。
 
 ## 长期记忆体系与知识图谱
 
@@ -204,8 +204,8 @@ pnpm run dev
 cd backend
 # Agent 平台：检索链路与引用门禁 25（跨库/相关性/历史装配 + 引用校验硬门禁 + 资料块）+ 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算与工作记忆 8 = 73 用例
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
-# 知识库/RAG：整模块 140 用例 —— 解析与清洗 44（解析守卫/HTML/PDF/乱码/清洗器/规则）、分块与父子偏移 23、
-# 阈值与检索回执 16、向量编解码与集合分片 11、MCP 检索端点协议 15、配置指纹 7、证据判定与指标 15、门禁判决 9
+# 知识库/RAG：整模块 145 用例 —— 解析与清洗 44（解析守卫/HTML/PDF/乱码/清洗器/规则）、分块与父子偏移 23、
+# 阈值与检索回执 16、向量编解码与集合分片 11、MCP 检索端点协议 15、配置指纹 7、证据判定与指标 15、门禁判决 9、可见性解析 5
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
 # 智能客服域：customerservice 22 类 = 88 用例（含 A1~A5、P0~P3 增强与图谱维护/检索扩展）
 mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
@@ -232,7 +232,7 @@ pnpm test:unit
 pnpm build
 ```
 
-当前覆盖：后端 **397 用例**（Agent 平台 73 + 知识库/RAG 140 + 智能客服域 88 + 契约层 13 + 呼叫中心 19 + 知识图谱 20 + 长期记忆 44；验签与事件指纹用 Python 端生成的跨语言固定向量锁定）。测试类须标 `@Tag("dev")`（surefire 按 profile 过滤，缺注解的测试会被静默跳过——EXIT=0 不等于跑过，以 surefire 报告为准）。
+当前覆盖：后端 **402 用例**（Agent 平台 73 + 知识库/RAG 145 + 智能客服域 88 + 契约层 13 + 呼叫中心 19 + 知识图谱 20 + 长期记忆 44；验签与事件指纹用 Python 端生成的跨语言固定向量锁定）。测试类须标 `@Tag("dev")`（surefire 按 profile 过滤，缺注解的测试会被静默跳过——EXIT=0 不等于跑过，以 surefire 报告为准）。
 
 ## 路线图
 
@@ -256,9 +256,11 @@ pnpm build
 - [x] 知识库摄取与索引硬化 R2（解析超时与恶意文件拦截、清洗层、分块 token 化与结构感知、索引代次与重建不断检、向量补偿同步、配置指纹与差异重建 + 解析产物复用）
 - [x] 知识库评测闭环 R3（证据标注 span 判定、五指标 + Wilson 置信区间、双跑对比与重建门禁、零命中 → 用例 → 质量问题闭环）
 - [x] 问答可信度 R4（结构化资料块注入、引用校验硬门禁、库级零召回兜底/严格拒答、答案层五维 LLM 裁判接 agent_eval）
+- [x] 知识库治理 R5-1/R5-2（文档级 ACL 检索前下推、上传审核与发布流转、生效过期窗口、回收站软删与超期清理）
 - [ ] 真实 AICC 接入（V0-real：替换 CsVoiceGateway 的 verify / parse / fetchRecording，业务层零改动）
 - [ ] 语音出域登记与合规录音视图（`RECORDING_EGRESS`，`audio-egress-enabled=true` 场景）
 - [ ] 生产知识图谱 Neo4j 后端实现（SPI 已就绪，注册 Bean 即切换）
+- [ ] 知识库 R5-3~R5-6 按需（图谱辅助检索 / URL·S3·Confluence 外部源 / OCR 与多模态 / MCP filters）
 - [ ] 向量库可插拔（Milvus 之外支持 pgvector / Qdrant）
 - [ ] Agent 平台初始化 SQL 的 PostgreSQL 方言支持
 - [ ] MCP 服务器补空间归属（当前仍为平台级资源）

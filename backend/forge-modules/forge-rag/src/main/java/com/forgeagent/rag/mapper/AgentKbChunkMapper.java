@@ -17,15 +17,20 @@ public interface AgentKbChunkMapper extends BaseMapperPlus<AgentKbChunk, AgentKb
     /**
      * 全文关键词检索(MySQL FULLTEXT ngram)
      *
-     * <p>join 文档表两道过滤:已删除文档不参与;只认文档当前生效代次的分块
-     * (重建期间新代先写库、指针后切,这里必须排除新代,否则会召回半成品内容)。</p>
+     * <p>join 文档表三道过滤:已删除 / 回收站 / 未发布或不在生效窗口内的文档不参与;
+     * 只认文档当前生效代次的分块(重建期间新代先写库、指针后切,这里必须排除新代)。
+     * hiddenDocIds 非空时追加 not-in(ACL 与治理的 hidden 集由 {@code DocVisibilityResolver} 计算)。</p>
      *
      * @param knowledgeId 知识库ID
      * @param query       查询文本
      * @param topK        返回条数
+     * @param hiddenDocIds 不可见文档ID(可空)
      * @return 命中列表(key=id/document_id/chunk_index/content/score)
      */
-    @Select("""
+    // 注意:MyBatis 只识别"字符串字面量以 <script> 开头"的注解 SQL(不 trim),
+    // 用文本块直接写会因前置换行退化成裸 SQL,<if>/<foreach> 原样进 SQL 导致整条报错
+    @Select("<script>"
+        + """
         SELECT c.id, c.document_id, c.chunk_index, c.content,
                MATCH(c.content) AGAINST(#{query} IN NATURAL LANGUAGE MODE) AS score
         FROM agent_kb_chunk c
@@ -34,13 +39,23 @@ public interface AgentKbChunkMapper extends BaseMapperPlus<AgentKbChunk, AgentKb
           AND c.enabled = 1
           AND c.chunk_role = 'c'
           AND c.generation = d.active_generation
+          AND d.trashed = 0
+          AND d.publish_status = 'PUBLISHED'
+          AND (d.effective_at IS NULL OR d.effective_at &lt;= NOW())
+          AND (d.expires_at IS NULL OR d.expires_at &gt; NOW())
+          <if test="hiddenDocIds != null and hiddenDocIds.size() > 0">
+          AND c.document_id NOT IN
+          <foreach collection='hiddenDocIds' item='did' open='(' separator=',' close=')'>#{did}</foreach>
+          </if>
           AND MATCH(c.content) AGAINST(#{query} IN NATURAL LANGUAGE MODE)
         ORDER BY score DESC, c.id ASC
         LIMIT #{topK}
+        </script>
         """)
     List<Map<String, Object>> searchByKeyword(@Param("knowledgeId") Long knowledgeId,
                                                @Param("query") String query,
-                                               @Param("topK") int topK);
+                                               @Param("topK") int topK,
+                                               @Param("hiddenDocIds") List<Long> hiddenDocIds);
 
     /**
      * 批量累计分块命中次数

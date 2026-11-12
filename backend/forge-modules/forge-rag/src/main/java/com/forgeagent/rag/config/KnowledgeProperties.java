@@ -128,6 +128,13 @@ public class KnowledgeProperties {
     private Boolean citationValidateEnabled = true;
 
     /**
+     * R5-2 回收站清理开关与保留天数:入回收站超过保留期的文档由定时任务物理删除
+     */
+    private Boolean trashCleanupEnabled = true;
+
+    private Integer trashRetentionDays = 30;
+
+    /**
      * 精排调用硬超时(毫秒)。精排是增强项,模型抖动不该把整轮检索拖到几十秒;超时回退 RRF 粗排
      */
     private Integer rerankTimeoutMs = 1500;

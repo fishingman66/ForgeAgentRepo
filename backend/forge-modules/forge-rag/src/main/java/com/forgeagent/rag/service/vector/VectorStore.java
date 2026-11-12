@@ -52,14 +52,26 @@ public interface VectorStore {
     void deleteByChunkIds(List<Long> chunkIds);
 
     /**
-     * 向量相似度检索
+     * 向量相似度检索(不过滤)
+     */
+    List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK);
+
+    /**
+     * 向量相似度检索(带文档可见性过滤,过滤在向量库侧下推,不做召回后过滤)
      *
      * @param knowledgeId 知识库ID
      * @param queryVector 查询向量
      * @param topK        返回条数
+     * @param filter      文档过滤;null 表示不过滤
      * @return 命中列表(按相关度降序)
      */
-    List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK);
+    List<VectorHit> search(Long knowledgeId, float[] queryVector, int topK, DocFilter filter);
+
+    /**
+     * 文档过滤条件:ids 为隐藏集(include=false → not in)或允许集(include=true → in)
+     */
+    record DocFilter(List<Long> ids, boolean include) {
+    }
 
     /**
      * 检索命中条目

@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）+ R4 问答可信度已交付（R4-1~R4-4）,R5 待启动** · 2026-11-12 · 适用版本 6.1.x
+> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）+ R4 问答可信度已交付（R4-1~R4-4）+ R5-1/R5-2 已交付（R5-3~R5-6 按需待启动）** · 2026-11-12 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -787,6 +787,24 @@ agent_kb_query_log（R1-6）
 
 设计要点：**所有治理动作只改数据库行 + 失效缓存，不碰向量库**（代价 O(1)，与语料规模无关）。检索可见性由一条 SQL 统一表达：`status=1 and trashed=0 and publish_status='PUBLISHED' and 时间窗内`，ACL 在其上再裁一次。
 
+### R5-1/R5-2 交付记录（2026-11-12）
+
+**实现落点**：`DocVisibilityResolver`（`service/governance`）把「治理谓词 + ACL 角色求交」统一算成一个 **hidden 文档集**：
+- 治理谓词：`trashed=0 AND publish_status='PUBLISHED' AND (effective_at IS NULL OR <=now) AND (expires_at IS NULL OR >now)`
+- ACL：`visibility='RESTRICTED'` 的文档要求登录用户 roleIds（`sys_user_role` 只读跨域查询，rag 不反向依赖 forge-system）与其 ACL 行有交集；**未登录默认拒绝**
+- 下推方式：MySQL 全文 SQL `document_id NOT IN (...)` + 同谓词 JOIN（hidden 为空时为零开销）；Milvus `document_id not in [...]`；hidden > 500 改允许列表 `in [...]`，允许列表 > 2000 时**跳过向量路并记降级** `DOC_SCOPE_FILTER_OVERFLOW`（宁可少一路，也不做后置过滤击穿 ACL）
+- 纵深防御：`loadChunksAndDocs` 之后按 hidden 再裁一次；**检索缓存键加入可见性签名**（不同角色的缓存不串号）
+- 治理动作：上传按库级 `review_required` 落 `PENDING_REVIEW`；`PUT /doc/review/{id}` 审核；`PUT /doc/governance/{id}` 设可见性/授权角色/发布态/时间窗（ACL 行全量覆盖）；删除改为**入回收站**（只改行），`PUT /doc/restore/{ids}` 恢复，`DocTrashCleanupService` 按保留期物理清理（分块+向量+文件+行）
+- 前端：文档列表状态标签（待审/已驳回/草稿/授权可见/回收站）、审核通过/驳回、治理弹窗（可见性+角色多选+发布态+时间窗）、回收站切换与恢复；知识库表单加「上传需审核」
+
+**决策记录**：
+1. 文档级删除从"物理删除"改为"回收站软删"——物理清理集中到定时任务，治理路径不再触碰向量库（与方案 §R5-2 一致）；上传去重与文档计数都排除回收站文档。
+2. ACL 粒度按已确认口径用**平台角色 roleId**；不缓存授权结果（一次过期授权等于泄露）。
+3. `agent_eval_case` 类治理表不在 Docker 01-schema，Docker 侧只同步 `agent_knowledge` / `agent_knowledge_document` / `agent_kb_doc_acl`。
+4. **顺手修掉一个存量 bug**：`AgentKbChunkMapper#searchByKeyword` 的注解 SQL 以换行开头写 `<script>`，MyBatis 只认"字符串以 `<script>` 开头"（不 trim），导致整条 SQL 退化成裸 SQL、关键词路长期静默降级为仅向量路。修复后关键词路真正生效，基线未变（RRF 下向量路已覆盖）。
+
+**验证**：单测 `DocVisibilityResolverTest`（治理谓词四态、ACL 求交正反、未登录默认拒绝、超限切换允许列表）；forge-rag 145/145；e2e `temp/r5_verify.py` 28/28（审核门正反、ACL 无授权/授权、未来生效、回收站不可见/恢复、列表分流、无 ERROR）；基线 93.33% / 0.8667 / 0.8841 **不降**。**R5-3~R5-6（图谱辅助检索/外部源/OCR/MCP filters）仍按需**，等真实需求再开。
+
 ### R5-3 图谱辅助检索（优先级高于 OCR）
 
 `forge-kg` 已有 `kg_node` / `kg_edge` / `KgScope(agent|workspace)`，客服已用 `CsKgQueryExpander`。复用路径：
@@ -825,7 +843,8 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `backend/sql/agent_kb_r5_fingerprint.sql` | **已交付**：`agent_knowledge` + `parse_fingerprint`/`chunk_fingerprint`;`agent_knowledge_document` + `config_stale`/`parse_fingerprint`/`parsed_text mediumtext` |
 | `backend/sql/agent_kb_r3_eval.sql` | **已交付**：`agent_kb_eval_case` + `evidences`/`status`/`source`/`source_id`/`dataset_revision`/`update_time`；`agent_kb_eval_run` + 五指标列/`metrics_json`/`config_snapshot`/`corpus_fingerprint`/`dataset_revision`/用例计数/门禁列/`case_results_json`；质量问题表另落 `agent_kb_r3_quality.sql` |
 | `backend/sql/agent_kb_r4_trust.sql` | **已交付**：`agent_knowledge` + `fallback_answer_enabled`（库级零召回兜底/严格拒答）；`agent_eval_case` + `expected_refusal`（期望拒答用例）。幂等（information_schema + PREPARE，重跑验证过） |
-| `backend/sql/agent_kb_r5_acl.sql` | `agent_kb_doc_acl`；文档表 + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed` |
+| `backend/sql/agent_kb_r5_acl.sql` | **已交付**：`agent_knowledge_document` + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed`/`trashed_at` + `idx_kb_doc_visible`；`agent_knowledge` + `review_required`；新表 `agent_kb_doc_acl`。幂等（information_schema + PREPARE，重跑验证过） |
+| `backend/sql/agent_kb_r5_graph.sql` | （按需）图谱辅助检索若启用，仅加指标表；图数据复用 `forge-kg` 现有两表 |
 
 > 脚本风格：**幂等**用 `create table if not exists` + `information_schema` 判断 + `PREPARE/EXECUTE`（MySQL 无 `ADD COLUMN IF NOT EXISTS`，直接 `ALTER` 重复执行会整脚本中断）+ 菜单权限 `insert ... where not exists`。Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 同步。
 
@@ -846,6 +865,7 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `gate.min-cases` / `gate.epsilon-pp` / `gate.stale-ratio` | 30 / 2.0 / 0.15 | R3 |
 | `citation.validate-enabled` | true（已交付） | R4 |
 | `fallback-answer-enabled` | true（已交付，落 kb 级列） | R4 |
+| `trash.cleanup-enabled` / `trash.retention-days` | true / 30（已交付） | R5 |
 | `graph.route-enabled` | false（dev true） | R5 |
 
 ### 8.3 前端改动点（`frontend/src/views/agent/knowledge/index.vue` + 拆子组件）
@@ -955,4 +975,4 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | R2 剩余 | — | 无(R2 全部完成;OCR/多模态解析归 R5) | — | 完成 |
 | R3 评测闭环 | **已交付**（2026-11-11） | span 证据 + 五指标 + 双跑门禁 + 查询日志闭环 + 质量议题（单轮/多轮分组无字段支撑未做；Wilson CI 已落） | 手工验算 + 基线对比（不降）+ e2e 34 项 | 已交付 |
 | R4 问答可信 | 待定 | 结构化资料块 + 引用校验 + 拒答策略 + 答案层评测 | 三类对抗用例 | 未启动 |
-| R5 治理与规模化 | 待定 | 文档 ACL + 审核时效回收站 + 图谱辅助检索 + 外部源 + OCR/多模态 | 按子项单独出验证口径 | 未启动 |
+| R5 治理与规模化 | **R5-1/R5-2 已交付**（2026-11-12）；R5-3~R5-6 按需 | 文档 ACL + 审核时效回收站（已交付）+ 图谱辅助检索 + 外部源 + OCR/多模态（按需） | ACL 正反/时间窗/回收站 e2e 28 项 + 基线不降 | 部分交付 |

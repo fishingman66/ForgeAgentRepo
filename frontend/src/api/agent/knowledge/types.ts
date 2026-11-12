@@ -15,6 +15,8 @@ export interface KnowledgeVO {
   rerankThreshold?: number | string | null;
   /** 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答 */
   fallbackAnswerEnabled?: number;
+  /** 上传后需审核(R5-2) */
+  reviewRequired?: number;
   /** 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */
@@ -54,6 +56,8 @@ export interface KnowledgeForm {
   rerankThreshold?: number | null;
   /** 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答 */
   fallbackAnswerEnabled?: number;
+  /** 上传后需审核(R5-2):1=新文档落待审 */
+  reviewRequired?: number;
   /** 父子分块开关(1=先切父块再切子块) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */
@@ -93,6 +97,20 @@ export interface KnowledgeDocumentVO {
   chunkCount: number;
   /** 配置过期(1=知识库分块/清洗口径已变,待差异重建) */
   configStale?: number;
+  /** 处理提示(向量补偿/扫描件/审核驳回原因) */
+  notice?: string;
+  /** 可见性(R5-1):INHERIT / RESTRICTED */
+  visibility?: string;
+  /** 发布态(R5-2):DRAFT/PENDING_REVIEW/PUBLISHED/REJECTED */
+  publishStatus?: string;
+  /** 生效时间 */
+  effectiveAt?: string;
+  /** 过期时间 */
+  expiresAt?: string;
+  /** 回收站(1=已入回收站) */
+  trashed?: number;
+  /** 入回收站时间 */
+  trashedAt?: string;
   createTime?: string;
   updateTime?: string;
 }
@@ -100,6 +118,18 @@ export interface KnowledgeDocumentVO {
 /** 知识库文档查询参数 */
 export interface KnowledgeDocumentQuery extends PageQuery {
   knowledgeId: number | string;
+  /** true=只看回收站(R5-2) */
+  trashed?: boolean;
+}
+
+/** 文档治理设置(R5-1/R5-2) */
+export interface DocGovernanceForm {
+  visibility?: string;
+  roleIds?: Array<number | string>;
+  publishStatus?: string;
+  effectiveAt?: string | null;
+  expiresAt?: string | null;
+  clearTimeWindow?: boolean;
 }
 
 /** 知识库分块视图对象 */

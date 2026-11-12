@@ -85,6 +85,11 @@ private java.math.BigDecimal rerankThreshold;
     private Integer fallbackAnswerEnabled;
 
     /**
+     * 上传后需审核(R5-2):1=新文档落待审
+     */
+    private Integer reviewRequired;
+
+    /**
      * 分块大小(字符数)
      */
     @Min(value = 100, message = "分块大小不能小于 100", groups = {AddGroup.class, EditGroup.class})

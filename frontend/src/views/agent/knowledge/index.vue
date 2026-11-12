@@ -118,6 +118,10 @@
           <el-switch v-model="form.fallbackAnswerEnabled" :active-value="1" :inactive-value="0" />
           <div class="form-tip">开启:检索零命中时允许模型基于通用知识回答,但须声明不来自知识库;关闭:严格模式,零命中一律拒答(金融/医疗场景)</div>
         </el-form-item>
+        <el-form-item label="上传需审核" prop="reviewRequired">
+          <el-switch v-model="form.reviewRequired" :active-value="1" :inactive-value="0" />
+          <div class="form-tip">开启:新上传文档先落「待审核」,审核通过后才参与检索;存量文档不受影响</div>
+        </el-form-item>
         <el-form-item label="分块单位" prop="chunkUnit">
           <el-select v-model="form.chunkUnit" style="width: 180px">
             <el-option label="按字符(存量口径)" value="char" />
@@ -181,6 +185,7 @@
           <el-button v-hasPermi="['agent:knowledgeDoc:upload']" type="primary" icon="Upload" :loading="docDialog.uploading">上传文档</el-button>
         </el-upload>
         <el-button icon="Refresh" @click="loadDocs">刷新</el-button>
+        <el-switch v-model="docDialog.showTrashed" active-text="回收站" @change="loadDocs" style="margin-left: 8px" />
       </div>
       <el-table v-loading="docDialog.loading" border :data="docDialog.list" max-height="420">
         <el-table-column label="ID" prop="id" width="70" align="center" />
@@ -189,27 +194,75 @@
         <el-table-column label="大小" width="90" align="center">
           <template #default="scope">{{ formatSize(scope.row.fileSize) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="130" align="center">
+        <el-table-column label="状态" width="180" align="center">
           <template #default="scope">
             <el-tag :type="scope.row.status === '1' ? 'success' : scope.row.status === '2' ? 'danger' : 'warning'">
               {{ scope.row.status === '1' ? '可用' : scope.row.status === '2' ? '失败' : '处理中' }}
             </el-tag>
             <el-tag v-if="(scope.row as KnowledgeDocumentVO).configStale === 1" type="warning" style="margin-left: 4px">待重建</el-tag>
+            <el-tag v-if="scope.row.publishStatus === 'PENDING_REVIEW'" type="warning" style="margin-left: 4px">待审核</el-tag>
+            <el-tag v-else-if="scope.row.publishStatus === 'REJECTED'" type="danger" style="margin-left: 4px">已驳回</el-tag>
+            <el-tag v-else-if="scope.row.publishStatus === 'DRAFT'" type="info" style="margin-left: 4px">草稿</el-tag>
+            <el-tag v-if="scope.row.visibility === 'RESTRICTED'" type="danger" style="margin-left: 4px">授权可见</el-tag>
+            <el-tag v-if="scope.row.trashed === 1" type="info" style="margin-left: 4px">回收站</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="分块数" prop="chunkCount" width="80" align="center" />
         <el-table-column label="失败原因" prop="failReason" min-width="140" show-overflow-tooltip />
         <el-table-column label="创建时间" prop="createTime" width="165" align="center" />
-        <el-table-column label="操作" width="200" align="center" fixed="right">
+        <el-table-column label="操作" width="300" align="center" fixed="right">
           <template #default="scope">
             <el-button v-if="scope.row.status === '2'" v-hasPermi="['agent:knowledgeDoc:retry']" size="small" text type="warning" icon="Refresh" @click="handleRetry((scope.row as KnowledgeDocumentVO))">重试</el-button>
+            <template v-if="scope.row.publishStatus === 'PENDING_REVIEW' && scope.row.trashed !== 1">
+              <el-button v-hasPermi="['agent:knowledgeDoc:edit']" size="small" text type="success" @click="handleDocReview((scope.row as KnowledgeDocumentVO), true)">通过</el-button>
+              <el-button v-hasPermi="['agent:knowledgeDoc:edit']" size="small" text type="danger" @click="handleDocReview((scope.row as KnowledgeDocumentVO), false)">驳回</el-button>
+            </template>
+            <el-button v-if="scope.row.trashed !== 1" v-hasPermi="['agent:knowledgeDoc:edit']" size="small" text type="primary" @click="handleDocGovernance((scope.row as KnowledgeDocumentVO))">治理</el-button>
+            <el-button v-if="scope.row.trashed === 1" v-hasPermi="['agent:knowledgeDoc:remove']" size="small" text type="success" icon="Refresh" @click="handleDocRestore((scope.row as KnowledgeDocumentVO))">恢复</el-button>
             <el-button v-hasPermi="['agent:knowledgeDoc:query']" size="small" text type="info" icon="View" @click="handleChunks((scope.row as KnowledgeDocumentVO))">分块</el-button>
             <el-button v-hasPermi="['agent:knowledgeDoc:query']" size="small" text type="primary" icon="Download" @click="handleDownload((scope.row as KnowledgeDocumentVO))">下载</el-button>
-            <el-button v-hasPermi="['agent:knowledgeDoc:remove']" size="small" text type="danger" icon="Delete" @click="handleDocDelete((scope.row as KnowledgeDocumentVO))">删除</el-button>
+            <el-button v-if="scope.row.trashed !== 1" v-hasPermi="['agent:knowledgeDoc:remove']" size="small" text type="danger" icon="Delete" @click="handleDocDelete((scope.row as KnowledgeDocumentVO))">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
       <pagination v-model:page="docDialog.query.pageNum" v-model:limit="docDialog.query.pageSize" :total="docDialog.total" @pagination="loadDocs" />
+    </el-dialog>
+
+    <!-- 文档治理(R5-1 可见性 / R5-2 内容治理) -->
+    <el-dialog v-model="govDialog.visible" title="文档治理" width="580px" destroy-on-close>
+      <el-form label-width="110px">
+        <el-form-item label="文档">{{ govDialog.fileName }}</el-form-item>
+        <el-form-item label="可见性">
+          <el-radio-group v-model="govDialog.form.visibility">
+            <el-radio value="INHERIT">继承空间</el-radio>
+            <el-radio value="RESTRICTED">仅授权角色</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="govDialog.form.visibility === 'RESTRICTED'" label="授权角色">
+          <el-select v-model="govDialog.form.roleIds" multiple filterable style="width: 100%" placeholder="选择可见角色(可多选)">
+            <el-option v-for="r in govDialog.roles" :key="r.roleId" :label="r.roleName" :value="r.roleId" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="发布态">
+          <el-select v-model="govDialog.form.publishStatus" style="width: 200px">
+            <el-option label="已发布" value="PUBLISHED" />
+            <el-option label="待审核" value="PENDING_REVIEW" />
+            <el-option label="草稿" value="DRAFT" />
+            <el-option label="已驳回" value="REJECTED" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="生效时间">
+          <el-date-picker v-model="govDialog.form.effectiveAt" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="留空=立即生效" style="width: 220px" />
+        </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker v-model="govDialog.form.expiresAt" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" placeholder="留空=不过期" style="width: 220px" />
+          <el-checkbox v-model="govDialog.form.clearTimeWindow" style="margin-left: 8px">清空时间窗</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="govDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="govDialog.saving" @click="submitGovernance">保存</el-button>
+      </template>
     </el-dialog>
 
     <!-- 分块查看与管理 -->
@@ -496,8 +549,11 @@ import {
   listKnowledgeChunks, downloadKnowledgeDocument, searchKnowledge,
   updateKnowledgeChunk, changeKnowledgeChunkEnabled, listKnowledgeZeroHit, rebuildKnowledgeIndex,
   rebuildStaleKnowledge, getRebuildProgress, listKbEvalCases, addKbEvalCase, delKbEvalCase, runKbEval, listKbEvalRuns,
-  pageKbQualityIssues, registerKbQualityIssue, changeKbQualityIssueStatus
+  pageKbQualityIssues, registerKbQualityIssue, changeKbQualityIssueStatus,
+  restoreKnowledgeDocument, updateDocGovernance, reviewKnowledgeDocument
 } from '@/api/agent/knowledge';
+import { listRole } from '@/api/system/role';
+import { ElMessageBox } from 'element-plus';
 import type {
   KnowledgeForm, KnowledgeQuery, KnowledgeVO, KnowledgeDocumentVO, KnowledgeChunkVO, KnowledgeSearchHitVO, KnowledgeZeroHitVO,
   KbEvalCaseVO, KbEvalRunVO, KbQualityIssueVO, KbRebuildProgressVO
@@ -535,7 +591,7 @@ const loadWorkspaces = async () => {
 const dialog = reactive({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
-const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
+const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, reviewRequired: 0, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
 const form = ref<KnowledgeForm>({ ...initForm });
 
 const rules = {
@@ -548,9 +604,27 @@ const docDialog = reactive({
   knowledgeId: 0 as number | string,
   loading: false,
   uploading: false,
+  showTrashed: false,
   list: [] as KnowledgeDocumentVO[],
   total: 0,
   query: { pageNum: 1, pageSize: 10, knowledgeId: 0 as number | string }
+});
+
+/** 文档治理弹窗(R5-1/R5-2) */
+const govDialog = reactive({
+  visible: false,
+  saving: false,
+  docId: 0 as number | string,
+  fileName: '',
+  roles: [] as Array<{ roleId: number | string; roleName: string }>,
+  form: {
+    visibility: 'INHERIT',
+    roleIds: [] as Array<number | string>,
+    publishStatus: 'PUBLISHED',
+    effectiveAt: null as string | null,
+    expiresAt: null as string | null,
+    clearTimeWindow: false
+  }
 });
 
 const chunkDialog = reactive({ visible: false, title: '', loading: false, documentId: 0 as number | string, list: [] as KnowledgeChunkVO[] });
@@ -620,6 +694,7 @@ const handleEdit = (row: KnowledgeVO) => {
     scoreThreshold: row.scoreThreshold === null || row.scoreThreshold === undefined ? null : Number(row.scoreThreshold),
     rerankThreshold: row.rerankThreshold === null || row.rerankThreshold === undefined ? null : Number(row.rerankThreshold),
     fallbackAnswerEnabled: row.fallbackAnswerEnabled === null || row.fallbackAnswerEnabled === undefined ? 1 : Number(row.fallbackAnswerEnabled),
+    reviewRequired: row.reviewRequired === null || row.reviewRequired === undefined ? 0 : Number(row.reviewRequired),
     parentChunkEnabled: row.parentChunkEnabled || '0',
     parentChunkSize: row.parentChunkSize || 2000,
     chunkUnit: row.chunkUnit || 'char',
@@ -903,7 +978,7 @@ const handleDocs = (row: KnowledgeVO) => {
 const loadDocs = async () => {
   docDialog.loading = true;
   try {
-    const res = await listKnowledgeDocument(docDialog.query);
+    const res = await listKnowledgeDocument({ ...docDialog.query, trashed: docDialog.showTrashed || undefined });
     docDialog.list = res.data?.rows || [];
     docDialog.total = res.data?.total || 0;
   } finally {
@@ -934,12 +1009,79 @@ const handleRetry = async (row: KnowledgeDocumentVO) => {
 
 const handleDocDelete = async (row: KnowledgeDocumentVO) => {
   try {
-    await proxy?.$modal.confirm(`确认删除文档「${row.fileName}」吗?`);
+    await proxy?.$modal.confirm(`确认将文档「${row.fileName}」移入回收站吗?\n保留期内可在回收站恢复,超期自动清理。`);
     await delKnowledgeDocument(row.id);
-    proxy?.$modal.msgSuccess('删除成功');
+    proxy?.$modal.msgSuccess('已移入回收站');
     loadDocs();
   } catch (e) {
     // 用户取消
+  }
+};
+
+/** 从回收站恢复(R5-2) */
+const handleDocRestore = async (row: KnowledgeDocumentVO) => {
+  try {
+    await restoreKnowledgeDocument(row.id);
+    proxy?.$modal.msgSuccess('已恢复');
+    loadDocs();
+  } catch (e) {
+    // 后端已提示
+  }
+};
+
+/** 审核待审文档(R5-2) */
+const handleDocReview = async (row: KnowledgeDocumentVO, approve: boolean) => {
+  try {
+    let reason: string | undefined;
+    if (!approve) {
+      const result = await ElMessageBox.prompt('请输入驳回原因', '驳回文档', {
+        inputPlaceholder: '如:内容过期 / 敏感信息'
+      });
+      reason = result.value;
+    }
+    await reviewKnowledgeDocument(row.id, approve, reason);
+    proxy?.$modal.msgSuccess(approve ? '已通过审核' : '已驳回');
+    loadDocs();
+  } catch (e) {
+    // 用户取消或后端报错
+  }
+};
+
+/** 打开治理弹窗(R5-1 可见性 / R5-2 发布态与时间窗) */
+const handleDocGovernance = async (row: KnowledgeDocumentVO) => {
+  govDialog.docId = row.id;
+  govDialog.fileName = row.fileName;
+  govDialog.form.visibility = row.visibility || 'INHERIT';
+  govDialog.form.publishStatus = row.publishStatus || 'PUBLISHED';
+  govDialog.form.effectiveAt = row.effectiveAt || null;
+  govDialog.form.expiresAt = row.expiresAt || null;
+  govDialog.form.clearTimeWindow = false;
+  govDialog.form.roleIds = [];
+  govDialog.visible = true;
+  try {
+    const res = await listRole({ pageNum: 1, pageSize: 200, roleName: '', roleKey: '', status: '' });
+    govDialog.roles = (res.data?.rows || []).map((r: any) => ({ roleId: r.roleId, roleName: r.roleName }));
+  } catch (e) {
+    // 角色列表不可用时仍可设置继承空间
+  }
+};
+
+const submitGovernance = async () => {
+  govDialog.saving = true;
+  try {
+    await updateDocGovernance(govDialog.docId, {
+      visibility: govDialog.form.visibility,
+      roleIds: govDialog.form.visibility === 'RESTRICTED' ? govDialog.form.roleIds : [],
+      publishStatus: govDialog.form.publishStatus,
+      effectiveAt: govDialog.form.effectiveAt || undefined,
+      expiresAt: govDialog.form.expiresAt || undefined,
+      clearTimeWindow: govDialog.form.clearTimeWindow
+    });
+    proxy?.$modal.msgSuccess('治理设置已保存');
+    govDialog.visible = false;
+    loadDocs();
+  } finally {
+    govDialog.saving = false;
   }
 };
 

@@ -1,6 +1,7 @@
 package com.forgeagent.rag.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.forgeagent.agentcore.service.WorkspacePermissionHelper;
 import com.forgeagent.agentcore.service.AuditLogHelper;
 import com.forgeagent.agentcore.utils.ChatTexts;
@@ -18,6 +19,7 @@ import com.forgeagent.rag.domain.AgentKnowledgeDocument;
 import com.forgeagent.rag.domain.vo.AgentKbChunkVo;
 import com.forgeagent.rag.domain.vo.AgentKnowledgeDocumentVo;
 import com.forgeagent.rag.mapper.AgentKbChunkMapper;
+import com.forgeagent.rag.mapper.AgentKbDocAclMapper;
 import com.forgeagent.rag.mapper.AgentKnowledgeDocumentMapper;
 import com.forgeagent.rag.mapper.AgentKnowledgeMapper;
 import com.forgeagent.rag.service.IAgentKnowledgeDocumentService;
@@ -52,6 +54,7 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
     private final AgentKnowledgeMapper knowledgeMapper;
     private final AgentKnowledgeDocumentMapper documentMapper;
     private final AgentKbChunkMapper chunkMapper;
+    private final AgentKbDocAclMapper aclMapper;
     private final KnowledgeDocProcessor docProcessor;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
     private final VectorStore vectorStore;
@@ -61,11 +64,13 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
     private final WorkspacePermissionHelper permissionHelper;
 
     @Override
-    public PageResult<AgentKnowledgeDocumentVo> queryPageList(Long knowledgeId, PageQuery pageQuery) {
+    public PageResult<AgentKnowledgeDocumentVo> queryPageList(Long knowledgeId, PageQuery pageQuery, Boolean trashed) {
         AgentKnowledge kb = getKbOrThrow(knowledgeId);
         checkWsReadable(kb.getWorkspaceId());
+        boolean inTrash = Boolean.TRUE.equals(trashed);
         LambdaQueryWrapper<AgentKnowledgeDocument> wrapper = new LambdaQueryWrapper<AgentKnowledgeDocument>()
             .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId)
+            .eq(AgentKnowledgeDocument::getTrashed, inTrash ? 1 : 0)
             .orderByDesc(AgentKnowledgeDocument::getId);
         Page<AgentKnowledgeDocumentVo> page = documentMapper.selectVoPage(pageQuery.build(), wrapper);
         return PageResult.build(page.getRecords(), page.getTotal());
@@ -110,6 +115,7 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
             AgentKnowledgeDocument dup = documentMapper.selectOne(new LambdaQueryWrapper<AgentKnowledgeDocument>()
                 .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId)
                 .eq(AgentKnowledgeDocument::getFileMd5, fileMd5)
+                .eq(AgentKnowledgeDocument::getTrashed, 0)
                 .last("limit 1"));
             if (dup != null) {
                 throw new ServiceException("文档内容与已上传的「" + dup.getFileName() + "」完全重复,无需重复上传");
@@ -128,6 +134,11 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
             doc.setFilePath(target.toString());
             doc.setStatus("0");
             doc.setChunkCount(0);
+            // R5-2:库级审核开关打开时新文档落待审,审核通过才参与检索
+            doc.setPublishStatus(Integer.valueOf(1).equals(kb.getReviewRequired())
+                ? "PENDING_REVIEW" : "PUBLISHED");
+            doc.setVisibility("INHERIT");
+            doc.setTrashed(0);
             documentMapper.insert(doc);
             refreshDocCount(knowledgeId);
             docProcessor.processAsync(doc.getId());
@@ -175,29 +186,118 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
         for (AgentKnowledgeDocument doc : docs) {
             AgentKnowledge kb = getKbOrThrow(doc.getKnowledgeId());
             checkWsWritable(kb.getWorkspaceId());
-            chunkMapper.delete(new LambdaQueryWrapper<AgentKbChunk>().eq(AgentKbChunk::getDocumentId, doc.getId()));
-            try {
-                vectorStore.deleteByDocumentIds(List.of(doc.getId()));
-            } catch (Exception e) {
-                log.warn("[知识库] 删除文档 {} 向量失败: {}", doc.getId(), e.getMessage());
-            }
-            try {
-                Files.deleteIfExists(Path.of(doc.getFilePath()));
-            } catch (Exception e) {
-                log.warn("[知识库] 删除文档文件失败: {}", e.getMessage());
-            }
-            documentMapper.deleteById(doc.getId());
-            // R3-1 自动打标:文档删除后其证据不再可达,引用它的用例应转 EVIDENCE_STALE
-            eventPublisher.publishEvent(new com.forgeagent.rag.service.eval.KbDocumentGenerationEvent(
-                doc.getKnowledgeId(), doc.getId()));
+            // R5-2:软删除入回收站——只改数据库行,不碰向量库(检索由治理谓词排除),
+            // 保留期内可恢复,超期由 DocTrashCleanupService 物理清理
+            documentMapper.update(null, new LambdaUpdateWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getId, doc.getId())
+                .set(AgentKnowledgeDocument::getTrashed, 1)
+                .set(AgentKnowledgeDocument::getTrashedAt, new java.util.Date()));
             refreshDocCount(doc.getKnowledgeId());
-            auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.delete", "knowledge_document", String.valueOf(doc.getId()),
-                "删除文档[" + doc.getFileName() + "]",
-                Map.of("fileName", doc.getFileName(), "fileSize", doc.getFileSize(),
+            auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.trash", "knowledge_document", String.valueOf(doc.getId()),
+                "移入回收站[" + doc.getFileName() + "]",
+                (Object) Map.of("fileName", doc.getFileName(), "fileSize", doc.getFileSize(),
                     "knowledgeId", doc.getKnowledgeId()),
                 null, "0", "RISK");
         }
         return true;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    @Override
+    public Boolean restore(List<Long> ids) {
+        List<AgentKnowledgeDocument> docs = documentMapper.selectByIds(ids);
+        if (docs.isEmpty()) {
+            return false;
+        }
+        for (AgentKnowledgeDocument doc : docs) {
+            AgentKnowledge kb = getKbOrThrow(doc.getKnowledgeId());
+            checkWsWritable(kb.getWorkspaceId());
+            documentMapper.update(null, new LambdaUpdateWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getId, doc.getId())
+                .set(AgentKnowledgeDocument::getTrashed, 0)
+                .set(AgentKnowledgeDocument::getTrashedAt, null));
+            refreshDocCount(doc.getKnowledgeId());
+            auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.restore", "knowledge_document", String.valueOf(doc.getId()),
+                "从回收站恢复[" + doc.getFileName() + "]", null,
+                Map.of("fileName", doc.getFileName(), "knowledgeId", doc.getKnowledgeId()), "0", "WARN");
+        }
+        return true;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    @Override
+    public Boolean updateGovernance(Long id, com.forgeagent.rag.domain.bo.DocGovernanceBo bo) {
+        AgentKnowledgeDocument doc = documentMapper.selectById(id);
+        if (doc == null) {
+            throw new ServiceException("文档不存在");
+        }
+        AgentKnowledge kb = getKbOrThrow(doc.getKnowledgeId());
+        checkWsWritable(kb.getWorkspaceId());
+        String visibility = StringUtils.isBlank(bo.getVisibility()) ? null : bo.getVisibility().toUpperCase();
+        if (visibility != null && !List.of("INHERIT", "RESTRICTED").contains(visibility)) {
+            throw new ServiceException("可见性只支持 INHERIT / RESTRICTED");
+        }
+        String publishStatus = StringUtils.isBlank(bo.getPublishStatus()) ? null : bo.getPublishStatus().toUpperCase();
+        if (publishStatus != null && !List.of("DRAFT", "PENDING_REVIEW", "PUBLISHED", "REJECTED").contains(publishStatus)) {
+            throw new ServiceException("发布态只支持 DRAFT / PENDING_REVIEW / PUBLISHED / REJECTED");
+        }
+        if (bo.getEffectiveAt() != null && bo.getExpiresAt() != null
+            && !bo.getExpiresAt().after(bo.getEffectiveAt())) {
+            throw new ServiceException("过期时间必须晚于生效时间");
+        }
+        LambdaUpdateWrapper<AgentKnowledgeDocument> update = new LambdaUpdateWrapper<AgentKnowledgeDocument>()
+            .eq(AgentKnowledgeDocument::getId, id)
+            .set(visibility != null, AgentKnowledgeDocument::getVisibility, visibility)
+            .set(publishStatus != null, AgentKnowledgeDocument::getPublishStatus, publishStatus);
+        if (Boolean.TRUE.equals(bo.getClearTimeWindow())) {
+            update.set(AgentKnowledgeDocument::getEffectiveAt, null)
+                .set(AgentKnowledgeDocument::getExpiresAt, null);
+        } else {
+            update.set(bo.getEffectiveAt() != null, AgentKnowledgeDocument::getEffectiveAt, bo.getEffectiveAt())
+                .set(bo.getExpiresAt() != null, AgentKnowledgeDocument::getExpiresAt, bo.getExpiresAt());
+        }
+        documentMapper.update(null, update);
+        // ACL 行全量覆盖(RESTRICTED 才有意义;改回 INHERIT 时清空授权)
+        if (visibility != null) {
+            aclMapper.delete(new LambdaQueryWrapper<com.forgeagent.rag.domain.AgentKbDocAcl>()
+                .eq(com.forgeagent.rag.domain.AgentKbDocAcl::getDocumentId, id));
+            if ("RESTRICTED".equals(visibility) && bo.getRoleIds() != null) {
+                for (Long roleId : bo.getRoleIds().stream().filter(java.util.Objects::nonNull).distinct().toList()) {
+                    com.forgeagent.rag.domain.AgentKbDocAcl acl = new com.forgeagent.rag.domain.AgentKbDocAcl();
+                    acl.setDocumentId(id);
+                    acl.setRoleId(roleId);
+                    acl.setCreateTime(new java.util.Date());
+                    aclMapper.insert(acl);
+                }
+            }
+        }
+        auditLogHelper.record(kb.getWorkspaceId(), "kb.doc.governance", "knowledge_document", String.valueOf(id),
+            "调整文档治理[" + doc.getFileName() + "]",
+            (Object) Map.of("visibility", String.valueOf(visibility), "publishStatus", String.valueOf(publishStatus),
+                "roleIds", bo.getRoleIds() == null ? List.of() : bo.getRoleIds()),
+            null, "0", "WARN");
+        return true;
+    }
+
+    @Override
+    public Boolean review(Long id, Boolean approve, String reason) {
+        AgentKnowledgeDocument doc = documentMapper.selectById(id);
+        if (doc == null) {
+            throw new ServiceException("文档不存在");
+        }
+        if (!"PENDING_REVIEW".equals(doc.getPublishStatus())) {
+            throw new ServiceException("仅待审文档可审核");
+        }
+        com.forgeagent.rag.domain.bo.DocGovernanceBo bo = new com.forgeagent.rag.domain.bo.DocGovernanceBo();
+        bo.setPublishStatus(Boolean.TRUE.equals(approve) ? "PUBLISHED" : "REJECTED");
+        Boolean ok = updateGovernance(id, bo);
+        // 驳回原因写进处理提示,前端文档列表直接可见
+        if (!Boolean.TRUE.equals(approve) && StringUtils.isNotBlank(reason)) {
+            documentMapper.update(null, new LambdaUpdateWrapper<AgentKnowledgeDocument>()
+                .eq(AgentKnowledgeDocument::getId, id)
+                .set(AgentKnowledgeDocument::getNotice, "审核驳回:" + StringUtils.substring(reason, 0, 300)));
+        }
+        return ok;
     }
 
     @Override
@@ -327,8 +427,10 @@ public class AgentKnowledgeDocumentServiceImpl implements IAgentKnowledgeDocumen
     }
 
     private void refreshDocCount(Long knowledgeId) {
+        // 回收站中的文档不计入知识库文档数
         long count = documentMapper.selectCount(new LambdaQueryWrapper<AgentKnowledgeDocument>()
-            .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId));
+            .eq(AgentKnowledgeDocument::getKnowledgeId, knowledgeId)
+            .eq(AgentKnowledgeDocument::getTrashed, 0));
         AgentKnowledge update = new AgentKnowledge();
         update.setId(knowledgeId);
         update.setDocCount((int) count);

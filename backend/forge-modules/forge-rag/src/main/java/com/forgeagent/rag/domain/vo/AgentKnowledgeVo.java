@@ -78,6 +78,11 @@ private java.math.BigDecimal rerankThreshold;
     private Integer fallbackAnswerEnabled;
 
     /**
+     * 上传后需审核(R5-2)
+     */
+    private Integer reviewRequired;
+
+    /**
      * 分块大小(字符数)
      */
     private Integer chunkSize;

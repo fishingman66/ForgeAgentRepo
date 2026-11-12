@@ -16,8 +16,10 @@ public interface IAgentKnowledgeDocumentService {
 
     /**
      * 分页查询知识库文档
+     *
+     * @param trashed 是否查回收站(true=只看回收站;false/null=只看正常文档)
      */
-    PageResult<AgentKnowledgeDocumentVo> queryPageList(Long knowledgeId, PageQuery pageQuery);
+    PageResult<AgentKnowledgeDocumentVo> queryPageList(Long knowledgeId, PageQuery pageQuery, Boolean trashed);
 
     /**
      * 上传文档并触发异步解析向量化,返回文档ID
@@ -30,9 +32,24 @@ public interface IAgentKnowledgeDocumentService {
     Boolean retry(Long id);
 
     /**
-     * 删除文档(级联删除分块与向量)
+     * 删除文档(移入回收站,不删分块与向量;超保留期由清理任务物理删除)
      */
     Boolean deleteByIds(List<Long> ids);
+
+    /**
+     * 从回收站恢复(R5-2)
+     */
+    Boolean restore(List<Long> ids);
+
+    /**
+     * 文档治理设置(R5-1/R5-2):可见性 + 授权角色 + 发布态 + 生效/过期窗口
+     */
+    Boolean updateGovernance(Long id, com.forgeagent.rag.domain.bo.DocGovernanceBo bo);
+
+    /**
+     * 审核(R5-2):PENDING_REVIEW → PUBLISHED / REJECTED
+     */
+    Boolean review(Long id, Boolean approve, String reason);
 
     /**
      * 查询文档分块列表

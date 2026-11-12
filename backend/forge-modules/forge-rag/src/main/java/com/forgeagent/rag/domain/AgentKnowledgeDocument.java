@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import com.forgeagent.common.mybatis.core.domain.BaseEntity;
 import java.io.Serial;
+import java.util.Date;
 /**
  * 知识库文档对象 agent_knowledge_document
  *
@@ -80,6 +81,36 @@ public class AgentKnowledgeDocument extends BaseEntity {
      * 处理提示(如「向量写入失败,已排队补偿」「扫描件需 OCR,当前未启用」)
      */
     private String notice;
+
+    /**
+     * 可见性(R5-1):INHERIT 继承空间(默认) / RESTRICTED 仅授权角色可见
+     */
+    private String visibility;
+
+    /**
+     * 发布态(R5-2):DRAFT / PENDING_REVIEW / PUBLISHED / REJECTED;仅 PUBLISHED 参与检索
+     */
+    private String publishStatus;
+
+    /**
+     * 生效时间(NULL=立即生效)
+     */
+    private Date effectiveAt;
+
+    /**
+     * 过期时间(NULL=不过期)
+     */
+    private Date expiresAt;
+
+    /**
+     * 回收站(1=已入回收站,不参与检索,超期物理清理)
+     */
+    private Integer trashed;
+
+    /**
+     * 入回收站时间
+     */
+    private Date trashedAt;
 
     /**
      * 配置过期:1=知识库分块/清洗口径已变,待差异重建(重建成功后清 0)
