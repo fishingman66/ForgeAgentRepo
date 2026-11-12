@@ -44,6 +44,15 @@ public class EvaluationService {
         评分维度:是否切题、事实一致性、完整度、是否含明显臆造。不要输出 JSON 之外的文字。
         """;
 
+    /** R4-4 答案层五维裁判:只在有参考答案或期望拒答的用例上跑(均分 >=4 视为通过) */
+    private static final String FIVE_DIM_SYS_PROMPT = """
+        你是回答质量评审员。请对给定问题与助手回答按五个维度打分,每维 1~5 整数,只输出一个 JSON 对象:
+        {"correctness":1-5,"faithfulness":1-5,"completeness":1-5,"citation_correctness":1-5,"refusal_correctness":1-5,"reason":"不超过80字"}
+        correctness=事实正确性;faithfulness=忠实于参考资料不臆造;completeness=完整度;
+        citation_correctness=引用编号真实有效(无引用可给 3);refusal_correctness=该拒答时拒答、不该拒答时作答。
+        期望拒答的用例以 refusal_correctness 为主。不要输出 JSON 之外的文字。
+        """;
+
     private final JdbcTemplate jdbc;
     private final IAgentChatService chatService;
 
@@ -80,12 +89,12 @@ public class EvaluationService {
 
     public List<Map<String, Object>> listCases(Long datasetId) {
         return jdbc.queryForList("""
-                SELECT id,dataset_id,question,expected_keywords,reference_answer,create_time
+                SELECT id,dataset_id,question,expected_keywords,reference_answer,expected_refusal,create_time
                 FROM agent_eval_case WHERE dataset_id=? ORDER BY id
                 """, datasetId);
     }
 
-    /** 批量导入样本;body.cases 为数组,元素含 question / expectedKeywords / referenceAnswer */
+    /** 批量导入样本;body.cases 为数组,元素含 question / expectedKeywords / referenceAnswer / expectedRefusal */
     public int addCases(Long datasetId, Object casesRaw) {
         if (!(casesRaw instanceof List<?> cases)) {
             throw new ServiceException("cases 必须是数组");
@@ -99,11 +108,14 @@ public class EvaluationService {
             if (StringUtils.isBlank(question)) {
                 continue;
             }
+            boolean refusal = Boolean.TRUE.equals(row.get("expectedRefusal"))
+                || "1".equals(text(row.get("expectedRefusal")))
+                || "true".equalsIgnoreCase(text(row.get("expectedRefusal")));
             jdbc.update("""
-                    INSERT INTO agent_eval_case (dataset_id,question,expected_keywords,reference_answer,create_time)
-                    VALUES (?,?,?,?,NOW())
+                    INSERT INTO agent_eval_case (dataset_id,question,expected_keywords,reference_answer,expected_refusal,create_time)
+                    VALUES (?,?,?,?,?,NOW())
                     """, datasetId, question, text(row.get("expectedKeywords")),
-                text(row.get("referenceAnswer")));
+                text(row.get("referenceAnswer")), refusal ? 1 : 0);
             count++;
             if (count >= MAX_CASES) {
                 break;
@@ -115,7 +127,7 @@ public class EvaluationService {
     /** 同步执行一次评测(样本上限 50,避免长请求) */
     public Map<String, Object> run(Long datasetId, Long agentId, boolean judgeEnabled) {
         List<Map<String, Object>> cases = jdbc.queryForList("""
-                SELECT id,question,expected_keywords,reference_answer FROM agent_eval_case
+                SELECT id,question,expected_keywords,reference_answer,expected_refusal FROM agent_eval_case
                 WHERE dataset_id=? ORDER BY id LIMIT ?
                 """, datasetId, MAX_CASES);
         if (cases.isEmpty()) {
@@ -159,11 +171,18 @@ public class EvaluationService {
                     log.warn("[Evaluation] 样本执行失败 caseId={}: {}", one.get("id"), error);
                 }
                 long latency = System.currentTimeMillis() - start;
-                double rule = ruleScore(answer, text(one.get("expected_keywords")));
+                boolean expectedRefusal = Integer.valueOf(1).equals(
+                    ((Number) one.getOrDefault("expected_refusal", 0)).intValue());
+                double rule = expectedRefusal
+                    ? (isRefusal(answer) ? 100 : 20)
+                    : ruleScore(answer, text(one.get("expected_keywords")));
                 Double judgeScore = null;
                 String judgeReason = null;
-                if (judgeEnabled && StringUtils.isNotBlank(answer) && error == null) {
-                    Judge judge = llmJudge(agentId, question, answer, text(one.get("reference_answer")));
+                // R4-4:五维裁判只在有参考答案或期望拒答的用例上跑,不强制全量(成本)
+                boolean fiveDimQualify = StringUtils.isNotBlank(text(one.get("reference_answer"))) || expectedRefusal;
+                if (judgeEnabled && fiveDimQualify && StringUtils.isNotBlank(answer) && error == null) {
+                    Judge judge = llmJudge(agentId, question, answer,
+                        text(one.get("reference_answer")), expectedRefusal);
                     if (judge != null) {
                         judgeScore = judge.score();
                         judgeReason = judge.reason();
@@ -263,7 +282,7 @@ public class EvaluationService {
     }
 
     /** LLM-as-Judge;模型不可用或输出非法时返回 null,由规则分兜底 */
-    private Judge llmJudge(Long agentId, String question, String answer, String reference) {
+    private Judge llmJudge(Long agentId, String question, String answer, String reference, boolean expectedRefusal) {
         try {
             List<Map<String, Object>> models = jdbc.queryForList("""
                     SELECT m.base_url,m.api_key,m.model_name FROM agent_model m
@@ -281,8 +300,10 @@ public class EvaluationService {
             model.setApiKey(text(cfg.get("api_key")));
             model.setModelName(text(cfg.get("model_name")));
             String prompt = "问题:" + question + "\n助手回答:" + cut(answer, 2000)
-                + "\n参考答案:" + (reference == null ? "无" : cut(reference, 1000));
-            Msg result = UtilityAgents.build("eval-judge", JUDGE_SYS_PROMPT, model)
+                + "\n参考答案:" + (reference == null ? "无" : cut(reference, 1000))
+                + (expectedRefusal ? "\n(本用例期望模型拒答:知识库无相关资料时应明确告知)" : "");
+            Msg result = UtilityAgents.build("eval-judge",
+                expectedRefusal || StringUtils.isNotBlank(reference) ? FIVE_DIM_SYS_PROMPT : JUDGE_SYS_PROMPT, model)
                 .call(List.of(Msg.builder().name("user").role(MsgRole.USER).textContent(prompt).build()))
                 .block(Duration.ofSeconds(60));
             if (result == null || StringUtils.isBlank(result.getTextContent())) {
@@ -297,6 +318,25 @@ public class EvaluationService {
             Map<String, Object> parsed = MAPPER.readValue(raw.substring(start, end + 1),
                 new TypeReference<>() {
                 });
+            // 五维裁判:均分 1~5 → 换算 0~100,维度 JSON 存 judge_reason 供回归对比
+            if (parsed.containsKey("correctness")) {
+                double sum = 0;
+                int dims = 0;
+                for (String dim : List.of("correctness", "faithfulness", "completeness",
+                    "citation_correctness", "refusal_correctness")) {
+                    Object v = parsed.get(dim);
+                    if (v instanceof Number n) {
+                        sum += Math.max(1, Math.min(5, n.doubleValue()));
+                        dims++;
+                    }
+                }
+                if (dims > 0) {
+                    Map<String, Object> compact = new LinkedHashMap<>();
+                    compact.put("dims", parsed);
+                    compact.put("pass", sum / dims >= 4.0);
+                    return new Judge(sum / dims * 20, cut(MAPPER.writeValueAsString(compact), 400));
+                }
+            }
             double score = Double.parseDouble(String.valueOf(parsed.getOrDefault("score", 0)));
             return new Judge(Math.max(0, Math.min(100, score)),
                 cut(text(parsed.get("reason")), 200));

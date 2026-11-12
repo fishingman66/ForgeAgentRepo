@@ -80,6 +80,11 @@ public class AgentKnowledgeBo implements Serializable {
 private java.math.BigDecimal rerankThreshold;
 
     /**
+     * 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答
+     */
+    private Integer fallbackAnswerEnabled;
+
+    /**
      * 分块大小(字符数)
      */
     @Min(value = 100, message = "分块大小不能小于 100", groups = {AddGroup.class, EditGroup.class})

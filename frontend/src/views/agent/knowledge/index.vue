@@ -114,6 +114,10 @@
           <el-input-number v-model="form.rerankThreshold" :min="0" :max="1" :step="0.05" :precision="2" controls-position="right" style="width: 180px" placeholder="留空不过滤" />
           <div class="form-tip">作用于精排分(0~1);留空则精排结果不做过滤</div>
         </el-form-item>
+        <el-form-item label="零召回兜底" prop="fallbackAnswerEnabled">
+          <el-switch v-model="form.fallbackAnswerEnabled" :active-value="1" :inactive-value="0" />
+          <div class="form-tip">开启:检索零命中时允许模型基于通用知识回答,但须声明不来自知识库;关闭:严格模式,零命中一律拒答(金融/医疗场景)</div>
+        </el-form-item>
         <el-form-item label="分块单位" prop="chunkUnit">
           <el-select v-model="form.chunkUnit" style="width: 180px">
             <el-option label="按字符(存量口径)" value="char" />
@@ -531,7 +535,7 @@ const loadWorkspaces = async () => {
 const dialog = reactive({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
-const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
+const initForm: KnowledgeForm = { id: undefined, workspaceId: undefined, name: '', description: '', embeddingModel: 'local-hash', rerankModel: '', scoreThreshold: null, rerankThreshold: null, fallbackAnswerEnabled: 1, parentChunkEnabled: '0', parentChunkSize: 2000, chunkSize: 500, chunkOverlap: 50, chunkUnit: 'char', splitStrategy: 'structure', cleanHeaderFooter: true, cleanBlankNormalize: true, cleanNfkc: false, cleanPiiMask: false, remark: '' };
 const form = ref<KnowledgeForm>({ ...initForm });
 
 const rules = {
@@ -615,6 +619,7 @@ const handleEdit = (row: KnowledgeVO) => {
     ...row,
     scoreThreshold: row.scoreThreshold === null || row.scoreThreshold === undefined ? null : Number(row.scoreThreshold),
     rerankThreshold: row.rerankThreshold === null || row.rerankThreshold === undefined ? null : Number(row.rerankThreshold),
+    fallbackAnswerEnabled: row.fallbackAnswerEnabled === null || row.fallbackAnswerEnabled === undefined ? 1 : Number(row.fallbackAnswerEnabled),
     parentChunkEnabled: row.parentChunkEnabled || '0',
     parentChunkSize: row.parentChunkSize || 2000,
     chunkUnit: row.chunkUnit || 'char',

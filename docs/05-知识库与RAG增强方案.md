@@ -1,6 +1,6 @@
 # ForgeAgent 知识库与 RAG 系统改造增强方案
 
-> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）,R4~R5 待启动** · 2026-11-11 · 适用版本 6.1.x
+> 状态：**R1 全部交付 + R0 基线 + R2 全部交付（R2-A / R2-1 / R2-2 / R2-3 / R2-5）+ R3 评测闭环已交付（R3-1~R3-6）+ R4 问答可信度已交付（R4-1~R4-4）,R5 待启动** · 2026-11-12 · 适用版本 6.1.x
 > 对标项目：`../kb-rag-project`（企业级 RAG 平台：Elasticsearch + Qdrant + Neo4j + 独立解析服务 + 评测门禁体系）
 > 本文按项目文档统一结构组织：**现状盘点 → 改造方案（R1~R5）→ 明确不做 → 决策与取舍记录 → 批次历史**。
 > 所有「改动点」标注到具体类 / 方法 / 表 / 配置项，可直接据此拆分开发任务。
@@ -752,6 +752,21 @@ agent_kb_query_log（R1-6）
 
 构造 3 类对抗用例：只有 2 条资料却引用 `[5]`、资料里藏"忽略以上指令"、问知识库外问题。断言：分别被拒发 / 不被指令劫持 / 正确拒答。
 
+### R4 交付记录（2026-11-12，R4-1~R4-4 全部落地）
+
+**实现落点**：
+- R4-1 `ChatRetrievalSupport#buildReferenceBlock`（替换朴素拼接）：JSON 引用列表（citation/document/location/content）+ 首尾引导块 + **合法编号清单写进 prompt**；尖括号统一转义 `\u003c/\u003e`（伪 `<<<KB_REF_END>>>` 不会提前闭合）；零召回写入「（本次检索未召回任何资料）」+ 禁止 `[数字]`。引用编号与 `citations` 溯源一致按命中顺序编号。
+- R4-2 `AnswerCitationValidator`（纯静态硬门禁）：只解析 Markdown 文本节点的 `[n]`（代码围栏/行内代码/链接/图片内容剔除），越界抛 ServiceException；接线在 `finishRound` 落库前 —— 非流式原样抛、流式经既有 catch 发 `error` 终态不发 `done`；Mock 执行器回显用户输入，跳过校验；`rag.knowledge.citation.validate-enabled` 默认开。
+- R4-3 拒答策略落 **kb 级 `fallback_answer_enabled`**（默认 1）：宽松版零召回指令"告知暂无资料 + 通用知识回答须声明"；严格版"禁止通用知识兜底，直接告知并停止"；多库绑定全为严格时才走严格版。top1<阈值场景已由 R1-A `passRelevance` 上游执行，不重复实现。
+- R4-4 答案层五维裁判接 `agent_eval`：新增 `agent_eval_case.expected_refusal`；裁判 prompt 升级五维（correctness/faithfulness/completeness/citation_correctness/refusal_correctness，1~5，均分≥4 通过→换算 0~100 存 judge_score，维度 JSON 存 judge_reason）；**只在有 reference_answer 或 expected_refusal 的用例上跑**（省成本），期望拒答用例规则分改为拒答判定（拒=100/不拒=20）。
+
+**决策记录**：
+1. 引用编号计数随 `Round` 传递（ragRefCount，-1=未绑知识库跳过校验），校验时机选在 `finishRound` 开头 —— 两条链路（blocking/stream）与工作流路径天然全覆盖。
+2. 引用校验失败走既有异常通道：流式 catch 会 `compensate` 删用户消息并发 error——与"不带假引用宣布成功"语义一致；前端无需新增事件类型。
+3. 期望拒答用例的 judge_score = 五维均分×20（0~100 口径与既有 judge_score 兼容），通过与否存 `pass` 字段进 judge_reason JSON。
+
+**验证**：对抗单测 `AnswerCitationValidatorTest`（越界 [5] 拒发、链接/图片/代码内引用不误伤、零召回禁引用）+ `ReferenceBlockBuilderTest`（伪分隔符转义、编号清单、严格/宽松两版拒答指令）；mock 链路对话冒烟 + kb 严格开关落库 + expected_refusal 落库走 e2e `temp/r4_verify.py`。
+
 ---
 
 ## 7. R5 · 治理与规模化（按需）
@@ -809,6 +824,7 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `backend/sql/agent_kb_r2_clean.sql` | **已交付**：`agent_knowledge` + `clean_rules json`（NULL=默认:页眉页脚/空白归一开,NFKC/PII 关） |
 | `backend/sql/agent_kb_r5_fingerprint.sql` | **已交付**：`agent_knowledge` + `parse_fingerprint`/`chunk_fingerprint`;`agent_knowledge_document` + `config_stale`/`parse_fingerprint`/`parsed_text mediumtext` |
 | `backend/sql/agent_kb_r3_eval.sql` | **已交付**：`agent_kb_eval_case` + `evidences`/`status`/`source`/`source_id`/`dataset_revision`/`update_time`；`agent_kb_eval_run` + 五指标列/`metrics_json`/`config_snapshot`/`corpus_fingerprint`/`dataset_revision`/用例计数/门禁列/`case_results_json`；质量问题表另落 `agent_kb_r3_quality.sql` |
+| `backend/sql/agent_kb_r4_trust.sql` | **已交付**：`agent_knowledge` + `fallback_answer_enabled`（库级零召回兜底/严格拒答）；`agent_eval_case` + `expected_refusal`（期望拒答用例）。幂等（information_schema + PREPARE，重跑验证过） |
 | `backend/sql/agent_kb_r5_acl.sql` | `agent_kb_doc_acl`；文档表 + `visibility`/`publish_status`/`effective_at`/`expires_at`/`trashed` |
 
 > 脚本风格：**幂等**用 `create table if not exists` + `information_schema` 判断 + `PREPARE/EXECUTE`（MySQL 无 `ADD COLUMN IF NOT EXISTS`，直接 `ALTER` 重复执行会整脚本中断）+ 菜单权限 `insert ... where not exists`。Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 同步。
@@ -828,8 +844,8 @@ URL 抓取（复用工作流 http 节点的 SSRF 防护：scheme 白名单、DNS
 | `chunk-unit-default` | token | R2 |
 | `gate.required` | false | R3 |
 | `gate.min-cases` / `gate.epsilon-pp` / `gate.stale-ratio` | 30 / 2.0 / 0.15 | R3 |
-| `citation.validate-enabled` | true | R4 |
-| `fallback-answer-enabled` | true | R4 |
+| `citation.validate-enabled` | true（已交付） | R4 |
+| `fallback-answer-enabled` | true（已交付，落 kb 级列） | R4 |
 | `graph.route-enabled` | false（dev true） | R5 |
 
 ### 8.3 前端改动点（`frontend/src/views/agent/knowledge/index.vue` + 拆子组件）

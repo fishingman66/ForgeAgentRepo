@@ -37,6 +37,7 @@ import com.forgeagent.agent.service.AgentChatAttachmentService;
 import com.forgeagent.agentcore.service.UtilityAgents;
 import com.forgeagent.agentcore.utils.ChatTexts;
 import com.forgeagent.agentcore.service.AgentConfigCacheService;
+import com.forgeagent.agent.service.support.AnswerCitationValidator;
 import com.forgeagent.agent.service.support.ChatContextAssembler;
 import com.forgeagent.agent.service.support.ChatRetrievalSupport;
 import com.forgeagent.agent.service.support.ChatStreamSupport;
@@ -171,7 +172,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
                          AgentMessage userMsg, String content, List<Long> toolIds, List<Long> knowledgeIds,
                          List<KnowledgeSearchHitVo> knowledgeHits, String roundId, String budgetNotice,
                          AgentRunner.RunnerContext ctx, AgentRunner runner, boolean regen,
-                         Map<String, Object> buildMetrics, String workflowMode) {
+                         Map<String, Object> buildMetrics, String workflowMode, int ragRefCount) {
     }
 
     /**
@@ -1107,13 +1108,19 @@ public class AgentChatServiceImpl implements IAgentChatService {
         List<KnowledgeSearchHitVo> knowledgeHits = new java.util.ArrayList<>(retrieval.hits());
         knowledgeHits.addAll(attachmentRetrieval.hits());
         // P3/M1:L0 统一预算分配前,检索/附件各自成块,由分配器决定注入多少
-        String ragBlock = retrievalSupport.buildRetrievedContext(retrieval.hits(), retrieval.contextByChunk());
+        // R4-1:结构化资料块(JSON 引用列表 + 合法编号清单),ragRefCount 供 R4-2 引用校验对账
+        boolean strictFallback = !knowledgeIds.isEmpty()
+            && knowledgeMapper.selectByIds(knowledgeIds).stream()
+            .allMatch(k -> Integer.valueOf(0).equals(k.getFallbackAnswerEnabled()));
+        ChatRetrievalSupport.ReferenceBlock refBlock = knowledgeIds.isEmpty()
+            ? new ChatRetrievalSupport.ReferenceBlock("", -1)
+            : retrievalSupport.buildReferenceBlock(retrieval.hits(), retrieval.contextByChunk(), strictFallback);
+        String ragBlock = refBlock.text();
+        int ragRefCount = refBlock.citationCount();
         String attachmentBlock = StringUtils.defaultString(attachmentRetrieval.text());
-        // 空召回兜底:绑定了知识库但零命中时显式告知模型,避免静默丢弃知识库语义;
-        // 同时异步落零命中日志,运营可据此发现知识缺口、反哺内容建设
+        // 空召回:绑定了知识库但零命中时,资料块内已含"暂无相关资料"与兜底/拒答指令(R4-3,
+        // 按 fallback_answer_enabled 分严格/宽松两版);同时异步落零命中日志供运营发现知识缺口
         if (!knowledgeIds.isEmpty() && retrieval.hits().isEmpty()) {
-            String notice = "（本次知识库检索未命中任何相关内容,请明确告知用户知识库中暂无相关资料,再基于自身知识回答。）";
-            ragBlock = StringUtils.isBlank(ragBlock) ? notice : ragBlock + "\n" + notice;
             knowledgeService.recordZeroHit(agent.getId(), session.getId(), session.getUserId(),
                 content, retrievalQuery, knowledgeIds);
         }
@@ -1258,7 +1265,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
         buildMetrics.put("modelName", model == null ? null : model.getModelName());
         return new Round(session, newSession, agent, model, userMsg, modelContent,
             toolIds, knowledgeIds, knowledgeHits, roundId, budgetNotice, ctx, selected, regen, buildMetrics,
-            workflowMode);
+            workflowMode, ragRefCount);
     }
 
     /**
@@ -1267,6 +1274,13 @@ public class AgentChatServiceImpl implements IAgentChatService {
      */
     private ChatSendVo finishRound(Round round, AgentRunner.RunnerResult result) {
         String reply = result.content();
+        // R4-2 引用校验(硬门禁):绑定了知识库的回合,done/落库前校验 [n] 编号,
+        // 越界抛异常 → 非流式原样返回错误、流式经 catch 发 error 终态(不发 done);
+        // Mock 执行回显用户输入,不作校验
+        if (!"mock".equals(result.runner())
+            && !Boolean.FALSE.equals(knowledgeProperties.getCitationValidateEnabled())) {
+            AnswerCitationValidator.validate(reply, round.ragRefCount());
+        }
         String extJson = "{\"runner\":\"" + result.runner() + "\",\"toolCount\":" + round.toolIds().size()
             + ",\"knowledgeCount\":" + round.knowledgeIds().size()
             + ",\"knowledgeHits\":" + round.knowledgeHits().size()

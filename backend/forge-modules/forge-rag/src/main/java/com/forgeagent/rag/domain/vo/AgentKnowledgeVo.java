@@ -73,6 +73,11 @@ private java.math.BigDecimal rerankThreshold;
     private Integer vectorDim;
 
     /**
+     * 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答
+     */
+    private Integer fallbackAnswerEnabled;
+
+    /**
      * 分块大小(字符数)
      */
     private Integer chunkSize;

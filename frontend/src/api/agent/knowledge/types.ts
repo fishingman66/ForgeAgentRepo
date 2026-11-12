@@ -13,6 +13,8 @@ export interface KnowledgeVO {
   scoreThreshold?: number | string | null;
   /** 精排相关度阈值(0~1,作用于 rerankScore;为空不过滤精排结果) */
   rerankThreshold?: number | string | null;
+  /** 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答 */
+  fallbackAnswerEnabled?: number;
   /** 父子分块开关(1=先切父块再切子块,检索命中子块注入父块全文) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */
@@ -50,6 +52,8 @@ export interface KnowledgeForm {
   scoreThreshold?: number | null;
   /** 精排相关度阈值(0~1,作用于 rerankScore;为空不过滤精排结果) */
   rerankThreshold?: number | null;
+  /** 零召回兜底(R4-3):1=允许通用知识回答须声明(默认),0=严格模式一律拒答 */
+  fallbackAnswerEnabled?: number;
   /** 父子分块开关(1=先切父块再切子块) */
   parentChunkEnabled?: string;
   /** 父块目标大小(字符) */

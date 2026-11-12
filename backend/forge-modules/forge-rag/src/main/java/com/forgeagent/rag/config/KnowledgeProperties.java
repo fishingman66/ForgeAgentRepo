@@ -122,6 +122,12 @@ public class KnowledgeProperties {
     private Integer ragCacheTtlSeconds = 60;
 
     /**
+     * R4-2 引用校验开关:绑定了知识库的对话回答在落库/done 前校验 [n] 引用编号,
+     * 越界即失败(非流式抛异常;流式发 error 终态);默认开,发现误伤可临时关闭
+     */
+    private Boolean citationValidateEnabled = true;
+
+    /**
      * 精排调用硬超时(毫秒)。精排是增强项,模型抖动不该把整轮检索拖到几十秒;超时回退 RRF 粗排
      */
     private Integer rerankTimeoutMs = 1500;
