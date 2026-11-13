@@ -11,6 +11,14 @@ import java.util.List;
 public interface CsVoiceGateway {
 
     /**
+     * 本实现服务的供应商标识(URL provider 段)。调度器按此路由到唯一实现;
+     * 一个实现可服务多个标识(如 AICC 与 AICC_MOCK 共用字段映射)。
+     */
+    default boolean supports(String provider) {
+        return false;
+    }
+
+    /**
      * 验签。实现必须使用常量时间比较,失败原因不区分,避免泄露渠道是否存在。
      */
     boolean verify(String secret, String timestamp, String nonce, String rawBody, String signature);

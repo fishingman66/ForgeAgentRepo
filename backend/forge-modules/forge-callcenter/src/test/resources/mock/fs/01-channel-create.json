@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eslEventName": "CHANNEL_CREATE",
+      "eventGenTimeMs": 1794278400000,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "Caller-Caller-ID-Number": "13812345678",
+        "Caller-Destination-Number": "1001"
+      }
+    }
+  ]
+}

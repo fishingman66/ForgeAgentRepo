@@ -1,0 +1,18 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::asr_result",
+      "eventGenTimeMs": 1794278403200,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "speaker": "caller",
+        "text": "我要查一下订单状态",
+        "confidence": 0.93,
+        "isFinal": true,
+        "startMs": 1800,
+        "endMs": 3200
+      }
+    }
+  ]
+}

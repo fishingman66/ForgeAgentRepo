@@ -1,0 +1,12 @@
+{
+  "events": [
+    {
+      "eslEventName": "CHANNEL_ANSWER",
+      "eventGenTimeMs": 1794278401500,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001"
+      }
+    }
+  ]
+}

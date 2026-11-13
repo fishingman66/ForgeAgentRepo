@@ -1,0 +1,13 @@
+{
+  "events": [
+    {
+      "eslEventName": "DTMF",
+      "eventGenTimeMs": 1794278407400,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "DTMF-Digit": "9"
+      }
+    }
+  ]
+}

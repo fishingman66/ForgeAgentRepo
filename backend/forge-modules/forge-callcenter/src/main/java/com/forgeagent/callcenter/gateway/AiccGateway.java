@@ -4,17 +4,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forgeagent.callcenter.config.ConditionalOnCallcenterEnabled;
-import com.forgeagent.callcenter.common.CsChannelSignature;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -33,22 +29,17 @@ public class AiccGateway implements CsVoiceGateway {
     private static final TypeReference<Map<String, Object>> CONTENT_TYPE = new TypeReference<>() {
     };
 
+    /** 本实现服务的供应商标识:CLOUD 托管 AICC 及其 Mock 共用同一套字段映射(V0~V2 契约)。 */
+    @Override
+    public boolean supports(String provider) {
+        return VoiceProvider.AICC.code().equalsIgnoreCase(provider)
+            || VoiceProvider.AICC_MOCK.code().equalsIgnoreCase(provider);
+    }
+
     @Override
     public boolean verify(String secret, String timestamp, String nonce, String rawBody, String signature) {
-        if (secret == null || secret.isBlank() || timestamp == null || nonce == null || rawBody == null) {
-            return false;
-        }
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String canonical = timestamp + "\n" + nonce + "\n" + rawBody;
-            String expected = Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(mac.doFinal(canonical.getBytes(StandardCharsets.UTF_8)));
-            return CsChannelSignature.constantTimeEquals(expected, signature);
-        } catch (Exception e) {
-            log.warn("[CC] 回调验签计算失败: {}", e.getMessage());
-            return false;
-        }
+        // 算法口径与 V0 sequence.json 一致,实现抽取至 CsHmacSignatures(FS 系网关共用)
+        return CsHmacSignatures.verify(secret, timestamp, nonce, rawBody, signature);
     }
 
     @Override

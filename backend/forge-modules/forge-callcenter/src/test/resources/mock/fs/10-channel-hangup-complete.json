@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eslEventName": "CHANNEL_HANGUP_COMPLETE",
+      "eventGenTimeMs": 1794278496000,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "Hangup-Cause": "NORMAL_CLEARING",
+        "variable_billsec": "96"
+      }
+    }
+  ]
+}

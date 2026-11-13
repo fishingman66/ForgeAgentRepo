@@ -30,8 +30,8 @@ public class CallcenterProductionReadinessValidator {
             throw new IllegalStateException("[CC] agent.callcenter.mock-enabled 在 prod 下必须为 false");
         }
         String provider = properties.getProvider() == null ? "" : properties.getProvider();
-        if (prod && "AICC_MOCK".equalsIgnoreCase(provider)) {
-            throw new IllegalStateException("[CC] agent.callcenter.provider=AICC_MOCK 在 prod 下禁止使用");
+        if (prod && ("AICC_MOCK".equalsIgnoreCase(provider) || "FS_MOCK".equalsIgnoreCase(provider))) {
+            throw new IllegalStateException("[CC] agent.callcenter.provider=" + provider + " 在 prod 下禁止使用");
         }
         String secret = properties.getCallbackSecret();
         boolean defaultSecret = secret == null || secret.isBlank()

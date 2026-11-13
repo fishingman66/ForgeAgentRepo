@@ -1,0 +1,16 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::cdr",
+      "eventGenTimeMs": 1794278496500,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "durationSec": 97,
+        "billSec": 96,
+        "hangupCause": "NORMAL_CLEARING",
+        "hangupDisposition": "caller"
+      }
+    }
+  ]
+}

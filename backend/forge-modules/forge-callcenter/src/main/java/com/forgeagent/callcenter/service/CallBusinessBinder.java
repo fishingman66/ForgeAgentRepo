@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.forgeagent.callcenter.config.ConditionalOnCallcenterEnabled;
 import com.forgeagent.callcenter.domain.CsCall;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
+import com.forgeagent.callcenter.insight.InsightPipeline;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
 import com.forgeagent.customerservice.domain.CsChannel;
 import com.forgeagent.customerservice.domain.CsConversation;
@@ -40,6 +41,8 @@ public class CallBusinessBinder {
     private final CallTranscriptQualityService transcriptQuality;
     private final CallMetricService metricService;
     private final CsCallMapper callMapper;
+    /** C4 洞察管道:挂机后跑意图/提取/质检报告(异步旁路)。 */
+    private final InsightPipeline insightPipeline;
 
     /** ring:通话绑定客服会话;渠道缺失或建会话失败只记日志,不阻断回调。 */
     public void onRing(CsCall call, CsVoiceEvent event) {
@@ -108,6 +111,11 @@ public class CallBusinessBinder {
             metricService.rebuild(call.getWorkspaceId(), new java.util.Date());
         } catch (Exception e) {
             log.error("[CC] 通话指标失败 callId={}: {}", call.getCallId(), e.getMessage());
+        }
+        try {
+            insightPipeline.onCallEnded(call);
+        } catch (Exception e) {
+            log.error("[CC] 洞察管道触发失败 callId={}: {}", call.getCallId(), e.getMessage());
         }
     }
 

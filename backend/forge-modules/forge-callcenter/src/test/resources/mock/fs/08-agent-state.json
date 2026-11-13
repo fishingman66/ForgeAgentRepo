@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eslEventName": "callcenter::agent_state",
+      "eventGenTimeMs": 1794278409000,
+      "workNo": "SEAT-001",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "CC-Agent": "SEAT-001",
+        "CC-Agent-State": "READY"
+      }
+    }
+  ]
+}

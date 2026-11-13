@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::record_ready",
+      "eventGenTimeMs": 1794278495000,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "variable_recordRecordingId": "FS-REC-0001",
+        "variable_recordFilePath": "mock://wav/8k-mono-1s"
+      }
+    }
+  ]
+}

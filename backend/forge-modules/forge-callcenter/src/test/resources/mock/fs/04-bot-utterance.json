@@ -1,0 +1,17 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::bot_utterance",
+      "eventGenTimeMs": 1794278403800,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "speaker": "bot",
+        "text": "好的,请稍等,正在为您查询订单",
+        "isFinal": true,
+        "startMs": 3300,
+        "endMs": 3800
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::asr_result",
+      "eventGenTimeMs": 1794278407200,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "speaker": "caller",
+        "text": "太慢了,转人工吧",
+        "confidence": 0.91,
+        "isFinal": true,
+        "startMs": 6000,
+        "endMs": 7200
+      }
+    }
+  ]
+}

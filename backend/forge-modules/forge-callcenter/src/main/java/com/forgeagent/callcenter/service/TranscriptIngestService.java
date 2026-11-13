@@ -6,6 +6,7 @@ import com.forgeagent.callcenter.domain.CsCallSegment;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.mapper.CsCallSegmentMapper;
 import com.forgeagent.callcenter.common.CsPiiMasker;
+import com.forgeagent.callcenter.insight.InsightPipeline;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,6 +25,8 @@ import java.util.Date;
 public class TranscriptIngestService {
 
     private final CsCallSegmentMapper segmentMapper;
+    /** C4 洞察管道:旁路异步,主叫终稿触发情绪评估(节流在管道内)。 */
+    private final InsightPipeline insightPipeline;
 
     /** 写入一条转写分片;正文为空返回 null(A2 据此跳过坐席推荐)。 */
     public CsCallSegment ingest(CsCall call, CsVoiceEvent event) {
@@ -47,6 +50,12 @@ public class TranscriptIngestService {
         segment.setIsFinal("true".equalsIgnoreCase(String.valueOf(event.content().get("isFinal"))) ? "1" : "0");
         segment.setCreateTime(new Date());
         segmentMapper.insert(segment);
+        // 洞察挂点在入库之后:管道只读已脱敏文本,失败不影响转写入库
+        try {
+            insightPipeline.onSegment(call, segment);
+        } catch (Exception e) {
+            log.warn("[CC] 洞察管道触发失败 callId={}: {}", call.getCallId(), e.getMessage());
+        }
         return segment;
     }
 }

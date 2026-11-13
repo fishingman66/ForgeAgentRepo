@@ -3,6 +3,8 @@ package com.forgeagent.callcenter.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.List;
+
 /**
  * 语音与呼叫中心模块配置(V1,prefix {@code agent.callcenter})。
  *
@@ -61,4 +63,46 @@ public class CallcenterProperties {
 
     /** 中继扩展接口实现:noop(暂无 SIP 中继)。 */
     private String trunkProvider = "noop";
+
+    /** C2 级联链路 ASR 引擎标识:mock(C1~C2 开发)/ dashscope(C2-real,需 API key)。 */
+    private String asrEngine = "mock";
+
+    /** C2 级联链路 TTS 引擎标识:mock / dashscope。 */
+    private String ttsEngine = "mock";
+
+    /**
+     * 不允许打断词组兜底表(C2):DB 表 agent_cc_voice_no_interrupt 之外的开发兜底;
+     * 精确匹配 partial 文本(trim 后全等),命中即忽略本次打断。
+     */
+    private List<String> noInterruptWords = List.of("嗯", "哦", "好的", "嗯嗯", "啊");
+
+    /** C4 洞察管道总开关:关闭时挂点直接返回,不建线程池、不写洞察表。 */
+    private Boolean insightEnabled = true;
+
+    /** C4 洞察线程池常驻线程数(旁路线程,与通话主链路隔离)。 */
+    private Integer insightPoolSize = 2;
+
+    /** C4 洞察线程池有界队列容量;满时拒绝并 WARN,绝不阻塞回调线程。 */
+    private Integer insightQueueCapacity = 512;
+
+    /**
+     * C4 单次洞察硬超时(毫秒):看门狗到点 interrupt 工作线程,
+     * 超时按失败处理(空转游标 + WARN),不让毒分片卡住整条管道。
+     */
+    private Long insightTimeoutMs = 3000L;
+
+    /** C4 情绪按轮次节流:同一通话两次情绪评估的最小间隔(毫秒)。 */
+    private Long sentimentMinIntervalMs = 3000L;
+
+    /** C4 负面情绪阈值:score ≤ 阈值判定 NEGATIVE(score 取值 [-1,1])。 */
+    private Double negativeScoreThreshold = -0.35;
+
+    /** C4 负面自动转接开关:默认关(方案 v2 解除边界后的可选项)。 */
+    private Boolean autoTransferOnNegative = false;
+
+    /** C4 负面自动转接目标队列(mod_callcenter queue);为空视为未配置,开关打开也不转。 */
+    private String autoTransferQueue;
+
+    /** C4 信息提取兜底字段:渠道 voice_config_json 未声明 extract_keys 时使用。 */
+    private List<String> extractDefaultKeys = List.of("orderNo", "amount");
 }

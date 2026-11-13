@@ -40,6 +40,8 @@ public final class CsEventTypes {
     public static final String CALL_HOLD = "call.hold";
     public static final String CALL_RESUME = "call.resume";
     public static final String CALL_TRANSFER = "call.transfer";
+    /** C4 洞察:负面情绪上行坐席弹屏(payload 带 label/score/autoTransfer)。 */
+    public static final String CALL_SENTIMENT = "call.sentiment";
 
     public static final Set<String> TEXT_EVENTS = Set.of(
         CHAT, CHAT_ACCEPTED, CHAT_CHUNK, CHAT_DONE,
@@ -48,14 +50,14 @@ public final class CsEventTypes {
 
     public static final Set<String> VOICE_EVENTS = Set.of(
         CALL_RING, CALL_ANSWER, CALL_HANGUP, CALL_DTMF, CALL_TRANSCRIPT,
-        CALL_RECORD_READY, CALL_HOLD, CALL_RESUME, CALL_TRANSFER);
+        CALL_RECORD_READY, CALL_HOLD, CALL_RESUME, CALL_TRANSFER, CALL_SENTIMENT);
 
     public static final Set<String> ALL_EVENTS = Set.of(
         CHAT, CHAT_ACCEPTED, CHAT_CHUNK, CHAT_DONE,
         TICKET_EVENT, TICKET_NEW, QUEUE_POSITION, HANDOFF,
         AGENT_TYPING, CSAT_INVITE, SEAT_SUGGEST, SYSTEM, ERROR,
         CALL_RING, CALL_ANSWER, CALL_HANGUP, CALL_DTMF, CALL_TRANSCRIPT,
-        CALL_RECORD_READY, CALL_HOLD, CALL_RESUME, CALL_TRANSFER);
+        CALL_RECORD_READY, CALL_HOLD, CALL_RESUME, CALL_TRANSFER, CALL_SENTIMENT);
 
     private CsEventTypes() {
     }

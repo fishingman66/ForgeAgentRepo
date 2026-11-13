@@ -1,0 +1,14 @@
+{
+  "events": [
+    {
+      "eslEventName": "forgeagent::transfer",
+      "eventGenTimeMs": 1794278407500,
+      "workNo": "",
+      "headers": {
+        "Unique-ID": "FS-CALL-20261113-0001",
+        "CC-Queue": "after_sales",
+        "variable_transferFrom": "bot"
+      }
+    }
+  ]
+}

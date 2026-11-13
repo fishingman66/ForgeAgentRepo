@@ -11,12 +11,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
+import java.util.List;
 
 /**
  * 录音入库(V1,D6):call.record.ready -> 取回一次 -> 本地 OSS -> 只存对象键。
  *
  * <p>OSS 不可用或录音地址不支持时降级:仅登记 recordingId 并告警,不让回调失败,
- * 也不向响应方泄露内部细节。对象键前缀 callcenter/recording/,与业务附件隔离。</p>
+ * 也不向响应方泄露内部细节。对象键前缀 callcenter/recording/,与业务附件隔离。
+ * C1 路由化:按通话的 media_provider 选择网关实现,与 CallEventDispatcher 同一 resolves 逻辑。</p>
  */
 @Slf4j
 @Service
@@ -24,7 +26,7 @@ import java.util.Date;
 @ConditionalOnCallcenterEnabled
 public class RecordingIngestService {
 
-    private final CsVoiceGateway gateway;
+    private final List<CsVoiceGateway> gateways;
     private final CallcenterProperties properties;
     private final RecordingStorage storage;
 
@@ -34,6 +36,10 @@ public class RecordingIngestService {
         call.setRecordingId(recordingId);
         call.setRecordingReadyAt(new Date());
         try {
+            CsVoiceGateway gateway = CallEventDispatcher.resolveGateway(gateways, call.getMediaProvider());
+            if (gateway == null) {
+                throw new IllegalStateException("无网关实现服务 provider=" + call.getMediaProvider());
+            }
             byte[] data = gateway.fetchRecording(url);
             String objectKey = "callcenter/recording/" + call.getCallId() + "/"
                 + (recordingId == null ? "recording" : recordingId) + ".wav";

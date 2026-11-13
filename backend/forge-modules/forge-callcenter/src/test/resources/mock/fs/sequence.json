@@ -1,0 +1,204 @@
+{
+  "contract": "FS_MOCK_V1",
+  "provider": "FS_MOCK",
+  "source": "ForgeAgent docs/07 呼叫中心增强方案 v2.1 §三.4(C1)",
+  "scope": "仅 dev/test;prod profile 下拒绝启动",
+  "signature": {
+    "algorithm": "HMAC-SHA256",
+    "secretFile": "secret.txt",
+    "canonical": "timestamp + \"\\n\" + nonce + \"\\n\" + rawBody",
+    "encoding": "Base64URL 无填充",
+    "signatureHeader": "X-Cc-Signature",
+    "timestampHeader": "X-Cc-Timestamp",
+    "nonceHeader": "X-Cc-Nonce",
+    "toleranceSeconds": 300
+  },
+  "response": {
+    "success": {
+      "message": "success",
+      "retcode": "0"
+    },
+    "rejected": {
+      "message": "invalid signature",
+      "retcode": "1001"
+    },
+    "rejectHttpStatus": 200
+  },
+  "callId": "FS-CALL-20261113-0001",
+  "baseEventGenTime": 1794278400000,
+  "baseEventGenTimeText": "2026-11-13 08:00:00 GMT+8",
+  "recording": {
+    "recordingId": "FS-REC-0001",
+    "url": "mock://wav/8k-mono-1s",
+    "file": "recording.wav",
+    "format": "8kHz / 16bit / mono / 1s 静音",
+    "expectedBytes": 16044
+  },
+  "eslShape": {
+    "envelope": "{\"events\": [{\"eslEventName\": \"...\", \"eventGenTimeMs\": 0, \"workNo\": \"\", \"headers\": {...}}]}",
+    "callId": "headers[Unique-ID]",
+    "caller": "headers[Caller-Caller-ID-Number]",
+    "callee": "headers[Caller-Destination-Number]",
+    "eventGenTime": "eventGenTimeMs(顶层,毫秒)或 headers[Event-Date-Timestamp](秒,乘 1000)",
+    "customEvents": "转写/话术/转人工/录音就绪/话单在 ESL 无原生事件,用 forgeagent::/callcenter:: subClass 模拟;真实链路中这些事件由媒体管道与业务层产生,契约一致"
+  },
+  "eventTypeMap": {
+    "CHANNEL_CREATE": "call.ring",
+    "CHANNEL_ANSWER": "call.answer",
+    "forgeagent::asr_result": "call.asr_result",
+    "forgeagent::bot_utterance": "call.bot_utterance",
+    "DTMF": "call.dtmf",
+    "forgeagent::transfer": "call.transfer",
+    "callcenter::agent_state": "call.seat_state",
+    "forgeagent::record_ready": "call.record.ready",
+    "CHANNEL_HANGUP_COMPLETE": "call.hangup",
+    "forgeagent::cdr": "call.cdr"
+  },
+  "idempotency": {
+    "key": "sha256(callId|eventType|eventGenTime|canonicalJson(content))",
+    "scope": "per callId",
+    "note": "与 AICC_MOCK 同一指纹口径,业务断言共用"
+  },
+  "stateMachine": {
+    "initial": "NONE",
+    "stateRank": [
+      "NONE",
+      "RINGING",
+      "ANSWERED",
+      "BOT_SERVING",
+      "TRANSFERRING",
+      "SEAT_CONNECTED",
+      "ENDED"
+    ],
+    "stateByEvent": {
+      "call.ring": "RINGING",
+      "call.answer": "ANSWERED",
+      "call.asr_result": "BOT_SERVING",
+      "call.bot_utterance": "BOT_SERVING",
+      "call.dtmf": "BOT_SERVING",
+      "call.transfer": "TRANSFERRING",
+      "call.seat_state": "SEAT_CONNECTED",
+      "call.record.ready": "SEAT_CONNECTED",
+      "call.hangup": "ENDED",
+      "call.cdr": "ENDED"
+    },
+    "rule": "事件只推进更高 rank;迟到或乱序事件不得回退状态。events[].expectedState 为按序推进后的实际态"
+  },
+  "events": [
+    {
+      "index": 1,
+      "file": "01-channel-create.json",
+      "eslEventName": "CHANNEL_CREATE",
+      "offsetMs": 0,
+      "eventGenTime": 1794278400000,
+      "workNo": ""
+    },
+    {
+      "index": 2,
+      "file": "02-channel-answer.json",
+      "eslEventName": "CHANNEL_ANSWER",
+      "offsetMs": 1500,
+      "eventGenTime": 1794278401500,
+      "workNo": ""
+    },
+    {
+      "index": 3,
+      "file": "03-asr-result.json",
+      "eslEventName": "forgeagent::asr_result",
+      "offsetMs": 3200,
+      "eventGenTime": 1794278403200,
+      "workNo": ""
+    },
+    {
+      "index": 4,
+      "file": "04-bot-utterance.json",
+      "eslEventName": "forgeagent::bot_utterance",
+      "offsetMs": 3800,
+      "eventGenTime": 1794278403800,
+      "workNo": ""
+    },
+    {
+      "index": 5,
+      "file": "05-asr-result.json",
+      "eslEventName": "forgeagent::asr_result",
+      "offsetMs": 7200,
+      "eventGenTime": 1794278407200,
+      "workNo": ""
+    },
+    {
+      "index": 6,
+      "file": "06-dtmf.json",
+      "eslEventName": "DTMF",
+      "offsetMs": 7400,
+      "eventGenTime": 1794278407400,
+      "workNo": ""
+    },
+    {
+      "index": 7,
+      "file": "07-transfer.json",
+      "eslEventName": "forgeagent::transfer",
+      "offsetMs": 7500,
+      "eventGenTime": 1794278407500,
+      "workNo": ""
+    },
+    {
+      "index": 8,
+      "file": "08-agent-state.json",
+      "eslEventName": "callcenter::agent_state",
+      "offsetMs": 9000,
+      "eventGenTime": 1794278409000,
+      "workNo": "SEAT-001"
+    },
+    {
+      "index": 9,
+      "file": "09-record-ready.json",
+      "eslEventName": "forgeagent::record_ready",
+      "offsetMs": 95000,
+      "eventGenTime": 1794278495000,
+      "workNo": ""
+    },
+    {
+      "index": 10,
+      "file": "10-channel-hangup-complete.json",
+      "eslEventName": "CHANNEL_HANGUP_COMPLETE",
+      "offsetMs": 96000,
+      "eventGenTime": 1794278496000,
+      "workNo": ""
+    },
+    {
+      "index": 11,
+      "file": "11-cdr.json",
+      "eslEventName": "forgeagent::cdr",
+      "offsetMs": 96500,
+      "eventGenTime": 1794278496500,
+      "workNo": ""
+    }
+  ],
+  "expectedFinal": {
+    "callState": "ENDED",
+    "ticketStatus": "RESOLVED",
+    "csatInvitations": 1,
+    "transcriptSegments": 3,
+    "recordingObjects": 1,
+    "recordingAccessAudits": 1,
+    "cdrAggregatable": true,
+    "durationSec": 97,
+    "billSec": 96
+  },
+  "fixtureFiles": [
+    "01-channel-create.json",
+    "02-channel-answer.json",
+    "03-asr-result.json",
+    "04-bot-utterance.json",
+    "05-asr-result.json",
+    "06-dtmf.json",
+    "07-transfer.json",
+    "08-agent-state.json",
+    "09-record-ready.json",
+    "10-channel-hangup-complete.json",
+    "11-cdr.json",
+    "sequence.json",
+    "recording.wav",
+    "secret.txt"
+  ]
+}

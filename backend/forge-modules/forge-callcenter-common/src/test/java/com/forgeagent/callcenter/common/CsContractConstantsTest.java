@@ -27,14 +27,16 @@ class CsContractConstantsTest {
 
     @Test
     void voiceEventsAreStable() {
-        assertEquals(9, CsEventTypes.VOICE_EVENTS.size());
+        // 10 = V1~V2 九个 + C4 的 call.sentiment(情绪上行)
+        assertEquals(10, CsEventTypes.VOICE_EVENTS.size());
         assertTrue(CsEventTypes.VOICE_EVENTS.contains("call.record.ready"));
         assertTrue(CsEventTypes.VOICE_EVENTS.contains("call.transcript"));
+        assertTrue(CsEventTypes.VOICE_EVENTS.contains("call.sentiment"));
     }
 
     @Test
     void allEventsIsDisjointUnion() {
-        assertEquals(22, CsEventTypes.ALL_EVENTS.size());
+        assertEquals(23, CsEventTypes.ALL_EVENTS.size());
         Set<String> union = new HashSet<>(CsEventTypes.TEXT_EVENTS);
         union.addAll(CsEventTypes.VOICE_EVENTS);
         assertEquals(union, CsEventTypes.ALL_EVENTS);

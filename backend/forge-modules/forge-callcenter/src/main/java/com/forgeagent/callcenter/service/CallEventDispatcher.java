@@ -49,7 +49,8 @@ public class CallEventDispatcher {
     public static final Map<String, String> REJECTED = Map.of("message", "invalid signature", "retcode", "1001");
 
     private final CsVoiceCallbackGuard guard;
-    private final CsVoiceGateway gateway;
+    /** C1 路由化:按 URL provider 段选择网关实现(AICC 系 / FS 系),业务层只认归一化事件。 */
+    private final List<CsVoiceGateway> gateways;
     private final CallIdempotencyService idempotency;
     private final CallStateMachine stateMachine;
     private final TranscriptIngestService transcriptIngest;
@@ -83,6 +84,11 @@ public class CallEventDispatcher {
             return REJECTED;
         }
         String secret = guard.resolveSecret(channel);
+        CsVoiceGateway gateway = resolveGateway(gateways, provider);
+        if (gateway == null) {
+            log.warn("[CC] 无网关实现服务供应商标识 code={} provider={}", channelCode, provider);
+            return REJECTED;
+        }
         if (!gateway.verify(secret, timestamp, nonce, rawBody, signature)) {
             // 内部排障日志:只记哈希与长度,不落明文密钥与签名
             log.warn("[CC] 回调验签失败 code={} ts={} bodySha={} bodyLen={} sigLen={} secretLen={}",
@@ -108,6 +114,26 @@ public class CallEventDispatcher {
             }
         }
         return SUCCESS;
+    }
+
+    /**
+     * 按 URL provider 段路由网关实现(C1,静态便于表征测试):
+     * 命中零个或多个实现都视为配置异常,返回 null 由调用方拒绝处理。
+     */
+    static CsVoiceGateway resolveGateway(List<CsVoiceGateway> gateways, String provider) {
+        if (provider == null || provider.isBlank()) {
+            return null;
+        }
+        CsVoiceGateway matched = null;
+        for (CsVoiceGateway candidate : gateways) {
+            if (candidate.supports(provider)) {
+                if (matched != null) {
+                    return null;
+                }
+                matched = candidate;
+            }
+        }
+        return matched;
     }
 
     /**

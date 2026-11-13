@@ -9,7 +9,11 @@ import java.util.Map;
 public enum VoiceProvider {
 
     AICC("AICC"),
-    AICC_MOCK("AICC_MOCK");
+    AICC_MOCK("AICC_MOCK"),
+    /** 自建 FreeSWITCH 主路线(V-1,C1-real 起真实接入)。 */
+    FS("FS"),
+    /** FS 的本地开发 Mock(V-5,C1 交付):仅 dev/test,prod 由就绪校验器拒绝。 */
+    FS_MOCK("FS_MOCK");
 
     private final String code;
 
