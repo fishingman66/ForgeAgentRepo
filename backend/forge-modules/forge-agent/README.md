@@ -1,6 +1,6 @@
 # forge-agent · Agent 平台业务与运行内核
 
-平台主体模块：工作空间、模型与供应商、工具与数据源、编排画布、对话运行、市场、触发器、审计计量、治理与评测。243 个主类、27 个 Controller、**73 个单元测试**（10 类）。
+平台主体模块：工作空间、模型与供应商、工具与数据源、编排画布、对话运行、市场、触发器、审计计量、治理与评测。250 个主类、27 个 Controller、**101 个单元测试**（15 类）。
 
 依赖方向：`agent-core ← forge-agent`，并依赖 `forge-rag`（检索）、`forge-memory`（记忆注入）、`forge-kg`（经 memory/rag 间接）、`forge-common-*`。`forge-customer-service` 通过本模块的 `api.customerservice` 契约包**单向依赖**本模块，反向禁止。
 
@@ -63,7 +63,7 @@ com.forgeagent.agent
 
 ## 测试
 
-**73 用例 / 10 类**，全部 `@Tag("dev")`：
+**101 用例 / 15 类**，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
@@ -76,5 +76,8 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 | 图校验器 21 | `WorkflowGraphValidatorTest` |
 | 资源域守卫 8 | `ResourceAccessGuardTest` |
 | 记忆预算与工作记忆 8 | `ContextBudgetAllocatorTest`(5) / `WorkingMemoryGuardTest`(3) |
+| MCP 空间归属 16 | `AgentMcpServerServiceImplTest`(11) / `AgentInfoServiceMcpBindingTest`(3) / `ChatContextAssemblerMcpVisibilityTest`(2) |
+| 工作流执行体 8 | `AgentWorkflowGraphCharacterizationTest`（走 `trialRun` 公共入口 + `dryRun`，不依赖私有方法，拆分前后可复用） |
+| 问数标识校验 4 | `SqlQueryServiceIdentifierTest` |
 
 验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。

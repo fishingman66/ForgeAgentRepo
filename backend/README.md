@@ -147,10 +147,10 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **442 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **470 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
-# Agent 平台 73：检索链路与引用门禁 25 + 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算/工作记忆 8
+# Agent 平台 101：检索链路与引用门禁 25 + 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算/工作记忆 8 + MCP 空间归属 16 + 工作流执行体 8 + 问数标识校验 4
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
 # 知识库/RAG 181：30 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am

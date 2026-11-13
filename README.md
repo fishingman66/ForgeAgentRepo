@@ -7,7 +7,7 @@
 | 速览 | 值 |
 | --- | --- |
 | 模块 | `backend/forge-modules/` 下 12 个，依赖单向无环 |
-| 后端单测 | **442 用例**（7 个模块有测试类，全部 `@Tag("dev")`） |
+| 后端单测 | **470 用例**（7 个模块有测试类，全部 `@Tag("dev")`） |
 | 前端 | 15 单测 + `vue-tsc --noEmit` 零错误，已接入构建门禁 |
 | 检索基线 | HitRate@5 **93.33%** / MRR **0.8667** / NDCG@5 **0.8841** |
 | 端到端 | 4 套逐期脚本（28 / 18 / 15 / 16）全通过 |
@@ -71,7 +71,7 @@ mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < backend/sql/for
 
 > - 导入务必带 `--default-character-set=utf8mb4`，否则中文双重编码。
 > - **新库**可通配全量导入；**升级存量库只执行新增脚本，不要重跑全量**——字母序不等于依赖序，重跑 `agent_mcp.sql` 会 drop 并重建 `agent_approval`，把 `agent_step5.sql` 已放开的 `session_id` 非空约束带回来，导致含人工审批节点的工作流执行失败。应用启动时 `WorkflowSchemaGuard` 会自检并输出 WARN 与脚本路径指引。
-> - 资源域双模式升级单独执行 `backend/sql/agent_resource_scope.sql`（幂等），现有资源自动保持平台共享。
+> - 资源域双模式升级执行 `backend/sql/agent_resource_scope.sql` + `backend/sql/agent_mcp_scope.sql`（均幂等），现有资源自动保持平台共享。
 > - Windows 终端执行前先 `chcp 65001`，避免控制台中文乱码。
 
 **3. 配置**：编辑 `backend/forge-admin/src/main/resources/application-dev.yml`，填入 MySQL 与 Redis 连接信息。
@@ -143,7 +143,7 @@ pnpm run dev
 
 ### 3.3 资源域模型（平台共享 / 空间私有）
 
-工具、数据源、模型三类资源带 `workspace_id`：`NULL` = 平台共享（全空间可用、仅超管可建改），非空 = 空间私有（仅归属空间可见）。共享资源含连接凭据与 API 密钥。列表、详情、Agent 绑定、对话、工作流、问数、对外 API 与触发器全部经 `ResourceAccessGuard` 把可见性**下推到 SQL**（不是查出来再过滤）；免登录链路以工作流归属 Agent 的空间作为 `callerWorkspaceId`。引用空间私有资源的 Agent 禁止发布到市场。
+工具、数据源、模型、MCP 服务器四类资源带 `workspace_id`：`NULL` = 平台共享（全空间可用、仅超管可建改），非空 = 空间私有（仅归属空间可见）。共享资源含连接凭据与 API 密钥。列表、详情、Agent 绑定、对话、工作流、问数、对外 API 与触发器全部经 `ResourceAccessGuard` 把可见性**下推到 SQL**（不是查出来再过滤）；免登录链路以工作流归属 Agent 的空间作为 `callerWorkspaceId`。引用空间私有资源的 Agent 禁止发布到市场。
 
 `agent.resource-sharing.enabled=false` 可一键收紧为全私有解释（存量 NULL 资源需运维先迁移归属）。详见 [forge-agent-core README](backend/forge-modules/forge-agent-core/README.md)。
 
@@ -239,10 +239,10 @@ pnpm run dev
 
 | 模块 | 用例 | 模块 | 用例 |
 | --- | --- | --- | --- |
-| Agent 平台 | 73 | 知识库/RAG | 181 |
+| Agent 平台 | 101 | 知识库/RAG | 181 |
 | 智能客服域 | 92 | 长期记忆 | 44 |
 | 知识图谱 | 20 | 呼叫中心 | 19 |
-| 契约层 | 13 | **后端合计** | **442** |
+| 契约层 | 13 | **后端合计** | **470** |
 
 前端 15 单测（`sse-events` 10 + `governance` 5），`pnpm typecheck` 零错误，`build` / `build:dev` / `build:prod` 均前置 `vue-tsc --noEmit`。
 
@@ -274,7 +274,7 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 
 ### 已交付
 
-平台基座（内置工具集 / 评测回归 / Run·Trace / 资源域双模式 / 多租户加固 / 免登录加固 / TypeScript 类型检查接入构建，115 个存量错误清零）、工作流（12 类节点引擎 / 对话触发 / 对外 API / 审批清扫）、智能客服（C0~C4 / A1~A5 / P0~P3 / AICC Mock 语音链路）、记忆与图谱（六层 L0~L5 / `forge-kg` 独立模块）、知识库（R1~R5 全量，含图片描述与视觉模型按工作空间配置）、验证体系（4 套 e2e + 检索基线定版）**均已交付**。逐批结论与决策偏差见 `docs/` 五篇方案文档的「批次历史」表。
+平台基座（内置工具集 / 评测回归 / Run·Trace / 资源域双模式（工具·数据源·模型·MCP 四类）/ 多租户加固 / 免登录加固 / TypeScript 类型检查接入构建，115 个存量错误清零）、工作流（12 类节点引擎 / 对话触发 / 对外 API / 审批清扫；执行体已拆分为节点执行器·图引擎·运行生命周期·轨迹编解码，主类 2054 行降为门面）、智能客服（C0~C4 / A1~A5 / P0~P3 / AICC Mock 语音链路）、记忆与图谱（六层 L0~L5 / `forge-kg` 独立模块）、知识库（R1~R5 全量，含图片描述与视觉模型按工作空间配置）、验证体系（4 套 e2e + 检索基线定版）**均已交付**。逐批结论与决策偏差见 `docs/` 六篇方案文档的「批次历史」表。
 
 ### 待办
 
@@ -284,8 +284,6 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 - [ ] S3·Confluence 外部源真实接入（SPI 已就绪，实现 `fetch` 即启用）
 - [ ] 向量库可插拔（Milvus 之外支持 pgvector / Qdrant）
 - [ ] Agent 平台初始化 SQL 的 PostgreSQL 方言支持
-- [ ] MCP 服务器补空间归属（当前仍为平台级资源）
-- [ ] `AgentWorkflowServiceImpl` 剩余执行体进一步拆分
 
 ---
 
