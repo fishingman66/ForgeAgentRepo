@@ -2,7 +2,7 @@
 
 > 状态：**R1 检索内核 / R2 摄取与索引 / R3 评测闭环 / R4 问答可信 / R5 治理与规模化全部交付**（2026-11-12）。OCR 明确不做，改为视觉模型图片描述。方案与决策记录见 [`docs/05-知识库与RAG增强方案.md`](../../../docs/05-知识库与RAG增强方案.md)。
 
-知识库文档摄取、清洗、分块、向量化、混合检索、重排序、评测门禁、治理、图谱辅助、外部源、图片描述与 MCP 端点。125 个主类、**6 个 Controller + 1 个 MCP 端点**、**181 个单元测试**（30 类）。
+知识库文档摄取、清洗、分块、向量化、混合检索、重排序、评测门禁、治理、图谱辅助、外部源、图片描述与 MCP 端点。125 个主类、**6 个 Controller + 1 个 MCP 端点**、**196 个单元测试**（32 类）。
 
 依赖方向：`agent-core ← forge-rag ← forge-agent`，另有 `forge-rag → forge-kg`（图谱第三路，单向）；`forge-memory → forge-rag`（复用嵌入工厂与向量编解码）。`forge-rag` 不依赖 `forge-agent` 的业务实现。
 
@@ -17,7 +17,7 @@
         → 结构感知分块(章节路径 / 表格保表头 / 代码原子块 / 中文句读边界)
         → [可选父子分块: 先切父块再切子块]
         → 嵌入(OpenAI 兼容 / local-hash 兜底,分批+超时+退避重试)
-        → MySQL 子块落库(携带 generation) + 向量(milvus REST v2 / mysql 向量列)
+        → MySQL 子块落库(携带 generation) + 向量(milvus gRPC / mysql 向量列)
         → [换代: 新代写成功 → 切 active_generation → 清旧代]
 
 检索链: 可见性解析(治理谓词 + ACL 角色求交 → hidden 集,检索前下推)
@@ -29,7 +29,7 @@
         → 命中统计 / 检索回执 SearchOutcome
         → 子块回填父块全文 + 页码定位
 
-降级设计: 向量库挂 → 关键词兜底;Milvus 集合未加载 → 自动 load 重试;
+降级设计: 向量库挂 → 关键词兜底;Milvus 集合被删/未加载 → 重建或重载后重试一次(lite 自动加载,load 失败只记 debug);
           重排失败 → RRF 回退;向量写失败 → 标 FAILED 由补偿任务重试,不阻断解析;
           嵌入网络失败 → 1s/2s 退避重试 3 次;
           图片描述失败 → 写【图片 pN】(未生成描述),任何失败不阻断摄取;
@@ -62,7 +62,7 @@ src/main/java/com/forgeagent/rag
 │   │                 # KbVlmConfigResolver / QueryHashes
 │   └── impl/         # 知识库 / 文档 / 摄取管线 / 评测 / 质量 / 外部源 /
 │                     # 向量补偿 / VLM 配置 服务实现
-└── src/test/java     # 30 类 181 用例,全部 @Tag("dev")
+└── src/test/java     # 32 类 196 用例,全部 @Tag("dev")
 ```
 
 ## 检索内核（R1）
@@ -160,14 +160,22 @@ API Key 经 `KbSecretCipher`（AES-GCM，`ENC:` 前缀，密钥由 `rag.knowledg
 
 | 值 | 实现 | 适用 | 说明 |
 | --- | --- | --- | --- |
-| `milvus`（默认） | `MilvusVectorStore` | 生产 | REST 调 Milvus，AUTOINDEX + COSINE；集合启动时自动创建 |
+| `milvus`（默认） | `MilvusVectorStore` | 本地 milvus-lite + 生产 standalone | `milvus-sdk-java 3.0.12` 走 **gRPC**（`MilvusClientV2`），AUTOINDEX + COSINE；集合启动时懒创建，SDK 自带 shaded gRPC/Netty |
 | `mysql` | `MysqlVectorStore` | 本地开发 | 向量存 `agent_kb_chunk.embedding`（float32 小端 BLOB），检索在应用层算余弦 |
 
 ```yaml
+# 本地开发（milvus-lite 3.x，19530 仅 gRPC）
 rag:
   knowledge:
-    vector-store: mysql   # dev 默认；生产保持 milvus
+    vector-store: milvus
+    milvus-host: 127.0.0.1
+    milvus-port: 19530
+    milvus-consistency-level: STRONG   # 写入后立即可见
+# 生产（Milvus 3.0 standalone）：只改 host/port/token/database/secure，
+# 业务代码与 SDK 版本完全一致，见 application-prod.yml 与 deploy/docker/docker-compose.yml
 ```
+
+`vector-store: mysql` 仅用于「不装 Milvus」的临时场景。**切换后端后必须执行一次** `backend/sql/manual_vector_backend_resync.sql`（非幂等）：`vector_status` 是「当前后端已同步」的单列状态，存量 `SYNCED` 分块不会被补偿任务捞起，不回填则语义召回静默为空。也可以对每个知识库调用 `PUT /agent/knowledge/{id}/reindex` 全量重建。
 
 边界：MySQL 版检索是 O(n) 全扫，单次最多 5000 分块，**上万分块就该上 Milvus**；维度不符的分块跳过（换嵌入模型后老向量自动失效）；`embedding` 标 `@TableField(select=false)` 需显式 select；升级脚本 `backend/sql/agent_kb_local_vector.sql`（幂等）。`local-hash` 是特征哈希伪向量，**只能验证链路通不通，不能评估召回质量**。
 
@@ -175,7 +183,9 @@ rag:
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `vector-store` / `milvus-*` / `collection-name` / `vector-dim` | `milvus` / 127.0.0.1:19530 / `agent_kb_chunk` / 384 | 向量后端与集合 |
+| `vector-store` / `milvus-host/port/token` | `milvus` / 127.0.0.1:19530 / 空 | gRPC 连接；SDK 3.0.12，lite 与 standalone 通用 |
+| `milvus-database` / `milvus-secure` / `milvus-consistency-level` | 空 / false / BOUNDED（dev 配 STRONG） | 库隔离 / TLS / 一致性 |
+| `collection-name` / `vector-dim` | `agent_kb_chunk` / 384 | 集合名与兜底维度（真实维度以模型输出为准） |
 | `file-dir` / `max-file-size-mb` | `./data/knowledge` / 20 | 文档存储 |
 | `rag-top-k` / `rag-max-hits` / `rag-min-score` | 3 / 5 / 0.05 | 对话检索参数（阈值只比可比分数） |
 | `cross-kb-rrf-k` | 60 | RRF 融合常数 |
@@ -213,7 +223,7 @@ Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 已同步全部表与列�
 
 ## 测试与验证
 
-**181 用例 / 30 类**，全部 `@Tag("dev")`：
+**196 用例 / 32 类**，全部 `@Tag("dev")`；其中 `MilvusVectorStoreContractTest` 13 条为 gRPC 报文契约，`MilvusGrpcIntegrationTest` 2 条需 `-Dmilvus.it=true` 连真机：
 
 ```bash
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
@@ -227,7 +237,7 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 
 ## 已知边界与扩展点
 
-- MySQL 向量后端是 O(n) 全扫（上限 5000），生产上万分块须用 Milvus；pgvector / Qdrant 未实现。
+- MySQL 向量后端是 O(n) 全扫（上限 5000），生产上万分块须用 Milvus；**Milvus 3.0 gRPC 是本地 lite 与生产 standalone 的唯一通道**（SDK 3.0.12，切环境只改连接配置）；pgvector / Qdrant 未实现。
 - S3 / Confluence 外部源为 SPI 骨架，实现 `fetch` 即启用；URL 源已真抓取。
 - 图谱第三路默认关，抽取需配真实模型；`kg.extract-model` 留空不会抽。
 - 图片描述不做 OCR，扫描件 PDF 仍由解析守卫明确报错。

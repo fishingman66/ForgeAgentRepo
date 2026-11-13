@@ -105,4 +105,19 @@ public class CallcenterProperties {
 
     /** C4 信息提取兜底字段:渠道 voice_config_json 未声明 extract_keys 时使用。 */
     private List<String> extractDefaultKeys = List.of("orderNo", "amount");
+
+    /** C5 分流规则缓存 TTL(毫秒):规则变更由管理端保存后靠 TTL 生效,避免每次分片查库。 */
+    private Long routeRuleCacheTtlMs = 60_000L;
+
+    /** C5 分片文本评估长度上限(字符):超长文本截断后再匹配,压制正则开销。 */
+    private Integer routeRuleMaxTextChars = 200;
+
+    /** C5 规则未声明 max_match_length 时的兜底上限(字符)。 */
+    private Integer routeRuleDefaultMaxMatchLength = 40;
+
+    /**
+     * C5 LLM 引擎开关:true 且容器内存在 {@code LlmIntentClassifier} 实现时才真正调用;
+     * 无实现一律降级到正则库并告警一次(不静默假装分类成功)。
+     */
+    private Boolean routeLlmEnabled = false;
 }

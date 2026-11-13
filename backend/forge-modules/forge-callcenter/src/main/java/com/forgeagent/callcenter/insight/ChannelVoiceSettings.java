@@ -44,10 +44,16 @@ public class ChannelVoiceSettings {
     private final ObjectProvider<CsCallChannelConfigMapper> mapperProvider;
     private final Map<String, Entry> cache = new ConcurrentHashMap<>();
 
-    /** 渠道级洞察设置:抽取字段清单 + 自动转接队列(可为 null)。 */
-    public record Settings(List<String> extractKeys, String autoTransferQueue) {
-        /** 完全关闭:不抽取、不转接。 */
-        public static final Settings EMPTY = new Settings(List.of(), null);
+    /** 渠道级语音设置:抽取字段 + 自动转接队列 + 是否走「无 IVR 直接应答」分流。 */
+    public record Settings(List<String> extractKeys, String autoTransferQueue, boolean directAnswer) {
+
+        /** 兼容旧调用(抽取 + 转接队列),直接应答默认关。 */
+        public Settings(List<String> extractKeys, String autoTransferQueue) {
+            this(extractKeys, autoTransferQueue, false);
+        }
+
+        /** 完全关闭:不抽取、不转接、不分流。 */
+        public static final Settings EMPTY = new Settings(List.of(), null, false);
     }
 
     private record Entry(Settings settings, long loadedAt) {
@@ -78,7 +84,8 @@ public class ChannelVoiceSettings {
 
     private Settings defaults() {
         return new Settings(properties.getExtractDefaultKeys() == null
-            ? List.of() : properties.getExtractDefaultKeys(), properties.getAutoTransferQueue());
+            ? List.of() : properties.getExtractDefaultKeys(),
+            properties.getAutoTransferQueue(), false);
     }
 
     private Settings load(String channelCode) {
@@ -125,7 +132,8 @@ public class ChannelVoiceSettings {
             } else {
                 queue = properties.getAutoTransferQueue();
             }
-            return new Settings(List.copyOf(keys), queue);
+            boolean directAnswer = root.has("direct_answer") && root.get("direct_answer").asBoolean(false);
+            return new Settings(List.copyOf(keys), queue, directAnswer);
         } catch (Exception e) {
             log.debug("[CC] voice_config_json 解析降级: {}", e.getMessage());
             return defaults();

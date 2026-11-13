@@ -55,10 +55,17 @@
             <artifactId>forge-common-json</artifactId>
         </dependency>
 
-        <!-- Jackson 数据绑定(Milvus REST 调用) -->
+        <!-- Jackson 数据绑定 -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Milvus 3.0 Java SDK(gRPC)：本地 milvus-lite 与生产 standalone 共用同一客户端。
+             SDK 自带 shaded gRPC/Netty；protobuf-java 由父 pom 统一锁版本。 -->
+        <dependency>
+            <groupId>io.milvus</groupId>
+            <artifactId>milvus-sdk-java</artifactId>
         </dependency>
 
         <!-- 安全模块 -->

@@ -14,10 +14,12 @@ import org.springframework.stereotype.Component;
 public class KnowledgeProperties {
 
     /**
-     * 向量存储实现:milvus(生产) / mysql(本地开发)。
+     * 向量存储实现:milvus(本地 milvus-lite / 生产 Milvus 3.0 standalone，统一 gRPC) /
+     * mysql(不装 Milvus 时的本地兜底)。
      *
      * <p>mysql 模式把向量存进 {@code agent_kb_chunk.embedding} 并在应用层算余弦,
-     * 目的是「不装 Milvus 也能跑通 RAG 全链路」;超过一万分块会明显变慢,不适合生产。</p>
+     * 目的是「不装 Milvus 也能跑通 RAG 全链路」;超过一万分块会明显变慢,不适合生产。
+     * 切换 vector-store 后需执行 backend/sql/manual_vector_backend_resync.sql 回填存量分块。</p>
      */
     private String vectorStore = "milvus";
 
@@ -27,14 +29,30 @@ public class KnowledgeProperties {
     private String milvusHost = "127.0.0.1";
 
     /**
-     * Milvus 服务端口(REST/gRPC 复用端口)
+     * Milvus 服务端口(gRPC;milvus-lite 与 standalone 均为 19530)
      */
     private Integer milvusPort = 19530;
 
     /**
-     * Milvus 访问令牌(单机版默认空)
+     * Milvus 访问令牌(milvus-lite 无认证保持空;standalone 开启认证时填 user:password)
      */
     private String milvusToken = "";
+
+    /**
+     * Milvus 数据库名(空 = 默认库)。生产需要库级隔离时指定,与本地连 lite 只差这一项配置
+     */
+    private String milvusDatabase = "";
+
+    /**
+     * 是否用 TLS 连接(uri 走 https)。milvus-lite 不支持 TLS,本地保持 false
+     */
+    private Boolean milvusSecure = false;
+
+    /**
+     * 一致性级别 STRONG/SESSION/BOUNDED/EVENTUALLY。
+     * 本地 lite 与刚摄取完立即检索的场景建议 STRONG;生产 standalone 可用 BOUNDED 降延迟
+     */
+    private String milvusConsistencyLevel = "BOUNDED";
 
     /**
      * Milvus 集合名称(存放全部知识库分块向量,按 knowledge_id 过滤隔离)

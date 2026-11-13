@@ -132,6 +132,22 @@ public class InsightPipeline {
         submit(null, () -> runPostCall(call));
     }
 
+    /**
+     * 分流决策留痕(C5 无 IVR 直接应答模式):意图由规则/语义引擎给出,
+     * 动作执行由调用方同步完成(需要在下发转接的当下完成),这里只异步落库。
+     *
+     * <p>与挂机后的 INTENT 洞察共用同一张表与同一套游标语义,
+     * 用 itemKey {@code direct-<segmentId>} 区分逐片决策与挂机全文结论。</p>
+     */
+    public void onRouteDecision(CsCall call, String itemKey, long cursor,
+                               String intentCode, String payload) {
+        if (!enabled() || call == null || call.getId() == null) {
+            return;
+        }
+        submit(InsightKind.INTENT, () -> record(call, InsightKind.INTENT, itemKey, cursor,
+            intentCode, null, payload));
+    }
+
     // ------------------------------------------------------------------
     // 执行体
     // ------------------------------------------------------------------

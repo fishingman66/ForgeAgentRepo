@@ -1,6 +1,6 @@
 # 智造 ForgeAgent 后端
 
-后端采用单体多模块架构：一个进程承载全部业务，模块按领域内聚划分、依赖单向。技术栈为 Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus，运行内核基于 AgentScope 2.0，存储为 MySQL 8 + Redis 6（向量库：生产 Milvus 2.4，本地开发可用 MySQL 向量列替代，见 [`forge-rag` README](forge-modules/forge-rag/README.md)）。
+后端采用单体多模块架构：一个进程承载全部业务，模块按领域内聚划分、依赖单向。技术栈为 Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus，运行内核基于 AgentScope 2.0，存储为 MySQL 8 + Redis 6 + Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone v3.0.6，SDK 3.0.12；无 Milvus 时可切 MySQL 向量列替代，见 [`forge-rag` README](forge-modules/forge-rag/README.md)）。
 
 选择单体而非微服务的理由：当前阶段业务耦合在对话主链路上，拆分会把一次对话变成跨服务长事务；各模块已按边界隔离，后续出现独立扩缩容需求时再按模块平移。
 
@@ -147,12 +147,12 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **470 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **485 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
 # Agent 平台 101：检索链路与引用门禁 25 + 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算/工作记忆 8 + MCP 空间归属 16 + 工作流执行体 8 + 问数标识校验 4
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
-# 知识库/RAG 181：30 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
+# 知识库/RAG 196：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
 # 智能客服域 92：22 个测试类（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
 mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \

@@ -7,6 +7,7 @@ import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.mapper.CsCallSegmentMapper;
 import com.forgeagent.callcenter.common.CsPiiMasker;
 import com.forgeagent.callcenter.insight.InsightPipeline;
+import com.forgeagent.callcenter.route.DirectAnswerRouter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,8 @@ public class TranscriptIngestService {
     private final CsCallSegmentMapper segmentMapper;
     /** C4 洞察管道:旁路异步,主叫终稿触发情绪评估(节流在管道内)。 */
     private final InsightPipeline insightPipeline;
+    /** C5 无 IVR 直接应答分流:渠道开启时才动作,未开启零开销。 */
+    private final DirectAnswerRouter directAnswerRouter;
 
     /** 写入一条转写分片;正文为空返回 null(A2 据此跳过坐席推荐)。 */
     public CsCallSegment ingest(CsCall call, CsVoiceEvent event) {
@@ -55,6 +58,12 @@ public class TranscriptIngestService {
             insightPipeline.onSegment(call, segment);
         } catch (Exception e) {
             log.warn("[CC] 洞察管道触发失败 callId={}: {}", call.getCallId(), e.getMessage());
+        }
+        // C5 直接应答分流:同步决策 + 动作(转接要赶在通话结束前),决策留痕异步
+        try {
+            directAnswerRouter.onSegment(call, segment);
+        } catch (Exception e) {
+            log.warn("[CC] 直接应答分流失败 callId={}: {}", call.getCallId(), e.getMessage());
         }
         return segment;
     }

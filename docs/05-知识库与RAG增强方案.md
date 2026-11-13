@@ -33,7 +33,7 @@
 
 | 项 | 实现 |
 | --- | --- |
-| 向量后端 | `vector-store=milvus`（生产）/ `mysql`（开发，`agent_kb_chunk.embedding` BLOB + 应用层余弦）。Milvus 集合按维度分片 `{name}_{dim}`，主集合沿用原名零迁移 |
+| 向量后端 | `vector-store=milvus`（dev 直连 milvus-lite 3.x、prod 用 Milvus 3.0 standalone v3.0.6，**统一 gRPC + `milvus-sdk-java 3.0.12`**）/ `mysql`（无 Milvus 时，`agent_kb_chunk.embedding` BLOB + 应用层余弦）。集合按维度分片 `{name}_{dim}`，主集合沿用原名零迁移 |
 | 维度 | `EmbeddingFactory#resolveDimension` 以模型真实输出为准（`warmUp()` 惰性自校准），`vector-dim` 只作 local-hash 兜底 |
 | 索引代次 | 文档 `active_generation` / 分块 `generation`。「新代写成功 → 切指针 → 清旧代」，检索只认 `==`。**切代读竞态整次重跑并绕过缓存** |
 | 一致性 | `vector_status`(PENDING/SYNCED/FAILED/SKIPPED) + `KbVectorSyncService` 补偿（30s / batch 200 / maxRetry 5 / PENDING 宽容 5min）；写顺序固定「算向量 → 落库 → 写向量」 |
@@ -135,6 +135,9 @@
 
 **工程口径**
 
+- **19530 是 gRPC 不是 REST**：milvus-lite 3.x 只实现 gRPC，用 HTTP/1.1 打 `/v2/vectordb/...` 会拿到 HTTP/2 SETTINGS 帧。Java 侧统一 `MilvusClientV2`，别再写 `RestClient` 调 REST v2；SDK 自带 shaded gRPC/Netty，protobuf-java 由父 pom 锁 4.36.2。
+- **切换 `vector-store` 不会自动回填**：补偿任务只捞 `PENDING/FAILED`，存量 `SYNCED` 分块在新后端里没有向量，语义召回会静默为空。切后端后执行一次 `backend/sql/manual_vector_backend_resync.sql`（非幂等，仅切时跑），或对每个库 `reindex`。
+
 - 新增 Vo **必须挂 `@AutoMapper(target = Entity.class)`**，否则 `selectVoPage` 抛 ConvertException 而接口只回"未知异常"。
 - 评测数字以 `baseline/` 的 `kb_baseline.py` 为准，`--no-write` 只打印不覆盖。**改语料或用例等于改基线**，必须重跑存档为新版本号。
 - MySQL `NATURAL LANGUAGE MODE` 只有一行时所有词算高频被忽略 → 关键词路零命中，造数至少 2 个分块。
@@ -162,7 +165,7 @@
 
 | 组 | 关键项 |
 | --- | --- |
-| 向量 | `vector-store`(milvus/mysql)、`milvus-host/port`、`vector-dim`（兜底） |
+| 向量 | `vector-store`(milvus/mysql)、`milvus-host/port/token/database/secure`、`milvus-consistency-level`(dev STRONG / prod BOUNDED)、`collection-name`、`vector-dim`（兜底）；SDK 3.0.12 gRPC |
 | 检索 | `rag-min-score`、`rag-max-hits`、`cross-kb-rrf-k`(60)、`rewrite-timeout-ms`(2000)、`rerank-timeout-ms`(1500)、`rerank-candidate-limit`(50)、`rerank-mode` |
 | 补偿 | `sync.compensation-enabled`(true)、`batch-size`(200)、`max-retry`(5)、`pending-timeout-minutes`(5)、`compensation-interval-ms`(30000) |
 | 门禁/校验 | `gate.required`(**false**，先观察)、`citation.validate-enabled`(true) |
@@ -243,6 +246,7 @@ R3 的评测回答"这次改配置好没好"，回答不了"用户在问什么�
 | R5-1/2 治理 | `DocVisibilityResolver` + 文档 ACL 检索前下推 + 审核/有效期/回收站 | 已交付 |
 | R5-3/4/6 图谱与外部源 | `KbGraphRetriever` 图路、`service/ext/` SPI + URL 抓取（S3/Confluence 骨架）、库级 `retrieval_overrides`、MCP filters | 已交付 |
 | R5-5 图片 | 图片抽取 + VLM 描述进正文 + 工作空间级 VLM 配置（Key 加密） | 已交付 |
+| 2026-11-14 Milvus 3.0 统一 | dev/prod 统一 gRPC 客户端（SDK 3.0.12）；compose 升 v3.0.6 + MinIO + etcd 3.5.25；后端切配置即换环境；新增 15 条向量契约/真机用例 | 已交付 |
 | 剩余 | S3/Confluence 真实接入（SPI 就绪，实现 `fetch` 即可）、OCR 可选 profile、图片向量 | 按需 |
 
 > 各批的单测与 e2e 数字已随验证环境一并归档；回归命令见 [backend/README](../backend/README.md)。

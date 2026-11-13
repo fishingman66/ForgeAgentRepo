@@ -66,6 +66,10 @@
         <mica-mqtt.version>2.6.12</mica-mqtt.version>
         <!-- Agent 运行内核 -->
         <agentscope.version>2.0.4</agentscope.version>
+        <!-- 向量库：Milvus 3.0.x(compose v3.0.6 / 本地 milvus-lite 3.2.x 同代) -->
+        <milvus-sdk.version>3.0.12</milvus-sdk.version>
+        <!-- SDK 生成的 gRPC 消息类依赖 protobuf-java，统一锁版本避免多版本并存 -->
+        <protobuf-java.version>4.36.2</protobuf-java.version>
 
         <!-- Maven 构建插件版本 -->
         <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version>
@@ -117,6 +121,19 @@
     <!-- 依赖声明 -->
     <dependencyManagement>
         <dependencies>
+
+            <!-- Milvus 3.0 Java SDK：gRPC 依赖已 shaded，不与平台 grpc 冲突 -->
+            <dependency>
+                <groupId>io.milvus</groupId>
+                <artifactId>milvus-sdk-java</artifactId>
+                <version>${milvus-sdk.version}</version>
+            </dependency>
+            <!-- SDK 生成的 proto 类统一使用平台 protobuf 版本 -->
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-java</artifactId>
+                <version>${protobuf-java.version}</version>
+            </dependency>
 
             <!-- SpringBoot的依赖配置-->
             <dependency>

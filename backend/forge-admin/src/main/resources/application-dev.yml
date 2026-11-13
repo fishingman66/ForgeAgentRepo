@@ -265,14 +265,19 @@ justauth:
       redirect-uri: ${justauth.address}/social-callback?source=gitea
 
 # RAG 模块 - 知识库向量检索
-# 本地开发默认走 mysql:向量存 agent_kb_chunk.embedding,应用层算余弦,不装 Milvus 也能跑通 RAG。
-# 需要连真 Milvus 时把 vector-store 改成 milvus(生产配置不要动这一项)。
+# 本地开发直连 milvus-lite(19530 仅提供 gRPC)；生产 Milvus 3.0 standalone 同样走 gRPC。
+# 两端共用 Milvus Java SDK 3.0.12 与同一套业务代码，切环境只需改 milvus-* 连接项。
+# 若不想装 Milvus 可临时改 vector-store: mysql(向量列 + 应用层余弦)，切换后需回填存量分块。
 rag:
   knowledge:
-    vector-store: mysql
+    vector-store: milvus
     milvus-host: 127.0.0.1
     milvus-port: 19530
     milvus-token:
+    milvus-database:
+    milvus-secure: false
+    # lite 写入后立即可见；生产 standalone 可改 BOUNDED 降延迟
+    milvus-consistency-level: STRONG
     collection-name: agent_kb_chunk
     vector-dim: 384
     file-dir: ./data/knowledge

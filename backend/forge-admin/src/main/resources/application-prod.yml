@@ -265,3 +265,16 @@ justauth:
       client-id: 10**********6
       client-secret: 1f7d08**********5b7**********29e
       redirect-uri: ${justauth.address}/social-callback?source=gitea
+
+# RAG 向量库：Milvus 3.0 standalone(gRPC)
+# 本地 dev 用 milvus-lite(127.0.0.1:19530)，两端共用同一 Java SDK 与业务代码。
+# 生产只改下面连接项，或由 compose 的 RAG_KNOWLEDGE_MILVUS_* 环境变量覆盖。
+rag:
+  knowledge:
+    vector-store: milvus
+    milvus-host: ${RAG_KNOWLEDGE_MILVUS_HOST:milvus}
+    milvus-port: ${RAG_KNOWLEDGE_MILVUS_PORT:19530}
+    milvus-token: ${RAG_KNOWLEDGE_MILVUS_TOKEN:}
+    milvus-database: ${RAG_KNOWLEDGE_MILVUS_DATABASE:}
+    milvus-secure: ${RAG_KNOWLEDGE_MILVUS_SECURE:false}
+    milvus-consistency-level: ${RAG_KNOWLEDGE_MILVUS_CONSISTENCY_LEVEL:BOUNDED}

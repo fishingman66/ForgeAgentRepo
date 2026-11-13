@@ -7,7 +7,7 @@
 | 速览 | 值 |
 | --- | --- |
 | 模块 | `backend/forge-modules/` 下 12 个，依赖单向无环 |
-| 后端单测 | **470 用例**（7 个模块有测试类，全部 `@Tag("dev")`） |
+| 后端单测 | **485 用例**（7 个模块有测试类，全部 `@Tag("dev")`） |
 | 前端 | 15 单测 + `vue-tsc --noEmit` 零错误，已接入构建门禁 |
 | 检索基线 | HitRate@5 **93.33%** / MRR **0.8667** / NDCG@5 **0.8841** |
 | 端到端 | 4 套逐期脚本（28 / 18 / 15 / 16）全通过 |
@@ -48,9 +48,9 @@ docker compose up -d
 
 ### 方式二：本地开发
 
-**1. 环境**：JDK 21、Maven 3.9+、**Node ≥ 22.22.0 与 pnpm ≥ 12.0.0**（见 `frontend/package.json` 的 `engines`）；MySQL 8、Redis 6 必装，Milvus 2.4 可选。
+**1. 环境**：JDK 21、Maven 3.9+、**Node ≥ 22.22.0 与 pnpm ≥ 12.0.0**（见 `frontend/package.json` 的 `engines`）；MySQL 8、Redis 6 必装，Milvus 3.0（本地 milvus-lite 3.x / 生产 standalone v3.0.6，均为 gRPC）必装。
 
-> 不装 Milvus 也能跑通知识库全链路：`rag.knowledge.vector-store: mysql` 用 MySQL 向量列做本地检索后端，详见 §4.2 与 [forge-rag README](backend/forge-modules/forge-rag/README.md)。
+> dev 默认直连本机 milvus-lite 的 19530（**gRPC**）；生产 compose 用 Milvus 3.0 standalone，二者共用 `milvus-sdk-java 3.0.12` 与同一套业务代码，切环境只改 `rag.knowledge.milvus-*` 连接项。不装 Milvus 时可临时改 `vector-store: mysql` 用 MySQL 向量列跑通全链路，详见 §4.2 与 [forge-rag README](backend/forge-modules/forge-rag/README.md)。
 
 **2. 初始化数据库**（创建 `forge-vue` 与 `forge-job`，均 utf8mb4）：
 
@@ -76,7 +76,17 @@ mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < backend/sql/for
 
 **3. 配置**：编辑 `backend/forge-admin/src/main/resources/application-dev.yml`，填入 MySQL 与 Redis 连接信息。
 
-**4. 后端**：
+**4. （Windows 环境）启动 milvus-lite（仅 gRPC）**：
+
+```bash
+pip install -U milvus-lite pymilvus
+milvus-lite server --data-dir D:/temp/milvus-data --port 19530
+```
+
+> milvus-lite 3.x 的 19530 **只提供 gRPC**，不提供 HTTP/1.1 REST v2。后端统一使用 `milvus-sdk-java 3.0.12` 的 `MilvusClientV2`，本地 lite 与生产 Milvus 3.0 standalone 走同一条代码路径；生产 compose 为 `milvusdb/milvus:v3.0.6` + MinIO + etcd（3.0 起不再支持 `COMMON_STORAGETYPE=local`）。
+> **从 `vector-store: mysql` 切过来时**，存量分块仍是 `SYNCED` 而新后端没有向量，必须先执行一次 `backend/sql/manual_vector_backend_resync.sql`（非幂等，仅切后端时跑），由补偿任务回填，否则语义召回会静默为空。
+
+**5. 后端**：
 
 ```bash
 cd backend
@@ -84,7 +94,7 @@ mvn -Pdev clean package -DskipTests -T 1C
 java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admin.jar
 ```
 
-**5. 前端**：
+**6. 前端**：
 
 ```bash
 cd frontend
@@ -93,7 +103,7 @@ pnpm run dev
 # 访问 http://localhost:8100（/dev-api 代理至 8080）
 ```
 
-**6. 登录**：`admin / admin123`
+**7. 登录**：`admin / admin123`
 
 ---
 
@@ -106,7 +116,7 @@ pnpm run dev
 | 前端 | Vue 3.5 + TypeScript 6 + Element Plus 2.14 + Vite 8 + Pinia 4 + vue-router 5 + UnoCSS + ECharts；pnpm 12 |
 | 后端 | Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus |
 | 运行内核 | AgentScope 2.0 |
-| 存储 | MySQL 8+（utf8mb4）+ Redis 6（Redisson）+ Milvus 2.4（可选）。无 Milvus 时向量以 `BLOB`（float32 小端）存于分块表/记忆表，由应用层算余弦，扫描上限 5000 |
+| 存储 | MySQL 8+（utf8mb4）+ Redis 6（Redisson）+ Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone）。无 Milvus 时可切 `vector-store: mysql`，向量以 `BLOB`（float32 小端）存于分块表/记忆表，由应用层算余弦，扫描上限 5000 |
 
 ### 3.2 模块地图
 
@@ -128,7 +138,7 @@ pnpm run dev
 | --- | --- | --- |
 | `forge-agent-core` | 共享内核：实体 / `ResourceAccessGuard` / 模型工厂 | [README](backend/forge-modules/forge-agent-core/README.md) |
 | `forge-agent` | Agent 平台业务与运行内核（27 Controller） | [README](backend/forge-modules/forge-agent/README.md) |
-| `forge-rag` | 知识库与 RAG（R1~R5 全量，181 用例） | [README](backend/forge-modules/forge-rag/README.md) |
+| `forge-rag` | 知识库与 RAG（R1~R5 全量，196 用例） | [README](backend/forge-modules/forge-rag/README.md) |
 | `forge-memory` | 六层长期记忆（L0~L5） | [README](backend/forge-modules/forge-memory/README.md) |
 | `forge-kg` | 知识图谱（MySQL 存图 / Neo4j SPI） | [README](backend/forge-modules/forge-kg/README.md) |
 | `forge-customer-service` | 智能客服域（C0~C4 / A1~A5 / P0~P3） | [README](backend/forge-modules/forge-customer-service/README.md) |
@@ -183,7 +193,7 @@ pnpm run dev
 | R5-3/4/6 规模化 | 图谱第三路（异步抽实体、≤2 跳、只走 RRF）；URL 外部源 + SSRF 防护 + S3·Confluence SPI 骨架；MCP `filters.documentIds` / `knowledge_chunks`；库级检索参数覆盖 |
 | R5-5 与视觉模型 | PDF/docx 抽图 → 描述插入对应页/段落（双开关默认关、≤20 张、同图 MD5 复用、失败不阻断，**不做 OCR**）；按工作空间配置平台或第三方 OpenAI 兼容模型，Key AES-GCM 加密 / 掩码回显 / 编辑留空沿用 / 连通性测试 |
 
-向量后端 `milvus`（生产）/ `mysql`（本地，`BLOB` + 应用层余弦，上限 5000）一个配置切换，上万分块应切 Milvus。完整口径见 [forge-rag README](backend/forge-modules/forge-rag/README.md) 与 [`docs/05-知识库与RAG增强方案.md`](docs/05-知识库与RAG增强方案.md)。
+向量后端 `milvus`（本地 lite / 生产 standalone 统一 gRPC，SDK 3.0.12）/ `mysql`（无 Milvus 时 `BLOB` + 应用层余弦，上限 5000）一个配置切换；切后端需回填存量分块（见 `backend/sql/manual_vector_backend_resync.sql`）。完整口径见 [forge-rag README](backend/forge-modules/forge-rag/README.md) 与 [`docs/05-知识库与RAG增强方案.md`](docs/05-知识库与RAG增强方案.md)。
 
 ### 4.3 智能客服与语音呼叫中心
 
@@ -239,10 +249,10 @@ pnpm run dev
 
 | 模块 | 用例 | 模块 | 用例 |
 | --- | --- | --- | --- |
-| Agent 平台 | 101 | 知识库/RAG | 181 |
+| Agent 平台 | 101 | 知识库/RAG | 196 |
 | 智能客服域 | 92 | 长期记忆 | 44 |
 | 知识图谱 | 20 | 呼叫中心 | 19 |
-| 契约层 | 13 | **后端合计** | **470** |
+| 契约层 | 13 | **后端合计** | **485** |
 
 前端 15 单测（`sse-events` 10 + `governance` 5），`pnpm typecheck` 零错误，`build` / `build:dev` / `build:prod` 均前置 `vue-tsc --noEmit`。
 
@@ -288,6 +298,10 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 ---
 
 ## 8. FAQ
+
+**本地 milvus-lite 为什么必须走 gRPC？**
+
+milvus-lite 3.x 只实现 gRPC，19530 用 HTTP/1.1 访问会拿到 HTTP/2 SETTINGS 帧而不是 JSON（旧版 REST v2 客户端已移除）。后端统一用 `milvus-sdk-java 3.0.12` 的 `MilvusClientV2`，本地与生产是同一条代码路径，切环境只改 `rag.knowledge.milvus-host/port/token/database/secure` 和 `milvus-consistency-level`。SDK 自带 shaded gRPC/Netty，protobuf-java 由父 pom 锁到 4.36.2，不与平台其他依赖冲突。
 
 **不部署 Milvus 能用吗？**
 
