@@ -504,14 +504,18 @@ public class ChatContextAssembler {
     }
 
     /**
-     * 加载 MCP 服务器定义快照(仅启用状态)
+     * 加载 MCP 服务器定义快照(仅启用状态,且对当前 Agent 归属空间可见)。
+     *
+     * <p>绑定时已有 {@code ResourceAccessGuard.assertReadableBy} 校验,这里再按同样口径过滤一次,
+     * 防止存量 Agent 的 mcp_ids 里残留跨空间私有服务器(或归属后被调整)在对话执行链路被装配。</p>
      */
-    public List<ToolAssembler.McpDef> loadMcpDefs(List<Long> mcpIds) {
+    public List<ToolAssembler.McpDef> loadMcpDefs(List<Long> mcpIds, Long callerWorkspaceId) {
         if (mcpIds.isEmpty()) {
             return Collections.emptyList();
         }
         return mcpServerMapper.selectByIds(mcpIds).stream()
             .filter(s -> !"1".equals(s.getStatus()))
+            .filter(s -> resourceGuard.readableBy(s.getWorkspaceId(), callerWorkspaceId))
             .map(s -> new ToolAssembler.McpDef(
                 s.getId(), s.getName(), s.getServerType(), s.getUrl(), s.getHeaders(),
                 s.getTimeoutSeconds(), s.getApprovalMode(), s.getApprovalTimeout()))

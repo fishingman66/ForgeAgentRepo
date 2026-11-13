@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import com.forgeagent.agentcore.domain.AgentInfo;
 import com.forgeagent.rag.domain.AgentKnowledge;
 import com.forgeagent.agentcore.domain.AgentModel;
+import com.forgeagent.agent.domain.AgentMcpServer;
 import com.forgeagent.agent.domain.AgentTool;
 import com.forgeagent.agent.domain.AgentWorkspace;
 import com.forgeagent.agentcore.domain.AgentWorkspaceMember;
@@ -387,9 +388,14 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
             }
         }
         if (mcpIds != null && !mcpIds.isEmpty()) {
-            long count = mcpServerMapper.selectByIds(mcpIds).stream().filter(Objects::nonNull).count();
-            if (count != mcpIds.stream().distinct().count()) {
+            List<AgentMcpServer> servers = mcpServerMapper.selectByIds(mcpIds).stream()
+                .filter(Objects::nonNull).toList();
+            if (servers.size() != mcpIds.stream().distinct().count()) {
                 throw new ServiceException("部分绑定的 MCP 服务器不存在");
+            }
+            // 与工具/模型同口径:平台共享可读,私有资源须属于当前 Agent 的归属空间
+            for (AgentMcpServer server : servers) {
+                resourceGuard.assertReadableBy(server.getWorkspaceId(), workspaceId);
             }
         }
     }

@@ -33,6 +33,16 @@ public class AgentMcpServerBo implements Serializable {
     private Long id;
 
     /**
+     * 归属工作空间(NULL=平台共享,全空间可见;非空=空间私有,仅归属空间可见)
+     */
+    private Long workspaceId;
+
+    /**
+     * 是否创建为平台共享资源(仅超管可选;false 时 workspaceId 必填)
+     */
+    private Boolean shared;
+
+    /**
      * 服务器名称
      */
     @NotBlank(message = "MCP服务器名称不能为空", groups = {AddGroup.class, EditGroup.class})

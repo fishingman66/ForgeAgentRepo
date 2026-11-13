@@ -1153,7 +1153,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
         buildMetrics.put("memoryEnabled", "1".equals(agent.getMemoryEnabled()));
         stageAt = System.currentTimeMillis();
         // MCP 定义快照:经审批门装配进 AgentScope 内核 Toolkit
-        List<ToolAssembler.McpDef> mcpDefs = contextAssembler.loadMcpDefs(mcpIds);
+        List<ToolAssembler.McpDef> mcpDefs = contextAssembler.loadMcpDefs(mcpIds, agent.getWorkspaceId());
         String roundId = java.util.UUID.randomUUID().toString();
         // 问数:轮级 SQL 执行明细收集器(reactor 线程写入)+ 数据源语义上下文注入
         List<Map<String, Object>> sqlCollector = new java.util.concurrent.CopyOnWriteArrayList<>();

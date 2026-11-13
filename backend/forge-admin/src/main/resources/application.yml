@@ -2,6 +2,9 @@
 server:
   # 服务器的HTTP端口，默认为8080
   port: 8080
+  # 优雅停机:停止时先停止接收新请求,等待进行中的请求(SSE 长连接/Agent 运行)完成再关闭,
+  # 避免滚动重启硬切;最长等待由 spring.lifecycle.timeout-per-shutdown-phase 控制
+  shutdown: graceful
   servlet:
     # 应用的访问路径
     context-path: /
@@ -48,6 +51,9 @@ user:
 spring:
   application:
     name: ForgeAgent
+  lifecycle:
+    # 优雅停机最长等待时间:超时后强制关闭,兜底防止停机卡死
+    timeout-per-shutdown-phase: 30s
   threads:
     # 开启虚拟线程 仅jdk21可用
     # SSE 对话流会长时间占用请求线程,虚拟线程避免 Jetty 线程池被长连接耗尽

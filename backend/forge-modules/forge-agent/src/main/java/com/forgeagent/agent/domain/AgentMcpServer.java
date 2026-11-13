@@ -29,7 +29,12 @@ public class AgentMcpServer extends BaseEntity {
     private Long id;
 
     /**
-     * 服务器名称(全局唯一)
+     * 归属工作空间(NULL=平台共享,全空间可见;非空=空间私有,仅归属空间可见)
+     */
+    private Long workspaceId;
+
+    /**
+     * 服务器名称(同一空间内唯一)
      */
     private String name;
 

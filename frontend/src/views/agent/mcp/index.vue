@@ -34,6 +34,13 @@
       <el-table v-loading="loading" border :data="mcpList" class="data-table">
         <el-table-column label="ID" prop="id" width="80" align="center" />
         <el-table-column label="名称" prop="name" min-width="140" show-overflow-tooltip />
+        <el-table-column label="归属" width="100" align="center">
+          <template #default="scope">
+            <el-tag size="small" :type="scope.row.workspaceId ? 'warning' : 'success'" effect="plain">
+              {{ scope.row.workspaceId ? '空间私有' : '平台共享' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="传输类型" width="130" align="center">
           <template #default="scope">
             <el-tag size="small" :type="scope.row.serverType === 'sse' ? 'warning' : 'success'" effect="plain">
@@ -79,8 +86,9 @@
     <!-- 新增/编辑 MCP 服务器 -->
     <el-dialog v-model="dialog.visible" :title="dialog.title" width="600px" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+        <ResourceScopeFields v-model="form" />
         <el-form-item label="服务器名称" prop="name">
-          <el-input v-model="form.name" placeholder="2-50 字符,全局唯一" maxlength="50" />
+          <el-input v-model="form.name" placeholder="2-50 字符,同一空间内唯一" maxlength="50" />
         </el-form-item>
         <el-form-item label="传输类型" prop="serverType">
           <el-select v-model="form.serverType" style="width: 100%">
@@ -127,6 +135,7 @@
 <script setup lang="ts" name="AgentMcp">
 import { addMcpServer, changeMcpServerStatus, delMcpServer, listMcpServer, testMcpServer, updateMcpServer } from '@/api/agent/mcp';
 import type { McpServerForm, McpServerQuery, McpServerVO } from '@/api/agent/mcp/types';
+import ResourceScopeFields from '@/views/agent/components/ResourceScopeFields.vue';
 import { checkPermi } from '@/utils/permission';
 
 const { proxy } = getCurrentInstance() as ComponentInternalInstance;
@@ -151,7 +160,8 @@ const dialog = ref({ visible: false, title: '', saving: false });
 const isEdit = ref(false);
 const formRef = ref();
 const initForm: McpServerForm = {
-  id: undefined, name: '', serverType: 'streamable_http', url: '', headers: '',
+  id: undefined, workspaceId: undefined, shared: false,
+  name: '', serverType: 'streamable_http', url: '', headers: '',
   timeoutSeconds: 30, approvalMode: 'auto', approvalTimeout: 300, description: ''
 };
 const form = ref<McpServerForm>({ ...initForm });

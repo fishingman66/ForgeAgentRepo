@@ -1,6 +1,8 @@
 /** MCP 服务器视图对象 */
 export interface McpServerVO {
   id: string;
+  /** 归属工作空间(空=平台共享,非空=空间私有) */
+  workspaceId?: number | string;
   name: string;
   description?: string;
   /** 传输类型(sse/streamable_http) */
@@ -23,6 +25,10 @@ export interface McpServerVO {
 /** MCP 服务器表单对象 */
 export interface McpServerForm {
   id?: string;
+  /** 归属工作空间(NULL=平台共享,非空=空间私有);编辑时归属不可变 */
+  workspaceId?: number | string;
+  /** 是否创建为平台共享资源(仅超管可选) */
+  shared?: boolean;
   name: string;
   description?: string;
   serverType: string;

@@ -173,7 +173,7 @@ public class SqlQueryService {
      * 采样指定列的 distinct 值(用于快速构建枚举值字典),最多 limit 条
      */
     public List<String> sampleDistinctValues(AgentDatasource ds, String tableName, String columnName, int limit) {
-        // 表名/列名校验:仅允许字母数字下划线,防止注入
+        // 表名/列名字符级校验:仅允许字母数字下划线,阻断反引号/空白/括号注入
         if (!isIdentifierSafe(tableName) || !isIdentifierSafe(columnName)) {
             throw new ServiceException("表名或列名不合法");
         }
@@ -181,7 +181,10 @@ public class SqlQueryService {
         HikariDataSource pool = registry.get(ds);
         try (Connection conn = pool.getConnection()) {
             conn.setReadOnly(true);
-            checkWhitelist(ds, "SELECT " + columnName + " FROM " + tableName);
+            // 表名过白名单 + information_schema 实存校验:仅允许拼接真实存在的列,
+            // 杜绝任意合法标识符拼接(白名单为空时实存校验仍是最后防线)
+            checkWhitelist(ds, "SELECT 1 FROM " + tableName);
+            validateColumnExists(conn, ds.getDbName(), tableName, columnName);
             String sql = "SELECT DISTINCT " + columnName + " FROM " + tableName
                 + " WHERE " + columnName + " IS NOT NULL ORDER BY " + columnName + " LIMIT " + cap;
             List<String> values = new ArrayList<>();
@@ -210,6 +213,30 @@ public class SqlQueryService {
             return false;
         }
         return name.matches("^[A-Za-z0-9_]+$");
+    }
+
+    /**
+     * information_schema 列存在性校验:表必须存在于指定库且列属于该表,
+     * 作为标识符拼接 SQL 的最终白名单(列名无法参数化,只能靠实存校验兜底)
+     */
+    private void validateColumnExists(Connection conn, String dbName, String tableName, String columnName) {
+        try (PreparedStatement ps = conn.prepareStatement(
+            "SELECT 1 FROM information_schema.columns "
+                + "WHERE table_schema = ? AND table_name = ? AND column_name = ? LIMIT 1")) {
+            ps.setString(1, dbName);
+            ps.setString(2, tableName);
+            ps.setString(3, columnName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new ServiceException("表 " + tableName + " 不存在或不含列 " + columnName
+                        + ",请确认表列名或重新同步结构");
+                }
+            }
+        } catch (ServiceException e) {
+            throw e;
+        } catch (SQLException e) {
+            throw new ServiceException("表列校验失败: " + rootMessage(e));
+        }
     }
 
     /**

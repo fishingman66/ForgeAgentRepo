@@ -26,6 +26,11 @@ public class AgentMcpServerVo implements Serializable {
     private Long id;
 
     /**
+     * 归属工作空间(NULL=平台共享,全空间可见;非空=空间私有,仅归属空间可见)
+     */
+    private Long workspaceId;
+
+    /**
      * 服务器名称
      */
     private String name;

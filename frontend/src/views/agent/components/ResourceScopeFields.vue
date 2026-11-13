@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 资源域双模式:三张资源表共用的「共享范围 / 归属空间」表单字段 */
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { myWorkspaces } from '@/api/agent/workspace';
 import type { WorkspaceVO } from '@/api/agent/workspace/types';
 import { useUserStore } from '@/store/modules/user';
@@ -8,9 +8,10 @@ import { useUserStore } from '@/store/modules/user';
 const model = defineModel<Record<string, any>>({ required: true });
 const workspaces = ref<WorkspaceVO[]>([]);
 const userStore = useUserStore();
-// 与后端 LoginHelper.isSuperAdmin(SUPER_ADMIN_USER_ID=1) 口径一致;
+// 超管权限由后端 SysPermissionService 下发 '*:*:*'(与前端 checkPermi 同口径)。
+// 不用 userId 硬编码:超管 ID 超出 JS 安全整数范围,直接比较会有精度问题。
 // 普通用户即使伪造 shared=true,后端 ResourceAccessGuard 仍会拒绝
-const canShare = String(userStore.userId) === '1';
+const canShare = computed(() => userStore.permissions.includes('*:*:*'));
 
 onMounted(async () => {
   try {
