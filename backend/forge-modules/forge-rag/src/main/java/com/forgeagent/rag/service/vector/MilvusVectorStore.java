@@ -78,6 +78,12 @@ public class MilvusVectorStore implements VectorStore {
     /** 已确认存在的维度集合缓存，避免每次检索/写入都发一次 has 请求 */
     private final Set<Integer> readyDims = ConcurrentHashMap.newKeySet();
 
+    /**
+     * 生产装配入口。类里还有一个包级双参构造器(测试注入客户端用),
+     * 两个构造器并存时 Spring 无法自动选择,会回落到无参构造而启动失败——
+     * 这里必须显式标注,否则整个应用起不来。
+     */
+    @org.springframework.beans.factory.annotation.Autowired
     public MilvusVectorStore(KnowledgeProperties properties) {
         this(properties, null);
     }

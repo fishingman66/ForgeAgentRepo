@@ -14,6 +14,7 @@ import com.forgeagent.callcenter.engine.LiveChannelRegistry;
 import com.forgeagent.callcenter.engine.ivr.IntentionClassifier;
 import com.forgeagent.callcenter.mapper.CsCallInsightMapper;
 import com.forgeagent.callcenter.mapper.CsCallSegmentMapper;
+import com.forgeagent.callcenter.ops.CallProfileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -84,6 +85,8 @@ public class InsightPipeline {
     private final ObjectProvider<IntentionClassifier> intentionClassifierProvider;
     /** SSE 通道属文本域 Bean,客服开关关闭时为空,情绪上行静默跳过。 */
     private final ObjectProvider<CsRealtimeTransport> transportProvider;
+    /** C8 画像快照是洞察的下游产物:挂机洞察跑完再生成,读到的就是最终结论。 */
+    private final ObjectProvider<CallProfileService> profileProvider;
 
     /** 每通话上次情绪评估时间(节流用);挂机后清理。 */
     private final Map<Long, Long> lastSentimentAt = new ConcurrentHashMap<>();
@@ -192,10 +195,24 @@ public class InsightPipeline {
         runIntent(call, cursor, callerText, segments);
         runExtract(call, cursor, fullText);
         runQaReport(call, cursor, segments, fullText);
+        buildProfile(call);
 
         // 通话结束清理每通话状态,避免长驻引用
         lastSentimentAt.remove(call.getId());
         autoTransferFired.remove(call.getId());
+    }
+
+    /** 画像快照:必须在三件套之后,否则读到的是半成品。 */
+    private void buildProfile(CsCall call) {
+        CallProfileService profileService = profileProvider.getIfAvailable();
+        if (profileService == null) {
+            return;
+        }
+        try {
+            profileService.build(call);
+        } catch (Exception e) {
+            log.warn("[CC] 画像生成失败 callId={}: {}", call.getCallId(), e.getMessage());
+        }
     }
 
     /** 意图:全文 + 最近 3 句上下文,走 SPI(正则引擎 / 未来 LLM 引擎同口)。 */
@@ -556,8 +573,11 @@ public class InsightPipeline {
 
     private List<CsCallSegment> loadSegments(CsCall call) {
         try {
+            // 只取转写段:C8 的时间轴段(system)混在同一张表,拼进文本会污染意图与提取
             List<CsCallSegment> rows = segmentMapper.selectList(new LambdaQueryWrapper<CsCallSegment>()
                 .eq(CsCallSegment::getCallId, call.getId())
+                .and(w -> w.isNull(CsCallSegment::getSegmentKind)
+                    .or().eq(CsCallSegment::getSegmentKind, "TRANSCRIPT"))
                 .orderByAsc(CsCallSegment::getId));
             return rows == null ? List.of() : rows;
         } catch (Exception e) {

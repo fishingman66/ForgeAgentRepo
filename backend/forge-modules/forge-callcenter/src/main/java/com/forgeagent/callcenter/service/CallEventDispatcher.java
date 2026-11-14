@@ -58,6 +58,8 @@ public class CallEventDispatcher {
     private final CdrReconciler cdrReconciler;
     private final CallSeatStateService seatStateService;
     private final CallBusinessBinder businessBinder;
+    /** C8 转接时间轴:transfer/seat_state 事件补 RING/CONNECT 段。 */
+    private final TransferTimelineService transferTimeline;
     private final CsCallMapper callMapper;
     private final CallcenterProperties properties;
     /** SSE 通道属文本域 Bean,客服开关关闭时为空,弹屏挂点静默降级。 */
@@ -229,6 +231,7 @@ public class CallEventDispatcher {
         call.setTransferFrom(event.str("transferFrom"));
         call.setTransferTo(event.str("transferTo"));
         call.setWorkNo(event.workNo());
+        transferTimeline.recordRing(call, event);
         businessBinder.onTransfer(call, event);
     }
 
@@ -236,6 +239,11 @@ public class CallEventDispatcher {
         seatStateService.apply(channel.getWorkspaceId(), event);
         if (event.workNo() != null && !event.workNo().isBlank()) {
             call.setWorkNo(event.workNo());
+        }
+        // 坐席就绪/通话中才算接通时间点;OFFLINE/PAUSE 等状态不写时间轴
+        String state = TransferTimelineService.seatState(event);
+        if ("READY".equalsIgnoreCase(state) || "TALKING".equalsIgnoreCase(state)) {
+            transferTimeline.recordConnect(call, event);
         }
         businessBinder.onSeatState(call, event);
     }

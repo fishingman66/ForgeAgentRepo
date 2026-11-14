@@ -5,6 +5,7 @@ import com.forgeagent.callcenter.config.ConditionalOnCallcenterEnabled;
 import com.forgeagent.callcenter.domain.CsCall;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.insight.InsightPipeline;
+import com.forgeagent.callcenter.ops.CallbackTaskService;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
 import com.forgeagent.customerservice.domain.CsChannel;
 import com.forgeagent.customerservice.domain.CsConversation;
@@ -43,6 +44,8 @@ public class CallBusinessBinder {
     private final CsCallMapper callMapper;
     /** C4 洞察管道:挂机后跑意图/提取/质检报告(异步旁路)。 */
     private final InsightPipeline insightPipeline;
+    /** C8 呼损回拨:振铃未接通即建单(幂等)。 */
+    private final CallbackTaskService callbackTaskService;
 
     /** ring:通话绑定客服会话;渠道缺失或建会话失败只记日志,不阻断回调。 */
     public void onRing(CsCall call, CsVoiceEvent event) {
@@ -88,7 +91,8 @@ public class CallBusinessBinder {
 
     /** seatState READY:坐席就绪即触发一次 ACD 自动分配(在线坐席才成为目标)。 */
     public void onSeatState(CsCall call, CsVoiceEvent event) {
-        if ("READY".equalsIgnoreCase(event.str("readyState"))
+        // 键名兼容:AICC 事件用 readyState,FS 归一化用 state(此前只读前者,FS 路径 ACD 从未触发)
+        if ("READY".equalsIgnoreCase(TransferTimelineService.seatState(event))
             && call.getTicketId() != null && call.getConversationId() != null) {
             int assigned = ticketService.assignWaiting();
             log.info("[CC] 坐席就绪触发 ACD 分配 callId={} assigned={}", call.getCallId(), assigned);
@@ -108,7 +112,10 @@ public class CallBusinessBinder {
             log.error("[CC] 转写质检失败 callId={}: {}", call.getCallId(), e.getMessage());
         }
         try {
-            metricService.rebuild(call.getWorkspaceId(), new java.util.Date());
+            // 按通话自己的振铃日重建,而不是「今天」:迟到 CDR / 补跑场景下,
+            // 拿 now 去重建会把昨天的通话算进今天,昨天的指标永远不更新
+            java.util.Date statDay = call.getRingAt() == null ? new java.util.Date() : call.getRingAt();
+            metricService.rebuild(call.getWorkspaceId(), statDay);
         } catch (Exception e) {
             log.error("[CC] 通话指标失败 callId={}: {}", call.getCallId(), e.getMessage());
         }
@@ -116,6 +123,11 @@ public class CallBusinessBinder {
             insightPipeline.onCallEnded(call);
         } catch (Exception e) {
             log.error("[CC] 洞察管道触发失败 callId={}: {}", call.getCallId(), e.getMessage());
+        }
+        try {
+            callbackTaskService.onHangup(call);
+        } catch (Exception e) {
+            log.error("[CC] 呼损建单失败 callId={}: {}", call.getCallId(), e.getMessage());
         }
     }
 

@@ -6,13 +6,19 @@ import com.forgeagent.callcenter.config.CallcenterProperties;
 import com.forgeagent.callcenter.config.ConditionalOnCallcenterEnabled;
 import com.forgeagent.callcenter.domain.CsCall;
 import com.forgeagent.callcenter.domain.CsCallEvent;
+import com.forgeagent.callcenter.domain.CsCallProfile;
 import com.forgeagent.callcenter.domain.CsCallMetricDaily;
 import com.forgeagent.callcenter.domain.CsCallSegment;
 import com.forgeagent.callcenter.domain.CsCallSeatState;
+import com.forgeagent.callcenter.domain.CsCallbackTask;
 import com.forgeagent.callcenter.mapper.CsCallEventMapper;
+import com.forgeagent.callcenter.mapper.CsCallProfileMapper;
+import com.forgeagent.callcenter.mapper.CsCallbackTaskMapper;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
 import com.forgeagent.callcenter.mapper.CsCallSeatStateMapper;
 import com.forgeagent.callcenter.mapper.CsCallSegmentMapper;
+import com.forgeagent.callcenter.ops.CallProfileService;
+import com.forgeagent.callcenter.ops.CallbackTaskService;
 import com.forgeagent.callcenter.service.CallMetricService;
 import com.forgeagent.callcenter.storage.RecordingStorage;
 import com.forgeagent.common.core.domain.R;
@@ -26,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -62,6 +69,10 @@ public class CsCallController extends BaseController {
     private final CallcenterProperties properties;
     private final RecordingStorage recordingStorage;
     private final CallMetricService metricService;
+    private final CsCallProfileMapper profileMapper;
+    private final CsCallbackTaskMapper callbackTaskMapper;
+    private final CallProfileService profileService;
+    private final CallbackTaskService callbackTaskService;
 
     /** 通话列表:workspace/status/direction 过滤全部下推 SQL,不做应用层过滤。 */
     @GetMapping
@@ -132,6 +143,42 @@ public class CsCallController extends BaseController {
         data.put("ossKey", call.getRecordingOssKey());
         data.put("expireSeconds", ttl);
         return R.ok(data);
+    }
+
+    /**
+     * 通话画像(C8):有则直读,无则按洞察/质检现算一份(历史通话同样可看)。
+     */
+    @GetMapping("/{id}/profile")
+    public R<CsCallProfile> profile(@PathVariable Long id) {
+        CsCall call = callMapper.selectById(id);
+        if (call == null || !call.getWorkspaceId().equals(currentWorkspaceId())) {
+            return R.fail("通话不存在或无权访问");
+        }
+        CsCallProfile existing = profileMapper.selectOne(new LambdaQueryWrapper<CsCallProfile>()
+            .eq(CsCallProfile::getCallId, id).last("limit 1"));
+        return existing != null ? R.ok(existing) : R.ok(profileService.build(call));
+    }
+
+    /** 呼损回拨清单(C8):默认全部状态,可按状态过滤。 */
+    @GetMapping("/callbacks")
+    public R<List<CsCallbackTask>> callbacks(@RequestParam(required = false) String status) {
+        return R.ok(callbackTaskService.list(currentWorkspaceId(), status));
+    }
+
+    /** 回拨单状态流转(C8):非法流转返回可读原因,不抛 500。 */
+    @PostMapping("/callbacks/{id}/status")
+    public R<CsCallbackTask> markCallback(@PathVariable Long id,
+                                          @RequestParam String status,
+                                          @RequestParam(required = false) String remark) {
+        CsCallbackTask task = callbackTaskMapper.selectById(id);
+        if (task == null || !task.getWorkspaceId().equals(currentWorkspaceId())) {
+            return R.fail("回拨单不存在或无权访问");
+        }
+        try {
+            return R.ok(callbackTaskService.mark(id, status, LoginHelper.getUserId(), remark));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return R.fail(e.getMessage());
+        }
     }
 
     /** 数据边界:坐席行缺失时返回 -1(空空间),保证跨空间数据零可见。 */

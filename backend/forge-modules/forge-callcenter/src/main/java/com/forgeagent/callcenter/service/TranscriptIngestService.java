@@ -51,6 +51,8 @@ public class TranscriptIngestService {
         }
         segment.setAsrConfidence(confidence);
         segment.setIsFinal("true".equalsIgnoreCase(String.valueOf(event.content().get("isFinal"))) ? "1" : "0");
+        // C8:转写段显式标记段类型,与转接时间轴段区分(同一张表、同一个时间轴)
+        segment.setSegmentKind(TransferTimelineService.KIND_TRANSCRIPT);
         segment.setCreateTime(new Date());
         segmentMapper.insert(segment);
         // 洞察挂点在入库之后:管道只读已脱敏文本,失败不影响转写入库

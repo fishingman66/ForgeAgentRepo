@@ -365,7 +365,7 @@ class InsightPipelineTest {
 
     private InsightPipeline pipeline(SentimentAnalyzer analyzer, IntentionClassifier classifier) {
         InsightPipeline p = new InsightPipeline(properties, insightMapper, segmentMapper, settings,
-            liveChannels, provider(analyzer), provider(classifier), provider(null));
+            liveChannels, provider(analyzer), provider(classifier), provider(null), provider(null));
         p.init();
         return p;
     }

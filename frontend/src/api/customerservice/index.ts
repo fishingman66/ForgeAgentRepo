@@ -277,7 +277,48 @@ export interface CsCallSegment {
   endMs: number | null;
   asrConfidence: number | null;
   isFinal: string;
+  /** C8 段类型:TRANSCRIPT / TRANSFER_RING / TRANSFER_CONNECT(时间轴段 speaker=system)。 */
+  segmentKind: string | null;
   createTime: string | null;
+}
+
+/** 通话画像快照(C8):洞察与质检的下游产物,内容均为已脱敏口径。 */
+export interface CsCallProfile {
+  id: number;
+  callId: number;
+  workspaceId: number | null;
+  channelCode: string | null;
+  callerNumber: string | null;
+  intentCode: string | null;
+  sentimentLabel: string | null;
+  sentimentScore: number | null;
+  qualityScore: number | null;
+  durationSec: number | null;
+  turnCount: number | null;
+  transferFlag: string | null;
+  resolvedFlag: string | null;
+  tags: string | null;
+  summary: string | null;
+  payload: string | null;
+  createTime: string | null;
+  updateTime: string | null;
+}
+
+/** 呼损回拨单(C8):状态单向 PENDING → CALLED → CLOSED,后端拒绝非法流转。 */
+export interface CsCallbackTask {
+  id: number;
+  callId: number;
+  workspaceId: number | null;
+  channelCode: string | null;
+  callerNumber: string | null;
+  reason: string;
+  status: string;
+  attemptCount: number | null;
+  lastAttemptAt: string | null;
+  operatorId: number | null;
+  remark: string | null;
+  createTime: string | null;
+  updateTime: string | null;
 }
 
 /** 电话坐席就绪态:按 AICC 工号维护;seatId/userId 在坐席绑定关系落地后回填。 */
@@ -299,6 +340,15 @@ export interface CsCallMetric {
   avgDurationSec: number;
   botResolveRate: number;
   recordingCoverage: number;
+  /* ---- C8 扩维 ---- */
+  transferCount: number;
+  transferRate: number;
+  abandonCount: number;
+  abandonRate: number;
+  avgWaitSec: number;
+  negativeCalls: number;
+  negativeRate: number;
+  qualityAvgScore: number;
 }
 
 export const listCalls = (status?: string, direction?: string): AxiosPromise<CsCall[]> =>
@@ -318,6 +368,26 @@ export const listCallSeats = (): AxiosPromise<CsCallSeatState[]> =>
 
 export const callStats = (): AxiosPromise<CsCallMetric> =>
   request({ url: '/agent/customerservice/calls/stats', method: 'get' });
+
+/** 通话画像(C8):后端有则直读,无则按洞察/质检现算一份。 */
+export const getCallProfile = (id: number): AxiosPromise<CsCallProfile> =>
+  request({ url: `/agent/customerservice/calls/${id}/profile`, method: 'get' });
+
+/** 呼损回拨清单(C8):不传状态返回全部。 */
+export const listCallbackTasks = (status?: string): AxiosPromise<CsCallbackTask[]> =>
+  request({ url: '/agent/customerservice/calls/callbacks', method: 'get', params: { status } });
+
+/** 回拨状态流转(C8):非法流转由后端返回可读原因。 */
+export const markCallbackTask = (
+  id: number,
+  status: string,
+  remark?: string
+): AxiosPromise<CsCallbackTask> =>
+  request({
+    url: `/agent/customerservice/calls/callbacks/${id}/status`,
+    method: 'post',
+    params: { status, remark }
+  });
 
 /* ---------------- A1 坐席辅助 ---------------- */
 

@@ -25,5 +25,7 @@ public class CsCallSegment {
     private Long endMs;
     private BigDecimal asrConfidence;
     private String isFinal;
+    /** C8 段类型:TRANSCRIPT(转写)/TRANSFER_RING(转人工发起)/TRANSFER_CONNECT(坐席接通)。 */
+    private String segmentKind;
     private Date createTime;
 }
