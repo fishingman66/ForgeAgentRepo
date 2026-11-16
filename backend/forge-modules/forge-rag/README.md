@@ -2,7 +2,7 @@
 
 > 状态：**R1 检索内核 / R2 摄取与索引 / R3 评测闭环 / R4 问答可信 / R5 治理与规模化全部交付**（2026-11-12）。OCR 明确不做，改为视觉模型图片描述。方案与决策记录见 [`docs/05-知识库与RAG增强方案.md`](../../../docs/05-知识库与RAG增强方案.md)。
 
-知识库文档摄取、清洗、分块、向量化、混合检索、重排序、评测门禁、治理、图谱辅助、外部源、图片描述与 MCP 端点。125 个主类、**6 个 Controller + 1 个 MCP 端点**、**196 个单元测试**（32 类）。
+知识库文档摄取、清洗、分块、向量化、混合检索、重排序、评测门禁、治理、图谱辅助、外部源、图片描述与 MCP 端点。125 个主类、**6 个 Controller + 1 个 MCP 端点**、**199 个单元测试**（32 类）。
 
 依赖方向：`agent-core ← forge-rag ← forge-agent`，另有 `forge-rag → forge-kg`（图谱第三路，单向）；`forge-memory → forge-rag`（复用嵌入工厂与向量编解码）。`forge-rag` 不依赖 `forge-agent` 的业务实现。
 
@@ -125,13 +125,16 @@ src/main/java/com/forgeagent/rag
 ## 库级检索参数与 MCP（R5-6）
 
 - `retrieval_overrides`（`KnowledgeRetrievalOverrides`）：`topK` / `searchMode` / `vectorWeight` / `keywordWeight` / `scoreThreshold` / `rerank`，留空跟随全局。优先级 **调用方显式 > 库级 > 全局**；两路权重只放大/缩小各自 RRF 贡献；`signature()` 参与缓存键。
-- MCP 端点 `/mcp`（`mcp-enabled` 默认关，`mcp-token` 建议内网配）：3 个工具
+- MCP 端点 `/mcp`（`mcp-enabled` 默认关，`mcp-token` 建议内网配）：3 个内置工具 + 外部域工具（08 方案 / A5）
 
 | 工具 | 说明 |
 | --- | --- |
 | `knowledge_search` | 检索片段，支持 `filters.documentIds` 作为允许列表下推到 `DocVisibilityResolver.resolve(kbId, onlyDocIds)` |
 | `knowledge_list` | 列出启用的知识库，取 knowledgeId |
 | `knowledge_chunks` | 按文档取分块明细 |
+| `skill_list` / `skill_get` | **08 方案 / A5 外部工具（SPI 注入）**：列出平台声明式技能 / 按名称取手册全文；server 名 `forgeagent-platform`，输出仍走 `{rows:[...]}` 形态 |
+
+外部工具扩展点：`McpExternalToolProvider` SPI（本模块 `rag/mcp` 定义，`supportedTools()` + `definitions(om)` + `invoke(om, name, args)`）；其他域（如 forge-agent 的技能）实现并注册为 Bean 即进入 tools/list，无实现支持的工具保持「未知工具」语义。当前单 token = 平台全量只读，token→工作空间粒度鉴权待后续。
 
 协议能力：`Mcp-Session-Id`（30min TTL）、版本协商（2025-06-18 / 2025-03-26）、JSON-RPC 批处理、`structuredContent`、规范错误码（-32700/-32600/-32601/-32602）、GET/DELETE 405。限制：无 SSE 响应、无服务器发起能力。**`/mcp`、`/mcp/**` 必须留在 `security.excludes`**（存量缺陷：曾一直被登录拦截返回 401）；未握手时 MCP 不下发 `structuredContent`，调用方要能从 `content[0].text` 解析。
 
@@ -229,7 +232,7 @@ Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 已同步全部表与列�
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
 ```
 
-分组：解析与清洗 34（`DocumentCleaner` 12 / `DocumentParseGuard` 10 / `CleanRules` 7 / `GarbledTextDetector` 5）、HTML/PDF/抽图/描述 18、分块与指纹 17、父子偏移 12、阈值与检索回执 16、向量编解码与集合分片 11、MCP 端点协议 15、证据判定与指标 15、门禁判决 9、可见性解析 5、图路 8、SSRF 4、参数覆盖 4、摄取管线 2、Key 加密 5、模型解析 6。
+分组：解析与清洗 34（`DocumentCleaner` 12 / `DocumentParseGuard` 10 / `CleanRules` 7 / `GarbledTextDetector` 5）、HTML/PDF/抽图/描述 18、分块与指纹 17、父子偏移 12、阈值与检索回执 16、向量编解码与集合分片 11、MCP 端点协议 18（含 A5 外部工具 3 条）、证据判定与指标 15、门禁判决 9、可见性解析 5、图路 8、SSRF 4、参数覆盖 4、摄取管线 2、Key 加密 5、模型解析 6。
 
 端到端脚本（含编译、打包、jar 冒烟、造数、断言与清理）：`temp/r5_verify.py` 28/28（ACL 与治理）、`temp/r5b_verify.py` 18/18（图谱 / 外部源 / MCP）、`temp/r5c_verify.py` 15/15（图片描述）、`temp/r5d_verify.py` 16/16（工作空间视觉模型配置）。检索基线 `docs/baseline/kb_baseline.py --no-write` 多轮不降。
 

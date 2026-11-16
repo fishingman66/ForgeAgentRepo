@@ -102,6 +102,8 @@ public class AgentChatServiceImpl implements IAgentChatService {
     private final IAgentMemoryService memoryService;
     private final AgentChatAttachmentService attachmentService;
     private final AgentChatProperties chatProperties;
+    /** 08方案 / A2:技能懒加载(目录进 system prompt,手册经 load_skill 按需取) */
+    private final com.forgeagent.agent.service.IAgentSkillService skillService;
     private final com.forgeagent.agent.service.semantic.SemanticContextBuilder semanticContextBuilder;
     private final AuditLogHelper auditLogHelper;
 
@@ -244,6 +246,46 @@ public class AgentChatServiceImpl implements IAgentChatService {
     }
 
     /**
+     * 08方案 / C4:run 结束时把高频取回的 L1 条目择优沉淀进 L3。
+     * 只认模型真正回访过(取回次数达阈值)的输出;仅对开启记忆的 Agent 生效,全程静默失败。
+     */
+    private void persistHotWorkingMemory(Round round) {
+        try {
+            if (!Boolean.TRUE.equals(chatProperties.getWorkingMemoryPersistEnabled())) {
+                return;
+            }
+            if (!"1".equals(round.agent().getMemoryEnabled())) {
+                return;
+            }
+            int minRecalls = intValue(chatProperties.getWorkingMemoryPersistMinRecalls(), 2);
+            List<RunWorkingMemory.HotEntry> hot =
+                runWorkingMemory.collectHotEntries(round.roundId(), minRecalls);
+            if (hot.isEmpty()) {
+                return;
+            }
+            int maxChars = intValue(chatProperties.getWorkingMemoryPersistMaxChars(), 500);
+            Long agentId = round.agent().getId();
+            Long sessionId = round.session().getId();
+            for (RunWorkingMemory.HotEntry entry : hot) {
+                String content = RunWorkingMemory.buildPersistContent(
+                    entry.toolName(), entry.text(), maxChars);
+                if (content.isEmpty()) {
+                    continue;
+                }
+                memoryService.ingestWorkingMemory(agentId, round.agent().getWorkspaceId(),
+                    round.session().getUserId(), sessionId, content);
+            }
+            log.info("[AgentChat] run {} 沉淀 {} 条高频工作记忆", round.roundId(), hot.size());
+        } catch (Exception e) {
+            log.warn("[AgentChat] 工作记忆沉淀失败 run={}: {}", round.roundId(), e.getMessage());
+        }
+    }
+
+    private static int intValue(Integer value, int fallback) {
+        return value == null || value <= 0 ? fallback : value;
+    }
+
+    /**
      * 阻塞式执行:LLM 调用在事务外,失败补偿后原样抛出交由全局异常处理返回
      */
     private ChatSendVo runBlocking(Round round) {
@@ -263,6 +305,8 @@ public class AgentChatServiceImpl implements IAgentChatService {
             finishTrace(runId, "failed", startAt, null);
             throw e;
         } finally {
+            // 08方案 / C4:run 结束时把高频取回的 L1 条目择优沉淀进 L3(静默失败)
+            persistHotWorkingMemory(round);
             // P3/M1 L1:本轮工作记忆不再需要,条目自身有 TTL 兜底
             runWorkingMemory.clear(runId);
         }
@@ -705,6 +749,8 @@ public class AgentChatServiceImpl implements IAgentChatService {
             }
         } finally {
             emitter.finish();
+            // 08方案 / C4:同阻塞路径,run 结束先沉淀高频 L1 条目(含工作流与异常路径)
+            persistHotWorkingMemory(round);
             // P3/M1 L1:本轮工作记忆不再需要(含工作流路径与异常路径)
             runWorkingMemory.clear(runId);
         }
@@ -1067,6 +1113,22 @@ public class AgentChatServiceImpl implements IAgentChatService {
         List<Long> toolIds = contextAssembler.splitIds(agent.getToolIdsStr());
         List<Long> knowledgeIds = contextAssembler.splitIds(agent.getKnowledgeIdsStr());
         List<Long> mcpIds = contextAssembler.splitIds(agent.getMcpIdsStr());
+        // 08方案 / A2:技能懒加载——已安装技能的引用工具/MCP 并入授权边界(安装即授权),
+        // 目录进 system prompt,手册经 load_skill 按需加载
+        List<com.forgeagent.agent.domain.AgentSkill> installedSkills =
+            skillService.listInstalledByAgent(agent.getId());
+        if (!installedSkills.isEmpty()) {
+            java.util.LinkedHashSet<Long> skillToolIds = new java.util.LinkedHashSet<>(toolIds);
+            java.util.LinkedHashSet<Long> skillMcpIds = new java.util.LinkedHashSet<>(mcpIds);
+            for (com.forgeagent.agent.domain.AgentSkill skill : installedSkills) {
+                skillToolIds.addAll(contextAssembler.splitIds(skill.getToolIds()));
+                skillMcpIds.addAll(contextAssembler.splitIds(skill.getMcpIds()));
+            }
+            toolIds = new java.util.ArrayList<>(skillToolIds);
+            mcpIds = new java.util.ArrayList<>(skillMcpIds);
+        }
+        List<ToolAssembler.SkillDef> skillDefs = installedSkills.stream()
+            .map(s -> new ToolAssembler.SkillDef(s.getName(), s.getDescription())).toList();
         String toolNames = toolIds.isEmpty() ? "" : toolMapper.selectByIds(toolIds).stream()
             .map(AgentTool::getName).collect(Collectors.joining("、"));
         String knowledgeNames = knowledgeIds.isEmpty() ? "" : knowledgeMapper.selectByIds(knowledgeIds).stream()
@@ -1141,6 +1203,16 @@ public class AgentChatServiceImpl implements IAgentChatService {
         if (route.needsClarification()) {
             basePrompt = (StringUtils.isBlank(basePrompt) ? "" : basePrompt + "\n\n")
                 + "本轮问题可能缺少明确的业务编号或查询对象,请先向用户确认关键信息,不要凭推测调用工具。";
+        }
+
+        // 08方案 / A2:技能懒加载目录(一行摘要恒定,N 技能 ≈ N×40 token;全文经 load_skill 按需取)
+        if (!skillDefs.isEmpty()) {
+            StringBuilder skillDir = new StringBuilder("[可用技能]\n与本轮任务相关的技能,先调用 load_skill 工具加载操作手册再执行:\n");
+            for (ToolAssembler.SkillDef def : skillDefs) {
+                skillDir.append("- ").append(def.name()).append(": ")
+                    .append(StringUtils.defaultString(def.description())).append('\n');
+            }
+            basePrompt = (StringUtils.isBlank(basePrompt) ? "" : basePrompt + "\n\n") + skillDir.toString().strip();
         }
         long memoryStart = System.currentTimeMillis();
         String memoryBlock = "";
@@ -1254,7 +1326,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
             model == null ? null : model.getMaxTokens(),
             session.getId(), agent.getId(), roundId, toolDefs, mcpDefs, tokenBudget, usedTokens,
             agent.getOutputSchema(), teamMembers, agent.getTeamMode(), images,
-            retrievalSupport.buildAttachmentRefs(fileAtts), sqlCollector);
+            retrievalSupport.buildAttachmentRefs(fileAtts), sqlCollector, skillDefs);
         AgentRunner selected = agentRunners.stream()
             .filter(r -> r.supports(ctx))
             .findFirst()

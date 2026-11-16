@@ -118,4 +118,26 @@ public class AgentChatProperties {
 
     /** L1:recall_working_memory 单次返回的最大字符数 */
     private Integer workingMemoryRecallLimitChars = 4000;
+
+    // ---------------- 08方案 / C4:L1 高频取回条目沉淀进 L3 ----------------
+
+    /** run 结束时是否把高频取回的工作记忆条目择优写入长期记忆 */
+    private Boolean workingMemoryPersistEnabled = true;
+
+    /** 条目取回次数达到该阈值才沉淀(模型真正回访过的输出才算有沉淀价值) */
+    private Integer workingMemoryPersistMinRecalls = 2;
+
+    /** 单条沉淀进长期记忆的最大字符数(工具原文只取开头片段) */
+    private Integer workingMemoryPersistMaxChars = 500;
+
+    // ---------------- 08方案 / A4:MCP 连接池 ----------------
+
+    /** 是否启用 MCP 连接池(按服务器指纹跨请求复用,默认开启;连接异常时自动驱逐重建) */
+    private Boolean mcpPoolEnabled = true;
+
+    /** 池内连接空闲多久后关闭(秒) */
+    private Integer mcpPoolIdleSeconds = 300;
+
+    /** 池最大连接数(按服务器指纹去重) */
+    private Integer mcpPoolMaxSize = 32;
 }

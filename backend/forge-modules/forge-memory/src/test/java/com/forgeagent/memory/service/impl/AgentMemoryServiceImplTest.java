@@ -346,4 +346,97 @@ class AgentMemoryServiceImplTest {
         when(governanceService.runOnce()).thenReturn(java.util.Map.of("ttlArchived", 2L));
         assertEquals(2L, service.runGovernance().get("ttlArchived"));
     }
+
+    // ---------------- 08方案 / B3:三路融合 ----------------
+
+    @Test
+    void combinedScoreDegradesToLegacyDualFormulaWhenGammaZero() {
+        double legacy = 0.8 * 0.9 + 0.2 * 0.5;
+        assertEquals(legacy, AgentMemoryServiceImpl.combinedScore(0.8, 0.0, 0.9, 0.5, 0.7), 1e-9,
+            "γ=0 必须与旧双路融合公式逐位一致,历史行为不变");
+        double alpha = 0.6 * 0.8;
+        double beta = 0.4 * 0.8;
+        double score = AgentMemoryServiceImpl.combinedScore(0.6, 0.2, 0.9, 0.5, 1.0);
+        assertEquals(alpha * 0.9 + beta * 0.5 + 0.2 * 1.0, score, 1e-9);
+    }
+
+    @Test
+    void keywordRankScoreDecaysAndClamps() {
+        assertEquals(1.0, AgentMemoryServiceImpl.keywordRankScore(0, 10), 1e-9);
+        assertEquals(0.9, AgentMemoryServiceImpl.keywordRankScore(1, 10), 1e-9);
+        assertEquals(0.0, AgentMemoryServiceImpl.keywordRankScore(10, 10), 1e-9);
+        assertEquals(0.0, AgentMemoryServiceImpl.keywordRankScore(15, 10), 1e-9);
+    }
+
+    @Test
+    void keywordHitEntersSelectionBeyondCandidateRank() {
+        // 向量关闭、关键词开启:11 条候选,注入上限 10 条;关键词命中的记忆不在候选池,
+        // 只有融合把它顶进前 10 才会出现——锁定「关键词命中可补进候选池」语义
+        when(vectorProperties.isKeywordEnabled()).thenReturn(true);
+        when(vectorProperties.getKeywordTopK()).thenReturn(10);
+        when(vectorProperties.getKeywordWeight()).thenReturn(0.4);
+        when(vectorProperties.getSemanticWeight()).thenReturn(0.6);
+        List<AgentMemory> candidates = new java.util.ArrayList<>();
+        for (int i = 1; i <= 11; i++) {
+            candidates.add(mem(i, "k" + i, "候选" + i, 5, 0));
+        }
+        when(memoryMapper.selectList(any())).thenReturn(candidates);
+        when(memoryMapper.searchByKeyword(any(), any(), anyString(), anyInt()))
+            .thenReturn(List.of(mem(99, "k99", "关键词命中记忆", 1, 0)));
+
+        String block = service.buildMemoryBlock(7L, 42L, "用户姓张吗");
+
+        assertTrue(block.contains("关键词命中记忆"), "关键词命中应能补进候选池并入选");
+        verify(memoryMapper).searchByKeyword(any(), any(), anyString(), anyInt());
+    }
+
+    @Test
+    void keywordQueryFailureDegradesWithoutBreakingConversation() {
+        // FTS 索引未建等场景:查询抛错必须静默降级为评分召回,不能把对话打断
+        when(vectorProperties.isKeywordEnabled()).thenReturn(true);
+        when(vectorProperties.getKeywordTopK()).thenReturn(10);
+        when(vectorProperties.getKeywordWeight()).thenReturn(0.2);
+        when(memoryMapper.selectList(any())).thenReturn(List.of(mem(1, "a", "评分候选甲", 5, 0)));
+        when(memoryMapper.searchByKeyword(any(), any(), anyString(), anyInt()))
+            .thenThrow(new RuntimeException("Can't find FULLTEXT index matching column list"));
+
+        String block = service.buildMemoryBlock(7L, 42L, "任意问题");
+
+        assertTrue(block.contains("评分候选甲"), "降级后评分候选照常注入");
+    }
+
+    // ---------------- 08方案 / C4:工作记忆沉淀 ----------------
+
+    @Test
+    void ingestWorkingMemoryInsertsDedupedMaskedFact() {
+        when(memoryMapper.selectCount(any())).thenReturn(0L);
+
+        service.ingestWorkingMemory(7L, 1L, 42L, 30L, "用户的收货地址是杭州市西湖区");
+
+        ArgumentCaptor<AgentMemory> captor = ArgumentCaptor.forClass(AgentMemory.class);
+        verify(memoryMapper).insert(captor.capture());
+        AgentMemory saved = captor.getValue();
+        assertEquals(7L, saved.getAgentId());
+        assertEquals(42L, saved.getUserId());
+        assertTrue(saved.getFactKey().startsWith("wm-"), "沉淀条目必须带 wm- 事实键前缀以便溯源");
+        assertEquals(Integer.valueOf(4), saved.getImportance());
+        verify(memoryVectorService).vectorizeAsync(saved.getId());
+    }
+
+    @Test
+    void ingestWorkingMemorySkipsDuplicateContent() {
+        when(memoryMapper.selectCount(any())).thenReturn(1L);
+
+        service.ingestWorkingMemory(7L, 1L, 42L, 30L, "同内容重复沉淀");
+
+        verify(memoryMapper, never()).insert(any(AgentMemory.class));
+    }
+
+    @Test
+    void ingestWorkingMemoryIgnoresBlankContent() {
+        service.ingestWorkingMemory(7L, 1L, 42L, 30L, "  ");
+        service.ingestWorkingMemory(7L, 1L, 42L, 30L, null);
+
+        verify(memoryMapper, never()).insert(any(AgentMemory.class));
+    }
 }

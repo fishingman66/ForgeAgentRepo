@@ -2,6 +2,7 @@ package com.forgeagent.rag.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.forgeagent.rag.config.KnowledgeProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,7 +37,7 @@ class KnowledgeMcpEndpointTest {
         properties.setMcpEnabled(true);
         // mapper/service 传 null:协议层用例不触达检索实现,
         // tools/call 的检索路径走参数校验失败与异常脱敏分支,同样可断言
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null);
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of());
     }
 
     private ResponseEntity<String> post(String body) {
@@ -104,7 +105,7 @@ class KnowledgeMcpEndpointTest {
         assertEquals(HttpStatus.OK, resp.getStatusCode());
         JsonNode result = parse(resp.getBody()).path("result");
         assertEquals("2025-06-18", result.path("protocolVersion").asText());
-        assertEquals("forgeagent-knowledge", result.path("serverInfo").path("name").asText());
+        assertEquals("forgeagent-platform", result.path("serverInfo").path("name").asText());
         assertTrue(result.path("capabilities").path("tools").isObject());
         assertNotNull(resp.getHeaders().getFirst("Mcp-Session-Id"));
     }
@@ -247,5 +248,73 @@ class KnowledgeMcpEndpointTest {
         } catch (Exception e) {
             return mapper.createObjectNode();
         }
+    }
+
+
+    // ==================== 08方案 / A5:外部工具 SPI ====================
+
+    private com.forgeagent.rag.mcp.McpExternalToolProvider stubProvider() {
+        com.forgeagent.rag.mcp.McpExternalToolProvider provider =
+            org.mockito.Mockito.mock(com.forgeagent.rag.mcp.McpExternalToolProvider.class);
+        ObjectNode def = mapper.createObjectNode();
+        def.put("name", "skill_list");
+        def.put("description", "列出平台技能");
+        def.putObject("inputSchema").put("type", "object");
+        org.mockito.Mockito.when(provider.supportedTools()).thenReturn(java.util.Set.of("skill_list", "skill_get"));
+        org.mockito.Mockito.when(provider.definitions(org.mockito.Mockito.any()))
+            .thenReturn(java.util.List.of((JsonNode) def));
+        return provider;
+    }
+
+    @Test
+    @DisplayName("A5:外部工具定义进入 tools/list")
+    void externalToolDefinitionAppearsInToolsList() throws Exception {
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(stubProvider()));
+        String sessionId = initialize();
+        ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
+        JsonNode tools = parse(resp.getBody()).path("result").path("tools");
+        boolean found = false;
+        for (JsonNode t : tools) {
+            if ("skill_list".equals(t.path("name").asText())) {
+                found = true;
+            }
+        }
+        assertTrue(found, "外部 Provider 的 skill_list 必须出现在 tools/list");
+    }
+
+    @Test
+    @DisplayName("A5:tools/call 路由到外部 Provider 并透传 rows")
+    void externalToolCallRoutesToProvider() throws Exception {
+        com.forgeagent.rag.mcp.McpExternalToolProvider provider = stubProvider();
+        ObjectNode result = mapper.createObjectNode();
+        ObjectNode rows = result.putArray("rows").addObject();
+        rows.put("name", "退换货处理");
+        org.mockito.Mockito.when(provider.invoke(org.mockito.Mockito.any(),
+                org.mockito.Mockito.eq("skill_get"), org.mockito.Mockito.any()))
+            .thenReturn(result);
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(provider));
+
+        String sessionId = initialize();
+        ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"skill_get\",\"arguments\":{\"name\":\"退换货处理\"}}}");
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        JsonNode body = parse(resp.getBody());
+        assertFalse(body.path("result").path("isError").asBoolean(true), "外部工具正常执行不得报错");
+        assertTrue(body.path("result").path("structuredContent").path("rows").get(0)
+            .path("name").asText("").contains("退换货"), "rows 结构化输出透传");
+    }
+
+    @Test
+    @DisplayName("A5:无 Provider 支持时保持未知工具错误语义")
+    void unknownToolStaysUnknownWithoutProvider() throws Exception {
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of());
+        String sessionId = initialize();
+        ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
+            "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"no_such\",\"arguments\":{}}}");
+        assertTrue(parse(resp.getBody()).path("result").path("isError").asBoolean(false),
+            "未知工具返回 isError=true");
     }
 }

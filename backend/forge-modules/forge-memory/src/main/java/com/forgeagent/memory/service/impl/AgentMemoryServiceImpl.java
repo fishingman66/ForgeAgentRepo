@@ -227,12 +227,21 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
         }
         boolean useVector = memoryVectorService != null && memoryVectorService.enabled()
             && StringUtils.isNotBlank(query);
+        // 08方案 / B3:关键词通道独立于向量开关,向量关闭时照样补中文短事实召回
+        boolean useKeyword = vectorProperties != null && vectorProperties.isKeywordEnabled()
+            && StringUtils.isNotBlank(query);
         List<Scored> scored;
-        if (useVector) {
+        if (useVector || useKeyword) {
             // 补偿扫描异步投递,不阻塞本轮;语义召回失败返回空列表,融合退化为评分排序
-            memoryVectorService.ensurePendingAsync(agentId, userId);
-            scored = fuse(memories, memoryVectorService.search(agentId, userId, query,
-                vectorProperties.getTopK()));
+            if (useVector) {
+                memoryVectorService.ensurePendingAsync(agentId, userId);
+            }
+            List<MemoryVectorService.Hit> hits = useVector
+                ? memoryVectorService.search(agentId, userId, query, vectorProperties.getTopK())
+                : List.of();
+            List<AgentMemory> keywordHits = useKeyword
+                ? keywordSearch(agentId, userId, query) : List.of();
+            scored = fuse(memories, hits, keywordHits);
         } else {
             scored = new ArrayList<>(memories.size());
             for (AgentMemory memory : memories) {
@@ -290,10 +299,14 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
     }
 
     /**
-     * 评分候选池 + 语义召回融合:按 id 去重,超出候选池的向量命中也允许补进来。
-     * 评分先归一化到 0~1 再与余弦相似度加权,避免两个量纲直接相加。
+     * 评分候选池 + 语义召回 + 关键词召回三路融合:按 id 去重,超出候选池的命中也允许补进来。
+     * 评分先归一化到 0~1 再加权,避免不同量纲直接相加。
+     *
+     * <p>08方案 / B3:新增关键词通道。γ=keywordWeight 时 α=semanticWeight×(1-γ)、
+     * β=(1-semanticWeight)×(1-γ);γ=0 退化为原双路融合公式,历史行为不变。</p>
      */
-    private List<Scored> fuse(List<AgentMemory> candidates, List<MemoryVectorService.Hit> hits) {
+    private List<Scored> fuse(List<AgentMemory> candidates, List<MemoryVectorService.Hit> hits,
+                              List<AgentMemory> keywordHits) {
         Map<Long, AgentMemory> pool = new LinkedHashMap<>();
         for (AgentMemory memory : candidates) {
             if (memory.getId() != null) {
@@ -309,19 +322,79 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
             pool.putIfAbsent(memory.getId(), memory);
             similarity.put(memory.getId(), hit.score());
         }
+        // 关键词通道按 FTS 相关度排名计分:第 1 名 1.0,线性衰减到 0
+        Map<Long, Double> keywordScore = new HashMap<>();
+        int topK = Math.max(1, vectorProperties.getKeywordTopK());
+        for (int rank = 0; rank < keywordHits.size(); rank++) {
+            AgentMemory memory = keywordHits.get(rank);
+            if (memory == null || memory.getId() == null) {
+                continue;
+            }
+            pool.putIfAbsent(memory.getId(), memory);
+            keywordScore.putIfAbsent(memory.getId(), keywordRankScore(rank, topK));
+        }
         double maxScore = pool.values().stream().mapToDouble(AgentMemoryServiceImpl::scoreOf)
             .max().orElse(1.0);
         double weight = vectorProperties == null ? 0.6
             : Math.max(0, Math.min(1, vectorProperties.getSemanticWeight()));
+        double keywordWeight = vectorProperties == null ? 0.4
+            : vectorProperties.getKeywordWeight();
         List<Scored> result = new ArrayList<>(pool.size());
         for (AgentMemory memory : pool.values()) {
             double normalized = maxScore > 0 ? scoreOf(memory) / maxScore : 0;
             double semantic = similarity.getOrDefault(memory.getId(), 0.0);
-            result.add(new Scored(memory, weight * semantic + (1 - weight) * normalized));
+            double keyword = keywordScore.getOrDefault(memory.getId(), 0.0);
+            result.add(new Scored(memory,
+                combinedScore(weight, keywordWeight, semantic, normalized, keyword)));
         }
         result.sort((a, b) -> Double.compare(b.score(), a.score()));
         return result;
     }
+
+    /** 三路融合(包可见静态,便于单测锁定权重口径):α·语义 + β·评分 + γ·关键词 */
+    static double combinedScore(double semanticWeight, double keywordWeight,
+                                double semantic, double normalized, double keyword) {
+        double clampedSemantic = Math.max(0, Math.min(1, semanticWeight));
+        double gamma = Math.max(0, Math.min(1, keywordWeight));
+        return clampedSemantic * (1 - gamma) * semantic
+            + (1 - clampedSemantic) * (1 - gamma) * normalized
+            + gamma * keyword;
+    }
+
+    /** 关键词通道按相关度排名归一:rank 0 得 1.0,线性衰减,超出 topK 为 0 */
+    static double keywordRankScore(int rank, int topK) {
+        return Math.max(0.0, (topK - rank) / (double) Math.max(1, topK));
+    }
+
+    /**
+     * 关键词召回:FULLTEXT 索引未建或查询异常时降级为空列表(融合回退评分路),
+     * 按错误信息去重告警一次,不把每轮对话刷成告警风暴。
+     */
+    private List<AgentMemory> keywordSearch(Long agentId, Long userId, String query) {
+        try {
+            return memoryMapper.searchByKeyword(agentId, userId, query,
+                vectorProperties.getKeywordTopK());
+        } catch (Exception e) {
+            String message = rootMessage(e);
+            if (!message.equals(keywordWarned.getAndSet(message))) {
+                log.warn("[AgentMemory] 关键词召回降级为评分召回(如索引未建请执行 agent_p2_memory_keyword.sql): {}",
+                    message);
+            }
+            return List.of();
+        }
+    }
+
+    private static String rootMessage(Throwable e) {
+        Throwable cur = e;
+        while (cur.getCause() != null && cur.getCause() != cur) {
+            cur = cur.getCause();
+        }
+        return cur.getMessage() == null ? cur.getClass().getSimpleName() : cur.getMessage();
+    }
+
+    /** 关键词通道降级告警去重(按错误信息) */
+    private final java.util.concurrent.atomic.AtomicReference<String> keywordWarned =
+        new java.util.concurrent.atomic.AtomicReference<>();
 
     /** 混合评分(包可见静态,便于单测锁定命中反馈封顶口径) */
     static double scoreOf(AgentMemory memory) {
@@ -368,9 +441,43 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
         });
     }
 
+    /**
+     * 08方案 / C4:L1 高频取回条目直插长期记忆(平台内部行为,不走权限校验)。
+     * 同内容去重 + 配额淘汰 + 异步向量化,与手动添加同一套落库口径;任何失败只记日志。
+     */
+    @Override
+    public void ingestWorkingMemory(Long agentId, Long workspaceId, Long userId, Long sessionId,
+                                    String content) {
+        if (StringUtils.isBlank(content)) {
+            return;
+        }
+        try {
+            String masked = CsPiiMasker.mask(content);
+            if (existsMemory(agentId, userId, masked)) {
+                return;
+            }
+            AgentMemory memory = new AgentMemory();
+            memory.setAgentId(agentId);
+            memory.setWorkspaceId(workspaceId);
+            memory.setUserId(userId);
+            memory.setContent(masked);
+            memory.setFactKey("wm-" + Integer.toHexString(normalizeKey(masked).hashCode()));
+            memory.setImportance(4);
+            memory.setHitCount(0);
+            memory.setSourceSessionId(sessionId);
+            if (governanceService != null) {
+                governanceService.evictBeforeInsert(agentId, userId, 1);
+            }
+            memoryMapper.insert(memory);
+            memoryVectorService.vectorizeAsync(memory.getId());
+            log.info("[AgentMemory] 工作记忆沉淀完成: agent={} session={}", agentId, sessionId);
+        } catch (Exception e) {
+            log.warn("[AgentMemory] 工作记忆沉淀失败(agent={}): {}", agentId, e.getMessage());
+        }
+    }
+
     private void doExtract(Long agentId, Long workspaceId, Long userId, Long sessionId,
-                           String userContent, String assistantContent) {
-        AgentModel model = resolveAgentModel(agentId);
+                           String userContent, String assistantContent) {        AgentModel model = resolveAgentModel(agentId);
         if (model == null) {
             return;
         }

@@ -1,6 +1,6 @@
 # forge-agent · Agent 平台业务与运行内核
 
-平台主体模块：工作空间、模型与供应商、工具与数据源、编排画布、对话运行、市场、触发器、审计计量、治理与评测。250 个主类、27 个 Controller、**101 个单元测试**（15 类）。
+平台主体模块：工作空间、模型与供应商、工具与数据源、技能包、编排画布、对话运行、市场、触发器、审计计量、治理与评测。275 个主类、28 个 Controller、**132 个单元测试**（20 类）。
 
 依赖方向：`agent-core ← forge-agent`，并依赖 `forge-rag`（检索）、`forge-memory`（记忆注入）、`forge-kg`（经 memory/rag 间接）、`forge-common-*`。`forge-customer-service` 通过本模块的 `api.customerservice` 契约包**单向依赖**本模块，反向禁止。
 
@@ -11,21 +11,25 @@ com.forgeagent.agent
 ├── api/customerservice/  # 给客服域用的契约门面（CsChatFacade / CsKnowledgeGateway /
 │                         #   CsRunOwnership / CsTraceExtender / CsGovernanceFacade + Impl）
 ├── config/               # AgentRuntimeProperties / AgentChatProperties / 调度池 / 过滤器
-├── controller/           # 27 个：Chat / Session / Info / Model / Provider / Tool / Datasource /
+├── controller/           # 28 个：Chat / Session / Info / Model / Provider / Tool / Datasource /
 │                         #   Workspace(+Member) / Market(+Audit,+My) / Governance / Approval /
 │                         #   Trigger / Usage / Dashboard / Feedback / AuditLog / ApiKey /
-│                         #   McpServer / Semantic / Attachment / Workflow(+Api,+Endpoint)
+│                         #   McpServer / Skill / Semantic / Attachment / Workflow(+Api,+Endpoint)
 ├── domain/               # 实体 + bo/vo（AgentInfo 等基础实体在 forge-agent-core）
 ├── event/  job/  mapper/ # 事件、定时任务、Mapper
 └── service/
     ├── run/              # RunEventBuffer(SSE 游标重放) / RunStreamEmitter / RunTraceService /
     │                     #   RunCancelRegistry / TraceStepType
-    ├── runner/           # AgentScopeRunner(ReAct 内核) / ToolAssembler / 各类工具：
+    ├── runner/           # AgentScopeRunner(ReAct 内核) / ToolAssembler(路由装配) /
+    │                     #   ToolProvider SPI + HttpToolProvider / SandboxToolProvider /
+    │                     #   SqlToolProvider（schema 工具走 ApprovalExempt 免审批门）/
+    │                     #   McpConnectionPool(A4 连接池) / 各类工具：
     │                     #   CurrentTimeTool / HttpToolAdapter / McpAgentTool / SqlQueryTool /
     │                     #   SqlSchemaTool / DockerSandboxTool / SandboxCodeExecutor /
-    │                     #   ReadAttachmentTool / RecallWorkingMemoryTool /
-    │                     #   RunWorkingMemory / WorkingMemoryGuard / TokenBudgetHook /
-    │                     #   ApprovalGateTool / OpenAiCompatRunner / MockAgentRunner
+    │                     #   ReadAttachmentTool / RecallWorkingMemoryTool / LoadSkillTool(A2 懒加载) /
+    │                     #   RunWorkingMemory(含高频条目沉淀 C4) / WorkingMemoryGuard / TokenBudgetHook /
+    │                     #   ApprovalGateTool / SkillMcpExternalToolProvider(A5 对外技能) /
+    │                     #   OpenAiCompatRunner / MockAgentRunner
     ├── support/          # ChatContextAssembler / ChatRetrievalSupport / ChatStreamSupport /
     │                     #   ContextBudgetAllocator / SessionSummaryService /
     │                     #   AnswerCitationValidator / ChatRetrievalSupport.buildReferenceBlock /
@@ -45,6 +49,9 @@ com.forgeagent.agent
 - **L2 滚动摘要**：`SessionSummaryService` 用 `agent_session.summary_text` + `summary_upto_msg_id` 水位 CAS 推进。
 - **检索注入与问答可信度（R4）**：`ChatRetrievalSupport` 调用 RAG 并用 `buildReferenceBlock(...)` 生成结构化资料块（`ReferenceBlock` record，JSON 引用列表 + 合法编号清单，尖括号转 `\u003c` 防伪分隔符）；`AnswerCitationValidator` 在 `finishRound` 开头做硬门禁（只认 Markdown 文本节点 `[n]`，越界拒发：非流式抛错、流式发 error 终态不发 done），mock runner 跳过。
 - **运行治理**：全链路 Run / Trace（阶段耗时、首 Token 延迟、Token 与状态）、SSE 断线续传（`RunEventBuffer` 游标）、跨实例取消令牌、聊天消息运行链路下钻、僵尸 running 定时兜底、轨迹快照截断。
+- **08 方案 / Skill 懒加载（A1+A2）**：`agent_skill` 声明式技能包（Markdown 手册 + 工具/MCP/知识库引用，平台解释执行不做可执行插件）；上下文只放 `[可用技能]` 一行摘要目录，全文经 `load_skill` 按需取（白名单快照兜底 + 实时状态优先，停用立即失效）；技能引用的工具随安装并入授权边界。端点 `/agent/skill/**`，SQL `backend/sql/agent_skill.sql`。
+- **08 方案 / MCP 连接池（A4）**：`McpConnectionPool`（Caffeine，指纹=serverType|url|超时|排序 headers），命中后 listTools 兼作健康校验、失败驱逐自愈；`agent.chat.mcp-pool-enabled=false` 回退请求级连接。
+- **08 方案 / A3 ToolProvider SPI**：`ToolAssembler` 按 `agent_tool.tool_type` 路由到 Provider 注册表，新增工具类型零改装配核心；`ApprovalExempt` 标记只读元数据工具（如 sql schema）免审批门。
 - **编排画布 vs forge-workflow**：本模块的「Agent 编排画布」是面向一次 LLM 任务的自研 JSON DAG（试运行、版本快照、运行回放）；`forge-workflow`（WarmFlow）是面向 OA 审批的流程引擎。**两者零依赖、互不调用，不要混用**。
 
 ## 免登录与对外入口
@@ -59,11 +66,11 @@ com.forgeagent.agent
 
 ## 配置
 
-`agent.runtime.*`（ReAct 超时与迭代上限、语义路由、工作流节点超时、`workflow-http-guard-enabled` http 节点 SSRF 防护）、`agent.chat.*`（对话链路超时、预算与上下文参数，含 `context-window-tokens` / `history-*` / `summary-*` / `working-memory-*`）、`agent.resource-sharing.enabled`（资源域双模式总开关）、`spring.task.scheduling.pool.size=4`（隔离定时任务故障域）。
+`agent.runtime.*`（ReAct 超时与迭代上限、语义路由、工作流节点超时、`workflow-http-guard-enabled` http 节点 SSRF 防护）、`agent.chat.*`（对话链路超时、预算与上下文参数，含 `context-window-tokens` / `history-*` / `summary-*` / `working-memory-*`）、`agent.resource-sharing.enabled`（资源域双模式总开关）、`agent.chat.mcp-pool-enabled`（MCP 连接池开关）与`agent.chat.working-memory-persist-*`（L1 高频条目沉淀长期记忆：开关 / 取回阈值 / 截断长度）、`spring.task.scheduling.pool.size=4`（隔离定时任务故障域）。
 
 ## 测试
 
-**101 用例 / 15 类**，全部 `@Tag("dev")`：
+**132 用例 / 20 类**，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
@@ -79,5 +86,9 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 | MCP 空间归属 16 | `AgentMcpServerServiceImplTest`(11) / `AgentInfoServiceMcpBindingTest`(3) / `ChatContextAssemblerMcpVisibilityTest`(2) |
 | 工作流执行体 8 | `AgentWorkflowGraphCharacterizationTest`（走 `trialRun` 公共入口 + `dryRun`，不依赖私有方法，拆分前后可复用） |
 | 问数标识校验 4 | `SqlQueryServiceIdentifierTest` |
+| 08 方案装配表征 9 | `ToolAssemblerCharacterizationTest`（SPI 化前后零行为变化的锁） |
+| 08 方案 MCP 池 9 | `McpConnectionPoolTest`(6) / `ToolAssemblerMcpPoolTest`(3，池内连接不进 closables 等铁律) |
+| 08 方案技能 8 | `LoadSkillToolTest`(4) / `SkillMcpExternalToolProviderTest`(4) |
+| L1 沉淀 5 | `RunWorkingMemoryPersistTest` |
 
 验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。

@@ -6,25 +6,27 @@ import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.extern.slf4j.Slf4j;
-import com.forgeagent.agent.domain.AgentDatasource;
 import com.forgeagent.agent.mapper.AgentDatasourceMapper;
 import com.forgeagent.agent.service.AgentRunner;
 import com.forgeagent.agent.service.IAgentApprovalService;
 import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.common.json.utils.JsonUtils;
 import org.springframework.stereotype.Component;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+
+
 
 /**
  * AgentScope Toolkit 装配器
  *
  * <p>按 Agent 绑定关系把平台工具(http)与 MCP 服务器工具注册进内核 Toolkit,
  * 每个工具都经过 {@link ApprovalGateTool} 审批门(auto/ask/deny)。
- * Toolkit 与 MCP 客户端均为有状态对象,每次请求独立构建,请求结束后关闭。</p>
+ * Toolkit 为有状态对象,每次请求独立构建。MCP 连接默认经 {@link McpConnectionPool}
+ * 跨请求复用(docs-08 A4),池开关关闭时回退为每请求独立连接、请求结束关闭。</p>
  *
  * @author ForgeAgent
  */
@@ -52,6 +54,18 @@ public class ToolAssembler {
     }
 
     /**
+     * 08方案 / A3:请求级装配上下文(随装配传递给各 ToolProvider)
+     */
+    public record BuildContext(List<Map<String, Object>> sqlCollector) {
+    }
+
+    /**
+     * 08方案 / A2:技能快照(懒加载目录一行 + load_skill 白名单)
+     */
+    public record SkillDef(String name, String description) {
+    }
+
+    /**
      * 装配结果:toolkit + 需随请求结束关闭的资源
      */
     public record Assembly(Toolkit toolkit, List<AutoCloseable> closables) implements AutoCloseable {
@@ -70,26 +84,39 @@ public class ToolAssembler {
 
     private final IAgentApprovalService approvalService;
     private final SqlQueryService sqlQueryService;
+    /** 08方案 / A2:技能服务(load_skill 按需加载手册全文) */
+    private final com.forgeagent.agent.service.IAgentSkillService skillService;
     private final AgentDatasourceMapper datasourceMapper;
     private final com.forgeagent.rag.mapper.AgentKbChunkMapper kbChunkMapper;
     private final com.forgeagent.rag.service.IAgentKnowledgeService knowledgeService;
     /** P3 / M1: L1 工作记忆(run 作用域)与会话配置 */
     private final RunWorkingMemory workingMemory;
     private final com.forgeagent.agent.config.AgentChatProperties chatProperties;
+    /** 08方案 / A4:MCP 连接池(跨请求复用,可经配置关闭回退) */
+    private final McpConnectionPool mcpPool;
+    /** 08方案 / A3:平台工具 Provider 注册表(按 toolType 路由,新增类型零改本类) */
+    private final Map<String, ToolProvider> toolProviders;
 
     public ToolAssembler(IAgentApprovalService approvalService, SqlQueryService sqlQueryService,
                          AgentDatasourceMapper datasourceMapper,
                          com.forgeagent.rag.mapper.AgentKbChunkMapper kbChunkMapper,
                          com.forgeagent.rag.service.IAgentKnowledgeService knowledgeService,
                          RunWorkingMemory workingMemory,
-                         com.forgeagent.agent.config.AgentChatProperties chatProperties) {
+                         com.forgeagent.agent.config.AgentChatProperties chatProperties,
+                         McpConnectionPool mcpPool,
+                         List<ToolProvider> providerList,
+                         com.forgeagent.agent.service.IAgentSkillService skillService) {
         this.approvalService = approvalService;
         this.sqlQueryService = sqlQueryService;
+        this.skillService = skillService;
         this.datasourceMapper = datasourceMapper;
         this.kbChunkMapper = kbChunkMapper;
         this.knowledgeService = knowledgeService;
         this.workingMemory = workingMemory;
         this.chatProperties = chatProperties;
+        this.mcpPool = mcpPool;
+        this.toolProviders = providerList == null ? Map.of() : providerList.stream()
+            .collect(java.util.stream.Collectors.toMap(ToolProvider::type, p -> p));
     }
 
     /**
@@ -100,10 +127,12 @@ public class ToolAssembler {
      *
      * @param sqlCollector 问数 SQL 执行明细收集器(可为空;SqlQueryTool 执行时写入)
      * @param attachments  本轮文件附件(非空时注册 read_attachment 工具)
+     * @param skills       已安装技能快照(非空时注册 load_skill 工具;目录在服务层拼入 system prompt)
      */
     public Assembly build(List<ToolDef> toolDefs, List<McpDef> mcpDefs, ApprovalGateTool.ApprovalContext approvalCtx,
                           List<Map<String, Object>> sqlCollector,
-                          List<AgentRunner.RunnerContext.AttachmentRef> attachments) {
+                          List<AgentRunner.RunnerContext.AttachmentRef> attachments,
+                          List<SkillDef> skills) {
         Toolkit toolkit = new Toolkit();
         List<AutoCloseable> closables = new ArrayList<>();
         RegisterOpts opts = registerOpts(approvalCtx);
@@ -120,35 +149,54 @@ public class ToolAssembler {
             registerIfAbsent(toolkit, new ReadAttachmentTool(attachments, kbChunkMapper, knowledgeService),
                 "read_attachment", opts);
         }
+        if (skills != null && !skills.isEmpty()) {
+            // 08方案 / A2:懒加载技能工具;只读平台数据,免审批门;目录由服务层拼进 system prompt
+            Long skillAgentId = approvalCtx == null ? null : approvalCtx.agentId();
+            registerIfAbsent(toolkit, new LoadSkillTool(skillService, skillAgentId, skills),
+                "load_skill", opts);
+        }
         if (toolDefs != null) {
+            BuildContext buildCtx = new BuildContext(sqlCollector);
             for (ToolDef def : toolDefs) {
-                AgentTool inner;
-                if ("sandbox".equals(def.toolType())) {
-                    inner = new DockerSandboxTool(new DockerSandboxTool.Config(
-                        def.name(), def.description(), def.sandboxImage(),
-                        def.sandboxTimeout(), def.sandboxMemory(), def.sandboxCpus()));
-                } else if ("sql".equals(def.toolType())) {
-                    AgentDatasource ds = def.datasourceId() == null
-                        ? null : datasourceMapper.selectById(def.datasourceId());
-                    if (ds == null || "1".equals(ds.getStatus())) {
-                        log.warn("[ToolAssembler] SQL 工具 [{}] 绑定数据源缺失或停用,跳过注册", def.name());
-                        continue;
-                    }
-                    inner = new SqlQueryTool(def, ds, sqlQueryService, sqlCollector);
-                    // schema 明细工具与查询工具配套注册;只读元数据不经审批门,避免重复弹窗
-                    registerIfAbsent(toolkit, new SqlSchemaTool(def, ds, sqlQueryService),
-                        def.name() + "_schema", opts);
-                } else {
-                    inner = new HttpToolAdapter(new HttpToolAdapter.ToolDef(
-                        def.id(), def.name(), def.description(), def.httpMethod(),
-                        def.httpUrl(), def.httpHeaders(), def.httpParams()));
+                // 08方案 / A3:按 toolType 路由到 Provider;未匹配类型跳过并告警
+                ToolProvider provider = toolProviders.get(
+                    StringUtils.defaultIfBlank(def.toolType(), "http"));
+                if (provider == null) {
+                    log.warn("[ToolAssembler] 未找到工具类型 [{}] 的 Provider,跳过注册: {}",
+                        def.toolType(), def.name());
+                    continue;
                 }
-                registerIfAbsent(toolkit, gate(inner, "platform-" + StringUtils.defaultIfBlank(def.toolType(), "http"),
-                    "", def.approvalMode(), def.approvalTimeout(), approvalCtx), def.name(), opts);
+                List<AgentTool> provided;
+                try {
+                    provided = provider.provide(def, buildCtx);
+                } catch (Exception e) {
+                    log.warn("[ToolAssembler] 工具 [{}] 装配失败,已跳过: {}",
+                        def.name(), e.getMessage());
+                    continue;
+                }
+                if (provided == null || provided.isEmpty()) {
+                    continue;
+                }
+                for (AgentTool inner : provided) {
+                    // 免审批标记(如 sql schema 只读元数据工具):与拆分前行为一致,避免重复弹窗
+                    AgentTool wrapped = inner instanceof ApprovalExempt
+                        ? inner
+                        : gate(inner, "platform-" + provider.type(), "",
+                            def.approvalMode(), def.approvalTimeout(), approvalCtx);
+                    registerIfAbsent(toolkit, wrapped, inner.getName(), opts);
+                }
             }
         }
         if (mcpDefs != null) {
+            boolean poolEnabled = Boolean.TRUE.equals(chatProperties.getMcpPoolEnabled());
             for (McpDef def : mcpDefs) {
+                // 08方案 / A4:先取池内连接(listTools 兼作健康校验),未命中再新建
+                McpConnectionPool.Pooled pooled = poolEnabled
+                    ? mcpPool.acquire(mcpPool.fingerprint(def)) : null;
+                if (pooled != null) {
+                    registerMcpTools(toolkit, def, pooled.wrapper(), pooled.tools(), opts, approvalCtx);
+                    continue;
+                }
                 McpClientWrapper wrapper = null;
                 try {
                     wrapper = buildMcpWrapper(def);
@@ -159,13 +207,14 @@ public class ToolAssembler {
                         wrapper.close();
                         continue;
                     }
-                    for (McpSchema.Tool t : mcpTools) {
-                        McpAgentTool mcpTool = new McpAgentTool(t, wrapper);
-                        registerIfAbsent(toolkit, gate(mcpTool, "mcp", def.name(),
-                            def.approvalMode(), def.approvalTimeout(), approvalCtx), t.name(), opts);
+                    if (poolEnabled) {
+                        // 池内连接不能进 closables,否则请求结束 Assembly.close() 会关掉它
+                        mcpPool.offer(mcpPool.fingerprint(def),
+                            new McpConnectionPool.Pooled(wrapper, mcpTools));
+                    } else {
+                        closables.add(wrapper);
                     }
-                    closables.add(wrapper);
-                    log.info("[ToolAssembler] MCP 服务器 [{}] 注册 {} 个工具", def.name(), mcpTools.size());
+                    registerMcpTools(toolkit, def, wrapper, mcpTools, opts, approvalCtx);
                 } catch (Exception e) {
                     log.warn("[ToolAssembler] MCP 服务器 [{}] 连接失败,已跳过: {}", def.name(), rootMessage(e));
                     if (wrapper != null) {
@@ -179,6 +228,20 @@ public class ToolAssembler {
             }
         }
         return new Assembly(toolkit, closables);
+    }
+
+    /**
+     * 注册单个 MCP 服务器发现的全部工具(经审批门)
+     */
+    private void registerMcpTools(Toolkit toolkit, McpDef def, McpClientWrapper wrapper,
+                                  List<McpSchema.Tool> mcpTools, RegisterOpts opts,
+                                  ApprovalGateTool.ApprovalContext approvalCtx) {
+        for (McpSchema.Tool t : mcpTools) {
+            McpAgentTool mcpTool = new McpAgentTool(t, wrapper);
+            registerIfAbsent(toolkit, gate(mcpTool, "mcp", def.name(),
+                def.approvalMode(), def.approvalTimeout(), approvalCtx), t.name(), opts);
+        }
+        log.info("[ToolAssembler] MCP 服务器 [{}] 注册 {} 个工具", def.name(), mcpTools.size());
     }
 
     /**
@@ -196,7 +259,7 @@ public class ToolAssembler {
             .toList();
         return build(normalized, List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, null),
-            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of());
+            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of(), List.of());
     }
 
     /**

@@ -24,7 +24,7 @@ import java.util.Map;
  */
 @Slf4j
 record SqlSchemaTool(ToolAssembler.ToolDef def, AgentDatasource datasource,
-                     SqlQueryService sqlQueryService) implements AgentTool {
+                     SqlQueryService sqlQueryService) implements AgentTool, ApprovalExempt {
 
     @Override
     public String getName() {

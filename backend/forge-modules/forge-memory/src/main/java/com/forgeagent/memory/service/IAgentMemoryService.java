@@ -74,6 +74,14 @@ public interface IAgentMemoryService {
                       String userContent, String assistantContent);
 
     /**
+     * 08方案 / C4:把 L1 高频取回的工作记忆条目沉淀进长期记忆(平台内部行为,不走权限校验)。
+     *
+     * <p>与 {@link #extractAsync} 同为对话旁路:同内容去重后直插,静默失败不抛异常。
+     * userId 为空时落平台级记忆(与读侧 applyReadScope 的平台级口径一致)。</p>
+     */
+    void ingestWorkingMemory(Long agentId, Long workspaceId, Long userId, Long sessionId, String content);
+
+    /**
      * 异步补建知识图谱:把已有记忆分批过一遍三元组抽取并落图。
      *
      * <p>会真实消耗模型调用(每批一次),只做手动触发。图谱未启用时直接报错,

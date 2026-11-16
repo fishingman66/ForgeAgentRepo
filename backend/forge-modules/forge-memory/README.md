@@ -1,6 +1,6 @@
 # forge-memory · 六层长期记忆
 
-跨会话记忆沉淀、语义检索、图谱关联、注入预算与治理。15 个主类、1 个 Controller（`AgentMemoryController`）、**44 个单元测试**（5 类）。
+跨会话记忆沉淀、语义检索、图谱关联、注入预算与治理。15 个主类、1 个 Controller（`AgentMemoryController`）、**48 个单元测试**（5 类）。
 
 方案与决策记录见 [`docs/03-长期记忆与知识图谱.md`](../../../docs/03-长期记忆与知识图谱.md)。全部能力落 MySQL（向量列）+ Redis，**零新基建**；默认关闭时主链路行为与未升级完全一致。
 
@@ -62,6 +62,7 @@ POST   /agent/memory/governance/run             手动触发治理任务
 | `memory.vector.backend` | `mysql` | **只认 `mysql`**；配 pgvector/milvus 会降级 + 告警一次（同值去重），`none` 为显式关闭不告警 |
 | `memory.vector.model` | `local-hash` | **生产必须指向 `agent_model` 里的真实嵌入模型**；`local-hash` 是特征哈希伪向量，不具备语义准确性 |
 | `memory.vector.top-k` / `min-score` / `scan-limit` / `pending-batch` / `semantic-weight` | 20 / 0.2 / 5000 / 20 / 0.6 | 检索与融合参数 |
+| `memory.vector.keyword-enabled` / `keyword-top-k` / `keyword-weight` | true / 10 / 0.4 | **08 方案 / B3 关键词通道**（FULLTEXT ngram，索引见 `agent_p2_memory_keyword.sql`）：γ=0.4 保证 FTS 前 2 名压得过评分池；索引未建自动降级评分路 + 按错误去重告警 |
 | `memory.governance.enabled` | `false` | 治理总开关（默认关，关闭时主链路行为不变） |
 | `memory.governance.scan-ms` | `600000` | **必须 > 0**：`@Scheduled(fixedDelayString)` 配 0 会抛异常导致应用起不来，关闭请用 `enabled` |
 | `memory.governance.archive-retention-days` / `archive-batch` / `archive-max-batches` | 180 / 500 / 20 | L4 归档 |
@@ -72,11 +73,11 @@ POST   /agent/memory/governance/run             手动触发治理任务
 
 ## 相关 SQL
 
-`agent_p2_memory.sql`（记忆主表）、`agent_p3_m1_session.sql`（会话摘要水位）、`agent_p3_m2_memory_vector.sql`（向量三列）、`agent_p3_m4_memory_governance.sql`（归档两表 + `expire_at` + `memory_quota` + 指标表）、`forge_kg_core.sql`（图谱两表）。全部幂等，已同步至 `deploy/docker/mysql/init/01-schema.sql`。
+`agent_p2_memory.sql`（记忆主表）、`agent_p2_memory_keyword.sql`（**08 方案 / B3** content+fact_key FULLTEXT ngram 索引，information_schema 判幂等）、`agent_p3_m1_session.sql`（会话摘要水位）、`agent_p3_m2_memory_vector.sql`（向量三列）、`agent_p3_m4_memory_governance.sql`（归档两表 + `expire_at` + `memory_quota` + 指标表）、`forge_kg_core.sql`（图谱两表）。全部幂等，已同步至 `deploy/docker/mysql/init/01-schema.sql`。
 
 ## 测试
 
-**44 用例 / 5 类**，全部 `@Tag("dev")`：
+**48 用例 / 5 类**，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,MemoryScopeTest,MemoryGraphInjectionTest,MemoryGovernanceServiceTest" \
@@ -84,7 +85,7 @@ mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,Memory
   -pl forge-modules/forge-memory -am
 ```
 
-分组：服务实现 19 / 向量服务 8 / 摘要范围 3 / 图注入 5 / 治理 9。验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。
+分组：服务实现 26（含 08 方案 / B3 三路融合 4 条 + C4 工作记忆沉淀 3 条）/ 向量服务 8 / 摘要范围 3 / 图注入 5 / 治理 9。验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。
 
 ## 已知边界与坑
 

@@ -58,7 +58,7 @@ public class KnowledgeMcpEndpoint {
 
     private static final String PROTOCOL_VERSION = "2025-06-18";
     private static final List<String> SUPPORTED_PROTOCOL_VERSIONS = List.of("2025-06-18", "2025-03-26");
-    private static final String SERVER_NAME = "forgeagent-knowledge";
+    private static final String SERVER_NAME = "forgeagent-platform";
     private static final String SERVER_VERSION = "1.0.0";
     private static final String TOOL_NAME = "knowledge_search";
     private static final long SESSION_TTL_MS = Duration.ofMinutes(30).toMillis();
@@ -74,6 +74,8 @@ public class KnowledgeMcpEndpoint {
     private final AgentKnowledgeMapper knowledgeMapper;
     private final com.forgeagent.rag.mapper.AgentKbChunkMapper chunkMapper;
     private final IAgentKnowledgeService knowledgeService;
+    /** 08方案 / A5:外部工具 Provider(其他域经 SPI 注入,如技能 skill_list/skill_get) */
+    private final java.util.List<com.forgeagent.rag.mcp.McpExternalToolProvider> externalToolProviders;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -222,8 +224,9 @@ public class KnowledgeMcpEndpoint {
             .put("listChanged", false);
         result.set("serverInfo", serverInfo);
         result.put("instructions",
-            "检索 ForgeAgent 平台知识库。先用 knowledge_list 查看可用知识库,"
-                + "再用 knowledge_search 按问题召回相关文档片段。");
+            "访问 ForgeAgent 平台能力:先用 knowledge_list 查看可用知识库,"
+                + "再用 knowledge_search 按问题召回相关文档片段;"
+                + "若列表中有 skill_list/skill_get,可获取平台的声明式技能与操作手册。");
 
         ObjectNode resp = objectMapper.createObjectNode();
         resp.put("jsonrpc", "2.0");
@@ -248,7 +251,7 @@ public class KnowledgeMcpEndpoint {
                 case "knowledge_search" -> knowledgeSearchTool(args);
                 case "knowledge_list" -> knowledgeListTool();
                 case "knowledge_chunks" -> knowledgeChunksTool(args);
-                default -> toolError("未知工具:" + toolName);
+                default -> externalToolCall(toolName, args);
             };
         } catch (IllegalArgumentException e) {
             // 业务校验类错误(参数缺失/知识库不存在等),消息可安全透出
@@ -350,6 +353,17 @@ public class KnowledgeMcpEndpoint {
         tools.add(tool);
         tools.add(listTool);
         tools.add(chunkTool);
+        // 08方案 / A5:外部域工具(SPI 注入,定义缺失或异常的 Provider 跳过不阻断)
+        for (com.forgeagent.rag.mcp.McpExternalToolProvider provider : externalToolProviders) {
+            try {
+                for (JsonNode def : provider.definitions(objectMapper)) {
+                    tools.add((com.fasterxml.jackson.databind.node.ObjectNode) def);
+                }
+            } catch (Exception e) {
+                log.warn("[MCP] 外部工具 Provider {} 定义失败,已跳过: {}",
+                    provider.getClass().getSimpleName(), e.getMessage());
+            }
+        }
         return tools;
     }
 
@@ -498,6 +512,18 @@ public class KnowledgeMcpEndpoint {
             row.put("content", chunk.getContent());
         }
         return result;
+    }
+
+    /**
+     * 08方案 / A5:外部工具路由(SPI);无 Provider 支持时保持原「未知工具」语义
+     */
+    private ObjectNode externalToolCall(String toolName, JsonNode args) {
+        for (com.forgeagent.rag.mcp.McpExternalToolProvider provider : externalToolProviders) {
+            if (provider.supportedTools().contains(toolName)) {
+                return provider.invoke(objectMapper, toolName, args);
+            }
+        }
+        return toolError("未知工具:" + toolName);
     }
 
     private ObjectNode toolError(String message) {
