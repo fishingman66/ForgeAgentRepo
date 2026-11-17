@@ -47,4 +47,13 @@ public enum CsCallStatus {
         }
         return to.name();
     }
+
+    /**
+     * 是否已接通(含后续服务态,但不含 ENDED):用于判断是否需要登记真实媒体/控制通道。
+     * ANSWERED 及之后、未挂机的状态均视为接通。
+     */
+    public static boolean wasAnswered(String status) {
+        CsCallStatus value = of(status);
+        return value != null && value != RINGING && value != ENDED;
+    }
 }

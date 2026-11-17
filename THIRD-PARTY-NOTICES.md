@@ -1,7 +1,7 @@
 Third-Party Notices
 ===================
 
-> 适用版本：6.1.0（基线版） · 清单核对日期：2026-11-11
+> 适用版本：6.1.0（基线版） · 清单核对日期：2026-11-17
 > 依赖版本以 `backend/pom.xml` 的 `dependencyManagement` 为准；各组件的许可证以其官方仓库声明为准，如有出入以上游为准。
 
 ## 关于本产品
@@ -36,6 +36,9 @@ Third-Party Notices
 | io.agentscope:agentscope | Apache-2.0 | Agent 运行内核（ReAct 循环、流式事件、钩子机制） |
 | org.springframework.ai:spring-ai-* | Apache-2.0 | MCP 客户端 / 服务端集成 |
 | io.modelcontextprotocol.sdk:mcp | MIT | MCP 协议 Java SDK |
+| link.thingscloud:freeswitch-esl-spring-boot-starter（2.2.0，含传递的 freeswitch-esl） | Apache-2.0 | FreeSWITCH ESL 事件订阅与呼叫控制（forge-callcenter） |
+
+> 注：FreeSWITCH 侧媒体模块 `mod_audio_stream`（amigniter，AGPL-3.0）是 C 模块，源码编译部署在 FusionPBX 服务器，**不在本项目 Java 依赖中**，故不计入上表；但其 AGPL-3.0 许可需在部署合规评审中单独确认。详见 `docs/09` 第十三节。
 
 ### dromara 社区组件
 

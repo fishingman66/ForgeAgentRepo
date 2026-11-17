@@ -7,7 +7,7 @@ import java.util.function.Consumer;
  *
  * <p>上行 = caller 音频(喂 ASR);下行 = TTS 合成音频(播放)。C2 级联链路与
  * C7 实时模型共用;实现两态:{@code FsMediaStreamProvider}(C1-real,
- * mod_audio_fsc WebSocket)与 {@code MockMediaStreamProvider}(C1,可编程音频注入)。</p>
+ * mod_audio_stream WebSocket)与 {@code MockMediaStreamProvider}(C1,可编程音频注入)。</p>
  *
  * <p>音频规格:8kHz / 16bit / mono PCM(电话口径);采样率协商是 C7 实时模型
  * 适配层的事,本接口固定 8k,避免过早抽象。</p>

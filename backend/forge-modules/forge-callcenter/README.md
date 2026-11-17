@@ -1,16 +1,22 @@
 # forge-callcenter · 语音呼叫中心
 
-对接华为云 AICC（当前为 `AICC_MOCK` 契约实现）的语音域：回调接入、8 态状态机、转写与录音入库、通话↔会话↔工单业务打通、坐席状态与 ACD、通话日指标与合规擦除。
+语音域：回调接入、8 态状态机、转写与录音入库、通话↔会话↔工单业务打通、坐席状态与 ACD、通话日指标与合规擦除。两套供应商链路并存：
 
-模块开关 `agent.callcenter.enabled`（默认 `false`），关闭时 Bean 与 `/chat-voice/**` 端点不装配。
+- **AICC**（华为云，当前 `AICC_MOCK`）：HTTP 回调 `/chat-voice/{provider}/{code}`
+- **FreeSWITCH**（自建，provider=`FS`）：ESL 事件订阅 + `mod_audio_stream` 媒体 WebSocket，2026-11-17 已交付 P1 事件面 / P2 控制面 / P3 媒体面，详见 `docs/09`
+
+模块开关 `agent.callcenter.enabled`（默认 `false`），关闭时 Bean 与 `/chat-voice/**` 端点不装配。真 FS 链路另由 `agent.callcenter.media-stream-provider=fs` 切换媒体实现（默认 `mock`）。
 
 ## 包结构
 
 ```
 com.forgeagent.callcenter
 ├── controller   # CsVoiceCallbackController（/chat-voice/{provider}/{code}）、CsCallController（坐席侧查询/录音取回）
-├── gateway      # CsVoiceGateway 接口 + AiccGateway 实现 + VoiceProvider 事件映射 + CsVoiceEvent 归一化事件
-├── service      # 回调编排、幂等、状态机、转写入库、录音入库、话单对账、坐席状态、业务绑定、质检、指标、擦除
+├── gateway      # CsVoiceGateway 接口 + AiccGateway / FsGateway 实现 + FsEventNormalizer 事件映射 + CsVoiceEvent
+├── engine       # 通道控制(FsChannelControl)/ 媒体流(FsMediaStream + MediaStreamHub)/ ASR-TTS SPI / IVR
+├── route        # 直接应答分流与意图裁决(转人工下发走 LiveChannelRegistry)
+├── insight      # 洞察管道(负面自动转接经 LiveChannelRegistry 下发 uuid_transfer)
+├── service      # 回调编排(dispatch + dispatchTrusted)、幂等、状态机、转写/录音入库、话单、业务绑定
 ├── domain       # CsCall / CsCallEvent / CsCallSegment / CsCallChannelConfig / CsCallSeatState / CsCallStatus
 ├── storage      # RecordingStorage 接口：local-fs（开发）/ oss（生产）
 ├── provider     # NumberProvider / TrunkProvider（D8 暂为 noop）
@@ -62,7 +68,8 @@ com.forgeagent.callcenter
 ## 端点
 
 ```
-POST /chat-voice/{provider}/{code}         AICC 回调（免登录，HMAC 验签）
+POST /chat-voice/{provider}/{code}         AICC / FS_MOCK 回调（免登录，HMAC 验签）
+WS   /cc/media/{callId}                    FreeSWITCH mod_audio_stream 媒体接入（FS 主动连，仅内网）
 GET  /agent/customerservice/calls?status=  通话列表（坐席侧）
 GET  /agent/customerservice/calls/{id}     详情：主记录 + 事件轨迹 + 转写时间轴
 GET  /agent/customerservice/calls/{id}/recording   短期签名 URL
@@ -72,17 +79,19 @@ GET  /agent/customerservice/calls/call-seats       坐席就绪态
 
 ## 配置
 
-`agent.callcenter.*`（`CallcenterProperties`）：`enabled`、`media-provider`（`AICC_MOCK` / `AICC`）、`callback-secret` 与 `callback-tolerance-seconds`、`recording-store`（`local-fs` / `oss`）、录音留存天数、音频出域开关、D8 规模（坐席数 / 并发路数 / 月分钟预算）、号码与中继实现。
+`agent.callcenter.*`（`CallcenterProperties`）：`enabled`、`provider`（`AICC_MOCK` / `AICC` / `FS` / `FS_MOCK`）、`media-stream-provider`（`mock` / `fs`）、`callback-secret` 与 `callback-tolerance-seconds`、`recording-store`（`local-fs` / `oss`）、录音留存天数、音频出域开关、D8 规模（坐席数 / 并发路数 / 月分钟预算）、号码与中继实现。
 
-生产环境 `CallcenterProductionReadinessValidator` 会拒绝 Mock 供应商与默认密钥。
+真 FS 另需两段配置：ESL 连接走 starter 前缀 `link.thingscloud.freeswitch.esl.inbound.*`（密码用 `${FS_ESL_PASSWORD}`，绝不写明文）；业务侧 `agent.callcenter.freeswitch.*` 含 `channel-code`（默认 CC_FS）、`esl-address`（默认 127.0.0.1:8021）、`dialplan-context`、`queue-extensions`（队列名→号码，如 after_sales:5000）、`media-ws-base`（FS 可访问的本服务地址）、`media-sample-rate`。详见 `docs/09` 第五节。
+
+生产环境 `CallcenterProductionReadinessValidator` 会拒绝 Mock 供应商、默认密钥、以及未改的 ESL 默认密码 `ClueCon`。
 
 ## 测试
 
-5 类 19 用例，全部 `@Tag("dev")`：
+16 类 188 用例，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test \
-  "-Dtest=AiccGatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest" \
+  "-Dtest=*GatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest,FsEslEventHandlerTest,FsChannelControlTest,FsChannelRegistrarTest,FsMediaStreamTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter -am
 ```
@@ -91,17 +100,20 @@ mvn -Pdev test \
 
 | 测试 | 覆盖 |
 | --- | --- |
-| `AiccGatewayTest` | 验签、解析、录音取回（5） |
-| `CallStateMachineTest` | 8 态跃迁与乱序不回退（5） |
-| `CallFingerprintsTest` | 跨语言一致的事件指纹（3） |
-| `LocalFsRecordingStorageTest` | 本地存储读写与签名下载（3） |
-| `CallBusinessBinderTest` | 挂机结案序列（3） |
+| `AiccGatewayTest` / `FsMockGatewayTest` | 验签、解析、录音取回 |
+| `FsGatewayTest`（7） | 真实网关路由、归一化复用、本地录音与路径穿越防护 |
+| `FsEslEventHandlerTest`（6） | EslEvent→业务报文、CUSTOM 子类还原、时间戳换算 |
+| `FsChannelControlTest`（9） | ESL uuid 命令拼装、队列名→号码映射 |
+| `FsChannelRegistrarTest`（8） | 接通登记/挂机注销、媒体流启动下发 |
+| `FsMediaStreamTest`（7） | 上下行音频编码、缓冲补发、clearAudio 打断 |
+| `CallStateMachineTest` / `CallFingerprintsTest` / `LocalFsRecordingStorageTest` / `CallBusinessBinderTest` | 8 态跃迁、指纹、录音、挂机结案 |
 
 端到端脚本：`temp/v1_verify.py`（25/25，回调契约与状态机）、`temp/v2_verify.py`（29/29，业务打通：建会话→建单→ACD→挂机结案→CSAT→质检→指标→擦除级联）。回调发送端为 `temp/mock_callback_sender.py`，11 个 fixture 在 `src/test/resources/mock/aicc/`。
 
 ## 扩展点
 
-- **接入真实 AICC**：只换 `AiccGateway` 的 `verify` / `parse` / `fetchRecording` 三个方法，业务层零改动（V0-real）。
-- **外呼**：`NumberProvider` / `TrunkProvider` 已留接口，当前 noop。
+- **FreeSWITCH 真实链路**（已交付 P1~P3）：四层 SPI 真实实现已填——`FsGateway`（事件源）、`FsChannelControl`（控制面）、`FsMediaStream`（媒体面）、`LiveChannelRegistry`（会话入口）。**未做**：真实 ASR/TTS 引擎（DashScope，需 API key）与 IVR 自动驱动（`IvrSessionDriver.drive` 无生产触发点），不能用 Mock 假装完成。
+- **接入真实 AICC**：只换 `AiccGateway` 的 `verify` / `parse` / `fetchRecording` 三个方法，业务层零改动（V0-real，待 AICC 服务）。
+- **外呼**：`NumberProvider` / `TrunkProvider` 已留接口，当前 noop；无 SIP 中继资质与号码资源前不写真实 PSTN 呼出上线代码。
 - **新增事件类型**：供应商映射表加一行 + `CallStateMachine` 加目标态 + `CallEventDispatcher.applyEvent` 加一个分支，其余阶段零改动。
 - **坐席辅助联动**：`call.asr_result` 落库后会调用文本域的 `SeatAssistService.suggestForVoice`（A2），语音侧不感知推荐实现细节。

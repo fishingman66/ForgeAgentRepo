@@ -438,3 +438,18 @@ agent:
     budget-monthly-minutes: 400000
     number-provider: noop
     trunk-provider: noop
+    # C1-real FreeSWITCH 真实接入(ESL 连接参数走 starter 前缀 link.thingscloud.freeswitch.esl.*)
+    freeswitch:
+      channel-code: CC_FS
+      recording-dir: /var/lib/freeswitch/recordings
+      # uuid_* 命令寻址,须与 starter servers 第一项一致
+      esl-address: 127.0.0.1:8021
+      # 转人工的 dialplan context
+      dialplan-context: default
+      # ACD 队列名 -> dialplan 号码(dialplan 中该号码执行 callcenter 应用)
+      queue-extensions: after_sales:888888
+      # P3 媒体面:FS 侧可访问的本服务地址(同机部署用回环);接通时拼 /cc/media/<callId>
+      media-ws-base: ws://127.0.0.1:8080
+      media-sample-rate: 8k
+    # P3 媒体流实现:mock(无 FS 环境) / fs(mod_audio_stream WebSocket)
+    media-stream-provider: mock

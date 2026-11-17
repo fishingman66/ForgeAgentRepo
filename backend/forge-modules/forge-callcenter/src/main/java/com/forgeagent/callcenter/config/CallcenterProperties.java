@@ -71,6 +71,12 @@ public class CallcenterProperties {
     private String ttsEngine = "mock";
 
     /**
+     * 媒体流实现(C1-real):mock(可编程音频注入,无 FS 环境)/ fs(mod_audio_stream WebSocket)。
+     * 与 provider 独立——provider 决定事件源,本项决定音频管道。
+     */
+    private String mediaStreamProvider = "mock";
+
+    /**
      * 不允许打断词组兜底表(C2):DB 表 agent_cc_voice_no_interrupt 之外的开发兜底;
      * 精确匹配 partial 文本(trim 后全等),命中即忽略本次打断。
      */
@@ -120,4 +126,50 @@ public class CallcenterProperties {
      * 无实现一律降级到正则库并告警一次(不静默假装分类成功)。
      */
     private Boolean routeLlmEnabled = false;
+
+    /** C1-real FreeSWITCH 真实接入(ESL 连接参数走 starter 的 link.thingscloud.freeswitch.esl.* 前缀)。 */
+    private FreeswitchProperties freeswitch = new FreeswitchProperties();
+
+    /**
+     * FreeSWITCH 真实接入的业务侧配置。
+     * ESL 连接(host/port/password/events)由 starter 自带配置绑定,
+     * 本类只承载归一化与录音取回需要的参数。
+     */
+    @Data
+    public static class FreeswitchProperties {
+        /**
+         * ESL 事件归属的语音渠道编码,对应 agent_cc_channel_config.channel_code,
+         * 该渠道 media_provider 须为 FS。ESL 事件没有 URL 渠道段,由此配置兜底。
+         */
+        private String channelCode = "CC_FS";
+
+        /** FS 录音落盘根目录,用于 fetchRecording 路径白名单校验(防目录穿越)。 */
+        private String recordingDir;
+
+        /**
+         * ESL 命令下发地址(host:port),须与 starter 的 servers 第一项一致。
+         * 仅用于 uuid_* 命令寻址,不参与事件订阅。
+         */
+        private String eslAddress = "127.0.0.1:8021";
+
+        /** uuid_transfer 的 dialplan context(FreeSWITCH 默认 default)。 */
+        private String dialplanContext = "default";
+
+        /**
+         * ACD 队列名 -> dialplan 号码映射(逗号分隔,如 after_sales:5000)。
+         * mod_callcenter 的入场方式是 dialplan 中该号码执行 callcenter 应用,
+         * 因此转人工要先转号码而非队列名;未配置的队列名按原值直接当号码转。
+         */
+        private String queueExtensions;
+
+        /**
+         * 媒体面 WebSocket 对外地址(FS 侧能访问到的地址),接通时拼成
+         * {@code ws://<host>:<port>/cc/media/<callId>} 下发给 uuid_audio_stream。
+         * 同机部署填 127.0.0.1;注意 FS 在云主机上时不能用容器内网名。
+         */
+        private String mediaWsBase = "ws://127.0.0.1:8080";
+
+        /** 音频采样率:8k(电话口径,与 MediaStream 接口一致) / 16k(ASR 精度更高)。 */
+        private String mediaSampleRate = "8k";
+    }
 }

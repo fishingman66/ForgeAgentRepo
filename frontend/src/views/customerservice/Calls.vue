@@ -11,6 +11,8 @@
  * ② 抽屉里加「通话画像」面板(意图/情绪/质检/标签/提取结果);
  * ③ 新增呼损回拨清单(状态单向流转,非法流转由后端拒绝并回显原因);
  * ④ 转写时间轴按 segmentKind 区分系统段(转接发起/坐席接通)。
+ * ⑤ 通话列表加「来源」列与供应商筛选(AICC / FS 两条链路并存时区分数据),
+ *    后端 listCalls 无 provider 参数,故筛选走前端 computed 本地派生,不改接口。
  *
  * 扩展点:坐席侧通话标签、人工补挂工单、月度对账报表都在本页叠加;
  * 列表字段与后端 CsCallController.list 的过滤参数一一对应。
@@ -42,6 +44,8 @@ const metric = ref<CsCallMetric | null>(null);
 const seats = ref<CsCallSeatState[]>([]);
 const loading = ref(false);
 const statusFilter = ref('');
+/** 供应商筛选:扁平 ref 避免 Volar 对嵌套 reactive 的 v-model 级联污染。 */
+const providerFilter = ref('');
 const drawerVisible = ref(false);
 const detailCall = ref<CsCall | null>(null);
 const detailEvents = ref<CsCallEvent[]>([]);
@@ -85,6 +89,29 @@ const statusTag = (status: string): 'success' | 'info' | 'warning' | 'danger' | 
     ENDED: 'info'
   };
   return map[status] ?? 'info';
+};
+
+/** 供应商筛选:后端 listCalls 只支持 status/direction,provider 在前端本地过滤。 */
+const filteredRows = computed<CsCall[]>(() => {
+  const selected = providerFilter.value;
+  return selected ? rows.value.filter((row) => row.mediaProvider === selected) : rows.value;
+});
+
+/** 供应商展示名与标签色:FS=真实 FreeSWITCH,带 MOCK 后缀的为开发链路。 */
+const providerLabel = (provider: string | null): string => {
+  const map: Record<string, string> = {
+    AICC: 'AICC',
+    AICC_MOCK: 'AICC Mock',
+    FS: 'FreeSWITCH',
+    FS_MOCK: 'FS Mock'
+  };
+  return provider ? (map[provider] ?? provider) : '未知';
+};
+const providerTag = (provider: string | null): 'success' | 'primary' | 'info' => {
+  if (provider === 'FS') {
+    return 'success';
+  }
+  return provider === 'AICC' ? 'primary' : 'info';
 };
 
 /** 画像标签集合(后端以逗号分隔存的一行文本)。 */
@@ -270,12 +297,22 @@ onMounted(async () => {
             <el-select v-model="statusFilter" placeholder="全部状态" clearable size="small" style="width: 150px" @change="load">
               <el-option v-for="s in ['RINGING', 'ANSWERED', 'BOT_SERVING', 'WAITING_AGENT', 'AGENT_SERVING', 'HOLD', 'WRAP_UP', 'ENDED']" :key="s" :label="s" :value="s" />
             </el-select>
+            <el-select v-model="providerFilter" placeholder="全部来源" clearable size="small" style="width: 130px">
+              <el-option v-for="p in ['AICC', 'AICC_MOCK', 'FS', 'FS_MOCK']" :key="p" :label="providerLabel(p)" :value="p" />
+            </el-select>
             <el-button size="small" @click="load">刷新</el-button>
           </div>
         </div>
       </template>
-      <el-table v-loading="loading" :data="rows" size="small" @row-click="openDetail">
+      <el-table v-loading="loading" :data="filteredRows" size="small" @row-click="openDetail">
         <el-table-column prop="callId" label="呼叫标识" min-width="180" show-overflow-tooltip />
+        <el-table-column label="来源" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="providerTag((row as CsCall).mediaProvider)">
+              {{ providerLabel((row as CsCall).mediaProvider) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="callerNumber" label="主叫" width="130" />
         <el-table-column prop="calleeNumber" label="被叫" width="130" />
         <el-table-column prop="direction" label="方向" width="90" />
@@ -294,7 +331,7 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && !rows.length" description="暂无通话记录" :image-size="70" />
+      <el-empty v-if="!loading && !filteredRows.length" :description="providerFilter ? '该来源暂无通话记录' : '暂无通话记录'" :image-size="70" />
     </el-card>
 
     <el-card shadow="never" class="cs-card">
@@ -354,6 +391,11 @@ onMounted(async () => {
       <template v-if="detailCall">
         <el-descriptions :column="1" border size="small">
           <el-descriptions-item label="呼叫标识">{{ detailCall.callId }}</el-descriptions-item>
+          <el-descriptions-item label="来源">
+            <el-tag size="small" :type="providerTag(detailCall.mediaProvider)">
+              {{ providerLabel(detailCall.mediaProvider) }}
+            </el-tag>
+          </el-descriptions-item>
           <el-descriptions-item label="主叫 / 被叫">{{ detailCall.callerNumber }} → {{ detailCall.calleeNumber }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ detailCall.status }}</el-descriptions-item>
           <el-descriptions-item label="坐席工号">{{ detailCall.workNo ?? '-' }}</el-descriptions-item>

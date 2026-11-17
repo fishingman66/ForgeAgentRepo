@@ -62,7 +62,7 @@ src/main/java/com/forgeagent/rag
 │   │                 # KbVlmConfigResolver / QueryHashes
 │   └── impl/         # 知识库 / 文档 / 摄取管线 / 评测 / 质量 / 外部源 /
 │                     # 向量补偿 / VLM 配置 服务实现
-└── src/test/java     # 32 类 196 用例,全部 @Tag("dev")
+└── src/test/java     # 32 类 199 用例,全部 @Tag("dev")
 ```
 
 ## 检索内核（R1）
@@ -226,7 +226,7 @@ Docker 路径 `deploy/docker/mysql/init/01-schema.sql` 已同步全部表与列�
 
 ## 测试与验证
 
-**196 用例 / 32 类**，全部 `@Tag("dev")`；其中 `MilvusVectorStoreContractTest` 13 条为 gRPC 报文契约，`MilvusGrpcIntegrationTest` 2 条需 `-Dmilvus.it=true` 连真机：
+**199 用例 / 32 类**，全部 `@Tag("dev")`；其中 `MilvusVectorStoreContractTest` 13 条为 gRPC 报文契约，`MilvusGrpcIntegrationTest` 2 条需 `-Dmilvus.it=true` 连真机：
 
 ```bash
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am

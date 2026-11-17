@@ -147,12 +147,12 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **485 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **696 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
-# Agent 平台 101：检索链路与引用门禁 25 + 表达式引擎 11 + 图校验器 21 + 资源域守卫 8 + 记忆预算/工作记忆 8 + MCP 空间归属 16 + 工作流执行体 8 + 问数标识校验 4
+# Agent 平台 132：20 个测试类（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
-# 知识库/RAG 196：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
+# 知识库/RAG 199：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
 # 智能客服域 92：22 个测试类（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
 mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
@@ -162,13 +162,13 @@ mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardT
 mvn -Pdev test "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am
-# 呼叫中心 19：网关验签 5 / 状态机 5 / 指纹 3 / 录音存储 3 / 业务绑定 3
-mvn -Pdev test "-Dtest=AiccGatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest" \
+# 呼叫中心 188：AICC 基线 + FreeSWITCH 真实对接(P1 事件面/P2 控制面/P3 媒体面)；新增 Fs* 契约测试
+mvn -Pdev test "-Dtest=*GatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest,FsEslEventHandlerTest,FsChannelControlTest,FsChannelRegistrarTest,FsMediaStreamTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-callcenter -am
 # 知识图谱 20：门面 9 + MySQL 存图 11
 mvn -Pdev test "-Dtest=KgServiceTest,MysqlKgStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" \
   "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-kg -am
-# 长期记忆 44：服务实现 19 / 向量 8 / 摘要范围 3 / 图注入 5 / 治理 9
+# 长期记忆 51：服务实现 / 向量 / 摘要范围 / 图注入 / 治理（5 个测试类）
 mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,MemoryScopeTest,MemoryGraphInjectionTest,MemoryGovernanceServiceTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-memory -am
 

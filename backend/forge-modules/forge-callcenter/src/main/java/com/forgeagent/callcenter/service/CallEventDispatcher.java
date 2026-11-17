@@ -10,6 +10,7 @@ import com.forgeagent.callcenter.domain.CsCall;
 import com.forgeagent.callcenter.domain.CsCallChannelConfig;
 import com.forgeagent.callcenter.domain.CsCallSegment;
 import com.forgeagent.callcenter.domain.CsCallStatus;
+import com.forgeagent.callcenter.engine.FsChannelRegistrar;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.gateway.CsVoiceGateway;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
@@ -66,6 +67,8 @@ public class CallEventDispatcher {
     private final ObjectProvider<CsRealtimeTransport> transportProvider;
     /** A2 坐席推荐服务同属文本域,关闭时为空,推荐挂点静默跳过。 */
     private final ObjectProvider<SeatAssistService> seatAssistProvider;
+    /** C1-real 真实通道注册器:接通登记、挂机注销,使转人工真实下发(无 ESL 时静默跳过)。 */
+    private final ObjectProvider<FsChannelRegistrar> channelRegistrarProvider;
 
     /** 回调总入口;五个失败点全部收敛到 REJECTED,成功路径永远返回 SUCCESS。 */
     public Map<String, String> dispatch(String provider, String channelCode, String timestamp, String nonce,
@@ -107,6 +110,45 @@ public class CallEventDispatcher {
             log.warn("[CC] 回调报文解析失败 code={}: {}", channelCode, e.getMessage());
             return REJECTED;
         }
+        consume(channel, events);
+        return SUCCESS;
+    }
+
+    /**
+     * 可信事件源入口(C1-real):ESL 长连接已完成连接级认证,跳过 HTTP 回调的 HMAC/时间窗/nonce 三关,
+     * 保留渠道校验 + 网关路由 + 归一化 + 逐事件幂等 + 状态推进全套业务编排。
+     *
+     * <p>事件报文格式与 HTTP 回调完全一致({@code {"events":[...]}}),归一化层零差异——
+     * FsEslEventHandler 把 EslEvent 转成同格式后调本方法,业务层对事件来源无感。</p>
+     *
+     * @return 处理的事件条数;渠道不可用或网关缺失返回 -1(由调用方记日志)
+     */
+    public int dispatchTrusted(String provider, String channelCode, String rawBody) {
+        CsCallChannelConfig channel;
+        try {
+            channel = guard.require(channelCode);
+        } catch (Exception e) {
+            log.warn("[CC] ESL 事件渠道不可用 code={}: {}", channelCode, e.getMessage());
+            return -1;
+        }
+        CsVoiceGateway gateway = resolveGateway(gateways, provider);
+        if (gateway == null) {
+            log.warn("[CC] ESL 事件无网关实现 provider={} code={}", provider, channelCode);
+            return -1;
+        }
+        List<CsVoiceEvent> events;
+        try {
+            events = gateway.parse(provider, channelCode, rawBody);
+        } catch (Exception e) {
+            log.warn("[CC] ESL 事件解析失败 code={}: {}", channelCode, e.getMessage());
+            return -1;
+        }
+        consume(channel, events);
+        return events.size();
+    }
+
+    /** 逐事件处理骨架:单事件异常进死信,不影响后续事件,对外成败由调用方决定。 */
+    private void consume(CsCallChannelConfig channel, List<CsVoiceEvent> events) {
         for (CsVoiceEvent event : events) {
             try {
                 handle(channel, event);
@@ -115,7 +157,6 @@ public class CallEventDispatcher {
                 deadLetter(event, e.getMessage());
             }
         }
-        return SUCCESS;
     }
 
     /**
@@ -176,11 +217,39 @@ public class CallEventDispatcher {
         call.setStatus(to);
         call.setUpdateTime(now);
         callMapper.updateById(call);
+        // C1-real:接通登记真实通道(让转人工从留痕变为真实下发),挂机注销
+        syncLiveChannel(channel, callId, to, from);
         // 挂机结案钩子:状态实际推进到 ENDED 才触发;迟到的 CDR 不重复触发(否则质检/指标重复)
         if ("ENDED".equals(to) && !"ENDED".equals(from)) {
             businessBinder.onHangup(call);
         }
         pushControlPlane(call, event);
+    }
+
+    /**
+     * 真实通道生命周期挂点:接通(ANSWERED 及之后的服务态)登记,ENDED 注销。
+     * 只在 media_provider=FS 时生效,注册器内部再做一次判断与 ESL 可用性检查。
+     */
+    private void syncLiveChannel(CsCallChannelConfig channel, String callId, String to, String from) {
+        FsChannelRegistrar registrar = channelRegistrarProvider.getIfAvailable();
+        if (registrar == null) {
+            return;
+        }
+        try {
+            if ("ENDED".equals(to)) {
+                if (!"ENDED".equals(from)) {
+                    registrar.onEnded(callId);
+                }
+                return;
+            }
+            // 首次进入 ANSWERED(或后续服务态)登记;重复调用由注册器幂等
+            if (CsCallStatus.wasAnswered(to)) {
+                registrar.onAnswered(channel.getMediaProvider(), callId);
+            }
+        } catch (Exception e) {
+            // 通道登记失败不能阻断事件处理
+            log.warn("[CC] 通道登记/注销失败 callId={} to={}: {}", callId, to, e.getMessage());
+        }
     }
 
     /** 事件分派:每个归一化事件的副作用集中在一个方法,方法名即事件语义。 */

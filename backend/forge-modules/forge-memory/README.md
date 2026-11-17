@@ -1,6 +1,6 @@
 # forge-memory · 六层长期记忆
 
-跨会话记忆沉淀、语义检索、图谱关联、注入预算与治理。15 个主类、1 个 Controller（`AgentMemoryController`）、**48 个单元测试**（5 类）。
+跨会话记忆沉淀、语义检索、图谱关联、注入预算与治理。15 个主类、1 个 Controller（`AgentMemoryController`）、**51 个单元测试**（5 类）。
 
 方案与决策记录见 [`docs/03-长期记忆与知识图谱.md`](../../../docs/03-长期记忆与知识图谱.md)。全部能力落 MySQL（向量列）+ Redis，**零新基建**；默认关闭时主链路行为与未升级完全一致。
 
@@ -77,7 +77,7 @@ POST   /agent/memory/governance/run             手动触发治理任务
 
 ## 测试
 
-**48 用例 / 5 类**，全部 `@Tag("dev")`：
+**51 用例 / 5 类**，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,MemoryScopeTest,MemoryGraphInjectionTest,MemoryGovernanceServiceTest" \

@@ -33,7 +33,7 @@ public class IvrSessionDriver {
     /**
      * 驱动一通电话的呼入流程(阻塞调用,由通话线程执行;挂机即返回)。
      *
-     * @param stream        媒体流(C1-real 为 mod_audio_fsc 会话,Mock 下为注入管道)
+     * @param stream        媒体流(C1-real 为 mod_audio_stream 会话,Mock 下为注入管道)
      * @param channel       通道命令
      * @param callerChannel DTMF 投递口(事件链路持有,Mock/测试直喂)
      * @param hangupFlag    挂机标志(事件链路置位)

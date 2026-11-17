@@ -1,5 +1,6 @@
 package com.forgeagent.callcenter.engine;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
@@ -12,8 +13,13 @@ import java.util.function.Consumer;
  * 媒体流 Mock(C1 / V-5):可编程音频注入,让 ASR/TTS/打断逻辑在无 FreeSWITCH 环境
  * 完整测试——测试用 {@code injectCallerAudio}/{@code injectSilence} 模拟 caller
  * 说话与停顿(静默即零字节注入,由消费方按长度判静默),TTS 输出全部落缓冲可断言。
+ *
+ * <p>与 {@link FsMediaStreamProvider} 互斥:由 {@code agent.callcenter.media-stream-provider}
+ * 切换(默认 mock),默认值保证无 FS 环境开箱可用。</p>
  */
 @Component
+@ConditionalOnProperty(prefix = "agent.callcenter", name = "media-stream-provider",
+    havingValue = "mock", matchIfMissing = true)
 public class MockMediaStreamProvider implements MediaStreamProvider {
 
     private final List<MockMediaStream> opened = new ArrayList<>();
@@ -81,7 +87,7 @@ public class MockMediaStreamProvider implements MediaStreamProvider {
             playbackQueue.clear();
         }
 
-        /** 播放器队列非空即为「机器人在说话」;真实侧由 mod_audio_fsc 播放缓冲表达。 */
+        /** 播放器队列非空即为「机器人在说话」;真实侧由 mod_audio_stream 播放缓冲表达。 */
         @Override
         public boolean isBotPlaying() {
             return !closed && !playbackQueue.isEmpty();

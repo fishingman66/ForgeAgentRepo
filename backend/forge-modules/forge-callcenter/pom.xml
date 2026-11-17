@@ -35,6 +35,46 @@
             <artifactId>forge-common-oss</artifactId>
         </dependency>
 
+        <!-- FreeSWITCH ESL 事件订阅与呼叫控制(C1-real):
+             排除 starter 依赖的 Netty 4.1 系列,统一使用 Spring Boot 4.1.2 BOM 管理的 Netty 4.2.x。
+             字节码已确认 ESL 库仅用 NioEventLoopGroup/NioSocketChannel,不依赖 epoll/kqueue native。 -->
+        <dependency>
+            <groupId>link.thingscloud</groupId>
+            <artifactId>freeswitch-esl-spring-boot-starter</artifactId>
+            <version>2.2.0</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-handler</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-epoll</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>io.netty</groupId>
+                    <artifactId>netty-transport-native-kqueue</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- ESL 运行时所需 Netty:不写版本,由 Spring Boot 4.1.2 BOM 管理(4.2.19.Final)。
+             netty-handler 会传递引入 netty-transport / netty-buffer / netty-codec / netty-common。 -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-handler</artifactId>
+        </dependency>
+
+        <!-- C1-real 媒体面:mod_audio_stream 作为客户端连本服务的 WebSocket 端点推送 PCM -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+        </dependency>
+
         <!-- 单元测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

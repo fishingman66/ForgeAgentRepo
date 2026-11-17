@@ -43,5 +43,21 @@ public class CallcenterProductionReadinessValidator {
             }
             log.warn("[CC] {} (dev 环境放行)", message);
         }
+
+        // C1-real:provider=FS 时校验 ESL 业务配置与 starter 连接密码
+        boolean realFs = "FS".equalsIgnoreCase(provider);
+        CallcenterProperties.FreeswitchProperties fs = properties.getFreeswitch();
+        if (realFs && (fs == null || fs.getChannelCode() == null || fs.getChannelCode().isBlank())) {
+            String message = "agent.callcenter.freeswitch.channel-code 在 provider=FS 时必填(ESL 事件归属的语音渠道)";
+            if (prod) {
+                throw new IllegalStateException("[CC] " + message);
+            }
+            log.warn("[CC] {} (dev 环境放行)", message);
+        }
+        // ESL 默认密码 ClueCon 必须覆盖:只读 starter 配置键,不落明文、不记日志
+        String eslPassword = environment.getProperty("link.thingscloud.freeswitch.esl.inbound.default-password");
+        if (prod && realFs && "ClueCon".equals(eslPassword)) {
+            throw new IllegalStateException("[CC] ESL 默认密码 ClueCon 未修改,prod 必须通过 FS_ESL_PASSWORD 覆盖");
+        }
     }
 }

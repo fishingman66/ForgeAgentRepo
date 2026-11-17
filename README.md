@@ -7,7 +7,7 @@
 | 速览 | 值 |
 | --- | --- |
 | 模块 | `backend/forge-modules/` 下 12 个，依赖单向无环 |
-| 后端单测 | **485 用例**（7 个模块有测试类，全部 `@Tag("dev")`） |
+| 后端单测 | **696 用例**（8 个模块有测试类，全部 `@Tag("dev")`） |
 | 前端 | 15 单测 + `vue-tsc --noEmit` 零错误，已接入构建门禁 |
 | 检索基线 | HitRate@5 **93.33%** / MRR **0.8667** / NDCG@5 **0.8841** |
 | 端到端 | 4 套逐期脚本（28 / 18 / 15 / 16）全通过 |
@@ -142,7 +142,7 @@ pnpm run dev
 | `forge-memory` | 六层长期记忆（L0~L5） | [README](backend/forge-modules/forge-memory/README.md) |
 | `forge-kg` | 知识图谱（MySQL 存图 / Neo4j SPI） | [README](backend/forge-modules/forge-kg/README.md) |
 | `forge-customer-service` | 智能客服域（C0~C4 / A1~A5 / P0~P3） | [README](backend/forge-modules/forge-customer-service/README.md) |
-| `forge-callcenter` | 语音呼叫中心（AICC Mock 链路） | [README](backend/forge-modules/forge-callcenter/README.md) |
+| `forge-callcenter` | 语音呼叫中心（AICC Mock 链路 + 真实 FreeSWITCH P1~P3 对接） | [README](backend/forge-modules/forge-callcenter/README.md) |
 | `forge-callcenter-common` | 零业务依赖契约层（事件信封 / 验签 / PII） | [README](backend/forge-modules/forge-callcenter-common/README.md) |
 | `forge-workflow` | OA 审批工作流（WarmFlow + LiteFlow） | [README](backend/forge-modules/forge-workflow/README.md) |
 | `forge-system` | 系统管理基座（用户 / 角色 / 菜单 / OSS） | [README](backend/forge-modules/forge-system/README.md) |
@@ -249,10 +249,11 @@ pnpm run dev
 
 | 模块 | 用例 | 模块 | 用例 |
 | --- | --- | --- | --- |
-| Agent 平台 | 101 | 知识库/RAG | 196 |
-| 智能客服域 | 92 | 长期记忆 | 44 |
-| 知识图谱 | 20 | 呼叫中心 | 19 |
-| 契约层 | 13 | **后端合计** | **485** |
+| Agent 平台 | 132 | 知识库/RAG | 199 |
+| 智能客服域 | 92 | 长期记忆 | 51 |
+| 知识图谱 | 20 | 呼叫中心 | 188 |
+| 契约层 | 13 | 管理端模板 | 1 |
+| **后端合计** | **696** | | |
 
 前端 15 单测（`sse-events` 10 + `governance` 5），`pnpm typecheck` 零错误，`build` / `build:dev` / `build:prod` 均前置 `vue-tsc --noEmit`。
 
@@ -284,11 +285,12 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 
 ### 已交付
 
-平台基座（内置工具集 / 评测回归 / Run·Trace / 资源域双模式（工具·数据源·模型·MCP 四类）/ 多租户加固 / 免登录加固 / TypeScript 类型检查接入构建，115 个存量错误清零）、工作流（12 类节点引擎 / 对话触发 / 对外 API / 审批清扫；执行体已拆分为节点执行器·图引擎·运行生命周期·轨迹编解码，主类 2054 行降为门面）、智能客服（C0~C4 / A1~A5 / P0~P3 / AICC Mock 语音链路）、记忆与图谱（六层 L0~L5 / `forge-kg` 独立模块）、知识库（R1~R5 全量，含图片描述与视觉模型按工作空间配置）、验证体系（4 套 e2e + 检索基线定版）**均已交付**。逐批结论与决策偏差见 `docs/` 六篇方案文档的「批次历史」表。
+平台基座（内置工具集 / 评测回归 / Run·Trace / 资源域双模式（工具·数据源·模型·MCP 四类）/ 多租户加固 / 免登录加固 / TypeScript 类型检查接入构建，115 个存量错误清零）、工作流（12 类节点引擎 / 对话触发 / 对外 API / 审批清扫；执行体已拆分为节点执行器·图引擎·运行生命周期·轨迹编解码，主类 2054 行降为门面）、智能客服（C0~C4 / A1~A5 / P0~P3）、呼叫中心（AICC Mock 语音链路 + **真实 FreeSWITCH 对接 P1 事件面 / P2 控制面+坐席面 / P3 媒体面**，详见 `docs/09`）、记忆与图谱（六层 L0~L5 / `forge-kg` 独立模块）、知识库（R1~R5 全量，含图片描述与视觉模型按工作空间配置）、验证体系（4 套 e2e + 检索基线定版）**均已交付**。逐批结论与决策偏差见 `docs/` 十篇方案文档的「批次历史」表。
 
 ### 待办
 
-- [ ] 真实 AICC 接入（V0-real：替换 `CsVoiceGateway` 的 verify / parse / fetchRecording，业务层零改动）
+- [ ] 真实 AICC 接入（V0-real：替换 `AiccGateway` 的 verify / parse / fetchRecording，业务层零改动）
+- [ ] 真实 ASR/TTS 引擎（DashScope 等，需 API key；SPI 已就绪，`asr-engine=...` 切换）+ IVR 会话自动驱动（`IvrSessionDriver.drive` 需业务定义 routeCode 触发点）
 - [ ] 语音出域登记与合规录音视图（`RECORDING_EGRESS`，`audio-egress-enabled=true` 场景）
 - [ ] 生产知识图谱 Neo4j 后端实现（SPI 已就绪，注册 Bean 即切换）
 - [ ] S3·Confluence 外部源真实接入（SPI 已就绪，实现 `fetch` 即启用）
