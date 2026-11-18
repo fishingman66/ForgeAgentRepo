@@ -96,6 +96,20 @@ public class AgentSession extends BaseEntity {
     private Long callerWorkspaceId;
 
     /**
+     * A2:客服预取检索结果(瞬态,不入库)。
+     * prepareRound 写入,buildRound 在 KB 集合一致时整体复用,免二次检索。
+     */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private com.forgeagent.agent.api.customerservice.CsChatFacade.PrefetchedRetrieval prefetchedRetrieval;
+
+    /**
+     * C2:客服工具护栏上下文(瞬态,不入库)。
+     * prepareRound 写入,buildRound 据此对平台工具启用客服护栏装饰。
+     */
+    @com.baomidou.mybatisplus.annotation.TableField(exist = false)
+    private com.forgeagent.agent.api.customerservice.CsChatFacade.GuardContext csGuard;
+
+    /**
      * 删除标志(0存在 2删除)
      */
     @TableLogic

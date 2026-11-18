@@ -1,4 +1,7 @@
-package com.forgeagent.callcenter.insight;
+package com.forgeagent.callcenter.common.sentiment;
+
+import com.forgeagent.callcenter.common.sentiment.LexiconSentimentAnalyzer;
+import com.forgeagent.callcenter.common.sentiment.SentimentAnalyzer;
 
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

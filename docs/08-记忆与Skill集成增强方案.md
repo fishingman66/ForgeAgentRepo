@@ -107,7 +107,7 @@ DSH 与 ForgeAgent 的场景差异是本方案取舍的总依据：
 
 ### 4.3 等需求：有消费者再做（当前不做）
 
-> **实施状态（2026-11-16）**：A5 已交付（用户拍板启动）。`McpExternalToolProvider` SPI（forge-rag 定义，forge-agent 实现 `SkillMcpExternalToolProvider`，对外暴露 `skill_list`/`skill_get`，server 名更新为 forgeagent-platform）；端点 18 tests + Provider 4 tests 全绿，forge-rag 199 / forge-agent 132 / 0 失败。
+> **实施状态（2026-11-16）**：A5 已交付（用户拍板启动）。`McpExternalToolProvider` SPI（forge-rag 定义，forge-agent 实现 `SkillMcpExternalToolProvider`，对外暴露 `skill_list`/`skill_get`，server 名更新为 forgeagent-platform）；端点 18 tests + Provider 4 tests 全绿，forge-rag 199 / forge-agent 147 / 0 失败（agent 132 为批次 A 前口径）。
 > **端到端验证（同日）**：本地库执行 `agent_skill.sql`；创建 2 个客服域技能（退换货处理 / 物流查询话术）并安装到「洪哥的智能体」；起服务走真实对话（Agnes 模型），验证链路全通——技能目录注入 system prompt（`promptHead=[可用技能]`）、`load_skill` 注册、**模型按手册步骤回复**（确认订单号→校验退货资格三要素→引导创建售后工单）。已恢复 Agent 停用原状。
 > **踩坑**：`/auth/login` 必须 AES+RSA 加密（复用 temp/A1Login.java）；打包时运行中的进程锁 jar 需先停服务。
 > **⚠️ 菜单号撞号（已修复）**：Docker 基线 02-seed 里 30161~30166 已被「长期记忆」菜单占用、30171~30176 被数据源管理占用——`agent_skill.sql` 首版 DELETE 段误删了本地库的记忆菜单（已恢复），技能菜单迁移至**空闲号段 30181~30186**；Docker 基线 01-schema 已补 agent_skill/agent_skill_install 两表（无 auto_increment）+ agent_memory 的 FULLTEXT ngram 索引折进建表定义，02-seed 追加技能菜单段（先删后插幂等），临时库 01+02 真机验证：记忆菜单 4 + 技能菜单 6 + 技能表 2 + FULLTEXT 2 列并存。**教训：新菜单号段必须先 grep 02-seed 查占用，不能默认 30161 起空闲**。

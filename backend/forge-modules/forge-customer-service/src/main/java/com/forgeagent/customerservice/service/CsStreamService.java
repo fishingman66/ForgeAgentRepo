@@ -109,8 +109,10 @@ public class CsStreamService {
                 // M3 后续:图谱扩展只进检索 query,缓存键与模型入参不变
                 CsKgQueryExpander.Expansion expansion =
                     kgQueryExpander.expandDetailed(channel.getWorkspaceId(), content);
-                List<KnowledgeSearchHitVo> hits = knowledgeGateway.search(
+                // A2:链路同构检索,与阻塞路径同口径;免登录 callerWorkspaceId 归属校验
+                CsKnowledgeGateway.RetrievalOutcome outcome = knowledgeGateway.retrieve(
                     channel.getWorkspaceId(), knowledgeIds, expansion.query());
+                List<KnowledgeSearchHitVo> hits = outcome.hits();
                 // M4 后续:检索扩展效果埋点
                 kgExpandMetricService.record(channel.getWorkspaceId(),
                     !expansion.terms().isEmpty(), hits.isEmpty());
@@ -130,10 +132,17 @@ public class CsStreamService {
                     }
                     emitter.send("chat_chunk", Map.of("content", reply));
                 } else {
+                    String binding = channel.getIdentityBinding();
+                    CsChatFacade.GuardContext guardContext = new CsChatFacade.GuardContext(
+                        conv.getId(), visitorId, channel.getWorkspaceId(), channel.getChannelCode(),
+                        binding != null && !binding.isBlank());
                     CsChatFacade.CsChatRequest request = new CsChatFacade.CsChatRequest(
                         conv.getAgentSessionId(), agentId, content,
                         channel.getOwnerUserId(), channel.getWorkspaceId(),
-                        visitorId, channel.getChannelCode(), conv.getTicketId());
+                        visitorId, channel.getChannelCode(), conv.getTicketId(),
+                        knowledgeIds.isEmpty() ? null : new CsChatFacade.PrefetchedRetrieval(
+                            expansion.query(), knowledgeIds, outcome.hits(), outcome.contextByChunk()),
+                        guardContext);
                     chatFacade.stream(request, tracedEmitter(channel, conv, visitorId, emitter));
                     AgentMessage last = messageMapper.selectOne(new LambdaQueryWrapper<AgentMessage>()
                         .eq(AgentMessage::getSessionId, conv.getAgentSessionId())

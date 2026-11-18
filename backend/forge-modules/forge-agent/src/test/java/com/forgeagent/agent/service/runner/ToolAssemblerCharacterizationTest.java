@@ -65,7 +65,7 @@ class ToolAssemblerCharacterizationTest {
     private static ToolAssembler.Assembly build(ToolAssembler assembler, List<ToolAssembler.ToolDef> defs) {
         return assembler.build(defs, List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, null),
-            new CopyOnWriteArrayList<>(), List.of(), List.of());
+            new CopyOnWriteArrayList<>(), List.of(), List.of(), null);
     }
 
     @Test
@@ -75,7 +75,7 @@ class ToolAssemblerCharacterizationTest {
             List.of(), List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, null),
             new CopyOnWriteArrayList<>(), List.of(),
-            List.of(new ToolAssembler.SkillDef("退换货处理", "引导完成退换货申请")));
+            List.of(new ToolAssembler.SkillDef("退换货处理", "引导完成退换货申请")), null);
         assertNotNull(assembly.toolkit().getTool("load_skill"));
         assertTrue(!(assembly.toolkit().getTool("load_skill") instanceof ApprovalGateTool),
             "load_skill 只读平台数据,免审批门");
@@ -150,7 +150,7 @@ class ToolAssemblerCharacterizationTest {
         props.setWorkingMemoryEnabled(true);
         ToolAssembler.Assembly withRun = assembler(props).build(List.of(), List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, "run-1"),
-            new CopyOnWriteArrayList<>(), List.of(), List.of());
+            new CopyOnWriteArrayList<>(), List.of(), List.of(), null);
         assertNotNull(withRun.toolkit().getTool("recall_working_memory"));
         assertTrue(!(withRun.toolkit().getTool("recall_working_memory") instanceof WorkingMemoryGuard),
             "取回工具自身不得参与压缩,避免递归");
@@ -176,7 +176,7 @@ class ToolAssemblerCharacterizationTest {
         ToolAssembler.Assembly assembly = assembler(new AgentChatProperties()).build(
             List.of(), List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, null),
-            new CopyOnWriteArrayList<>(), List.of(attachment), List.of());
+            new CopyOnWriteArrayList<>(), List.of(attachment), List.of(), null);
         assertNotNull(assembly.toolkit().getTool("read_attachment"),
             "带附件时注册 read_attachment 工具");
     }

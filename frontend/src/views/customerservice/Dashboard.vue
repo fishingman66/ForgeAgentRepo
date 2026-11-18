@@ -17,7 +17,9 @@ const cards = [
   { key: 'botSessions', label: '自助会话', suffix: '' },
   { key: 'handoffCount', label: '转人工', suffix: '' },
   { key: 'firstResponseP95Ms', label: '首响 P95', suffix: ' ms' },
-  { key: 'csatAvg', label: 'CSAT 均分', suffix: '' }
+  { key: 'csatAvg', label: 'CSAT 均分', suffix: '' },
+  { key: 'containmentRate', label: 'AI 自动解决率', suffix: ' %' },
+  { key: 'repeatContactRate', label: '重复进线率', suffix: ' %' }
 ];
 
 const load = async () => {
@@ -66,6 +68,9 @@ onMounted(load);
       </template>
       <el-table v-loading="loading" :data="rows" size="small">
         <el-table-column prop="statDate" label="日期" width="150" />
+        <el-table-column label="渠道" width="100">
+          <template #default="{ row }">{{ row.channelCode || '全渠道' }}</template>
+        </el-table-column>
         <el-table-column prop="botSessions" label="自助会话" width="110" />
         <el-table-column prop="handoffCount" label="转人工" width="100" />
         <el-table-column prop="firstResponseP95Ms" label="首响P95(ms)" width="130" />
@@ -74,6 +79,8 @@ onMounted(load);
         <el-table-column prop="csatAvg" label="CSAT" width="100" />
         <el-table-column prop="csatResponseRate" label="回收率(%)" width="120" />
         <el-table-column prop="slaPassRate" label="SLA达标(%)" width="130" />
+        <el-table-column prop="containmentRate" label="AI自动解决(%)" width="130" />
+        <el-table-column prop="repeatContactRate" label="重复进线率(%)" width="130" />
       </el-table>
       <el-empty v-if="!loading && !rows.length" description="暂无指标，点击右上角重建" :image-size="70" />
     </el-card>

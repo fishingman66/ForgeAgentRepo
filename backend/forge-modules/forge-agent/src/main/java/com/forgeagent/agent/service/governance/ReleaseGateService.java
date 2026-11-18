@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forgeagent.agentcore.domain.AgentInfo;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
-import com.forgeagent.common.json.utils.JsonUtils;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -45,19 +44,29 @@ public class ReleaseGateService {
 
     /** 发布前预检(只写 preview 记录,不阻断) */
     public GateResult preview(AgentInfo agent) {
-        return check(agent, "preview");
+        return check(agent, "preview", true);
     }
 
     /** 发布时执行门禁,不通过直接阻断发布事务 */
     public GateResult assertCanRelease(AgentInfo agent) {
-        GateResult result = check(agent, null);
+        GateResult result = check(agent, null, true);
         if (!result.passed()) {
             throw new ServiceException("发布门禁未通过: " + result.reason());
         }
         return result;
     }
 
-    private GateResult check(AgentInfo agent, String previewStatus) {
+    /**
+     * 只读评估:执行与发布同一套检查但不写 release_gate_execution 记录。
+     *
+     * <p>供客服发布门禁(CsGovernanceFacade.canPublish)这类高频判定复用,
+     * 避免每次模板应用都产生一条执行记录。</p>
+     */
+    public GateResult evaluate(AgentInfo agent) {
+        return check(agent, null, false);
+    }
+
+    private GateResult check(AgentInfo agent, String previewStatus, boolean persist) {
         Map<String, Object> checks = new LinkedHashMap<>();
         List<String> problems = new ArrayList<>();
 
@@ -141,12 +150,21 @@ public class ReleaseGateService {
         checks.put("reason", reason);
 
         String status = previewStatus != null ? previewStatus : (passed ? "passed" : "blocked");
-        jdbc.update("""
-                INSERT INTO release_gate_execution
-                  (agent_id,target_version,status,checks_json,reason,waived,requested_by,create_time)
-                VALUES (?,?,?,?,?,?,?,NOW())
-                """, agent.getId(), agent.getVersion(), status, JsonUtils.toJsonString(checks),
-            reason, waived ? "1" : "0", currentUserId());
+        if (persist) {
+            // 不走 JsonUtils(其静态初始化依赖重,纯单测环境会炸),用类内 MAPPER 即可
+            String checksJson;
+            try {
+                checksJson = MAPPER.writeValueAsString(checks);
+            } catch (Exception e) {
+                checksJson = "{}";
+            }
+            jdbc.update("""
+                    INSERT INTO release_gate_execution
+                      (agent_id,target_version,status,checks_json,reason,waived,requested_by,create_time)
+                    VALUES (?,?,?,?,?,?,?,NOW())
+                    """, agent.getId(), agent.getVersion(), status, checksJson,
+                reason, waived ? "1" : "0", currentUserId());
+        }
         return new GateResult(passed, waived, sampleAvailable, reason, checks);
     }
 

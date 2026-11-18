@@ -1,6 +1,7 @@
 package com.forgeagent.agent.api.customerservice.impl;
 
 import com.forgeagent.agent.api.customerservice.CsKnowledgeGateway;
+import com.forgeagent.agent.service.support.ChatRetrievalSupport;
 import com.forgeagent.rag.domain.bo.KnowledgeSearchBo;
 import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import com.forgeagent.rag.service.IAgentKnowledgeService;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 客服检索契约实现(C0):唯一允许在无登录上下文调用 searchInternal 的入口。
@@ -23,6 +25,7 @@ import java.util.List;
 public class CsKnowledgeGatewayImpl implements CsKnowledgeGateway {
 
     private final IAgentKnowledgeService knowledgeService;
+    private final ChatRetrievalSupport retrievalSupport;
 
     @Override
     public List<KnowledgeSearchHitVo> search(Long callerWorkspaceId, List<Long> knowledgeIds, String query) {
@@ -47,6 +50,26 @@ public class CsKnowledgeGatewayImpl implements CsKnowledgeGateway {
             }
         }
         return hits;
+    }
+
+    @Override
+    public com.forgeagent.agent.api.customerservice.CsKnowledgeGateway.RetrievalOutcome retrieve(
+            Long callerWorkspaceId, List<Long> knowledgeIds, String query) {
+        if (knowledgeIds == null || knowledgeIds.isEmpty() || query == null || query.isBlank()) {
+            return new com.forgeagent.agent.api.customerservice.CsKnowledgeGateway.RetrievalOutcome(
+                List.of(), Map.of());
+        }
+        try {
+            ChatRetrievalSupport.RetrievalResult result = retrievalSupport.retrieveKnowledge(
+                knowledgeIds, query, null, callerWorkspaceId);
+            return new com.forgeagent.agent.api.customerservice.CsKnowledgeGateway.RetrievalOutcome(
+                result.hits() == null ? List.of() : result.hits(),
+                result.contextByChunk() == null ? Map.of() : result.contextByChunk());
+        } catch (Exception e) {
+            log.warn("[CS] 链路同构检索失败 workspaceId={}: {}", callerWorkspaceId, e.getMessage());
+            return new com.forgeagent.agent.api.customerservice.CsKnowledgeGateway.RetrievalOutcome(
+                List.of(), Map.of());
+        }
     }
 
     @Override

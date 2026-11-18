@@ -108,6 +108,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
     private final AuditLogHelper auditLogHelper;
 
     private final ChatRetrievalSupport retrievalSupport;
+    private final com.forgeagent.agent.service.support.CsToolGuardService csToolGuardService;
     private final ChatContextAssembler contextAssembler;
     private final ChatStreamSupport streamSupport;
     private final RunTraceService runTrace;
@@ -988,6 +989,10 @@ public class AgentChatServiceImpl implements IAgentChatService {
         }
         // S0:调用方空间经实体瞬态字段传入 buildRound,避免改多处 buildRound 签名
         session.setCallerWorkspaceId(bo.getCallerWorkspaceId());
+        // A2:预取检索结果同样经瞬态字段穿透(仅客服链路非空)
+        session.setPrefetchedRetrieval(bo.getPrefetched());
+        // C2:工具护栏上下文(仅客服链路非空)
+        session.setCsGuard(bo.getCsGuardContext());
         try {
             return buildRound(session, newSession, bo.getContent(), null, bo.getAttachmentIds(), false);
         } catch (Exception e) {
@@ -1129,8 +1134,15 @@ public class AgentChatServiceImpl implements IAgentChatService {
         }
         List<ToolAssembler.SkillDef> skillDefs = installedSkills.stream()
             .map(s -> new ToolAssembler.SkillDef(s.getName(), s.getDescription())).toList();
-        String toolNames = toolIds.isEmpty() ? "" : toolMapper.selectByIds(toolIds).stream()
+        List<AgentTool> toolEntities = toolIds.isEmpty()
+            ? java.util.List.of() : toolMapper.selectByIds(toolIds);
+        String toolNames = toolEntities.stream()
             .map(AgentTool::getName).collect(Collectors.joining("、"));
+        // C2:护栏按工具实体里的 risk_level/action_key/daily_limit 求值,按名对齐
+        java.util.Map<String, AgentTool> csGuardTools = new java.util.HashMap<>();
+        for (AgentTool entity : toolEntities) {
+            csGuardTools.putIfAbsent(entity.getName(), entity);
+        }
         String knowledgeNames = knowledgeIds.isEmpty() ? "" : knowledgeMapper.selectByIds(knowledgeIds).stream()
             .map(AgentKnowledge::getName).collect(Collectors.joining("、"));
         // 工具定义快照:提前加载,供统一查询改写判断是否绑定了问数数据源
@@ -1159,8 +1171,29 @@ public class AgentChatServiceImpl implements IAgentChatService {
         stageAt = System.currentTimeMillis();
         // RAG: 用改写后的问题对绑定知识库混合检索(未绑知识库时保持原文,改写结果仅供问数路由使用)
         String retrievalQuery = knowledgeIds.isEmpty() ? content : rewrittenQuery;
-        ChatRetrievalSupport.RetrievalResult retrieval = retrievalSupport.retrieveKnowledge(knowledgeIds, retrievalQuery,
-            new ChatRetrievalSupport.RetrievalTrace(agent.getId(), session.getId(), session.getUserId(), content));
+        ChatRetrievalSupport.RetrievalTrace retrievalTrace =
+            new ChatRetrievalSupport.RetrievalTrace(agent.getId(), session.getId(), session.getUserId(), content);
+        ChatRetrievalSupport.RetrievalResult retrieval;
+        com.forgeagent.agent.api.customerservice.CsChatFacade.PrefetchedRetrieval prefetched =
+            session.getPrefetchedRetrieval();
+        if (prefetched != null && session.getCallerWorkspaceId() != null
+            && ChatRetrievalSupport.prefetchedUsable(prefetched.knowledgeIds(), knowledgeIds)) {
+            // A2:客服预检已按同一 KB 集合与同一 query 走过完整检索管线,整体复用免二次检索;
+            // 检索 query 与闸门判定同源(含图谱扩展),链路不再改写
+            retrievalQuery = prefetched.query() != null && !prefetched.query().isBlank()
+                ? prefetched.query() : retrievalQuery;
+            retrieval = new ChatRetrievalSupport.RetrievalResult(
+                prefetched.hits() == null ? java.util.List.of() : prefetched.hits(),
+                prefetched.contextByChunk() == null ? java.util.Map.of() : prefetched.contextByChunk());
+            buildMetrics.put("ragPrefetched", true);
+        } else if (session.getCallerWorkspaceId() != null) {
+            // 客服免登录链路:访客无 Sa-Token,登录口径成员校验必失败(此前被逐库吞成静默零命中),
+            // 改走 callerWorkspaceId 归属校验口径;控制台路径行为不变
+            retrieval = retrievalSupport.retrieveKnowledge(knowledgeIds, retrievalQuery, retrievalTrace,
+                session.getCallerWorkspaceId());
+        } else {
+            retrieval = retrievalSupport.retrieveKnowledge(knowledgeIds, retrievalQuery, retrievalTrace);
+        }
         // 会话文件:小文件全文注入,大文件只注入摘要+按问题召回的片段,并受附件预算约束
         ChatRetrievalSupport.AttachmentRetrieval attachmentRetrieval = retrievalSupport.retrieveAttachments(fileAtts, retrievalQuery, content);
         buildMetrics.put("retrievalMs", System.currentTimeMillis() - stageAt);
@@ -1326,7 +1359,8 @@ public class AgentChatServiceImpl implements IAgentChatService {
             model == null ? null : model.getMaxTokens(),
             session.getId(), agent.getId(), roundId, toolDefs, mcpDefs, tokenBudget, usedTokens,
             agent.getOutputSchema(), teamMembers, agent.getTeamMode(), images,
-            retrievalSupport.buildAttachmentRefs(fileAtts), sqlCollector, skillDefs);
+            retrievalSupport.buildAttachmentRefs(fileAtts), sqlCollector, skillDefs,
+            csToolGuardService.decorator(session.getCsGuard(), csGuardTools));
         AgentRunner selected = agentRunners.stream()
             .filter(r -> r.supports(ctx))
             .findFirst()
@@ -1396,6 +1430,12 @@ public class AgentChatServiceImpl implements IAgentChatService {
         vo.setSessionId(round.session().getId());
         vo.setUserMessage(MapstructUtils.convert(round.userMsg(), AgentMessageVo.class));
         vo.setAssistantMessage(MapstructUtils.convert(assistantMsg, AgentMessageVo.class));
+        // A1 终态:链路权威信号随 VO 回传(附件命中不计入 KB 零命中判定;
+        // 命中数取 buildMetrics 里的 KB 口径,与预取复用分支同源)
+        Object kbHitCount = round.buildMetrics().get("knowledgeHits");
+        vo.setZeroHit(ChatSendVo.zeroHitOf(!round.knowledgeIds().isEmpty(),
+            kbHitCount instanceof Integer count ? count : null));
+        vo.setCitationCount(round.ragRefCount());
         return vo;
     }
 

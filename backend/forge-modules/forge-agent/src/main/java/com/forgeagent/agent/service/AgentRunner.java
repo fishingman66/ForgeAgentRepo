@@ -146,7 +146,8 @@ public interface AgentRunner {
                          String outputSchema, List<TeamMember> teamMembers, String teamMode,
                          List<ImageRef> images, List<AttachmentRef> attachments,
                          List<Map<String, Object>> sqlCollector,
-                         List<ToolAssembler.SkillDef> skills) {
+                         List<ToolAssembler.SkillDef> skills,
+                         java.util.function.UnaryOperator<io.agentscope.core.tool.AgentTool> csGuardDecorator) {
 
         /**
          * 协作模式(P2 / C2):sequential / parallel / reviewer / supervisor
@@ -231,7 +232,7 @@ public interface AgentRunner {
             this(agentName, modelName, toolNames, knowledgeNames, retrievedContext, systemPrompt, history,
                 llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens, null, null, null, List.of(), List.of(),
                 null, null, null, List.of(), "sequential", List.of(), List.of(),
-                new CopyOnWriteArrayList<>(), List.of());
+                new CopyOnWriteArrayList<>(), List.of(), null);
         }
 
         /**
@@ -247,7 +248,7 @@ public interface AgentRunner {
             this(agentName, modelName, toolNames, knowledgeNames, retrievedContext, systemPrompt, history,
                 llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens,
                 sessionId, agentId, roundId, toolDefs, mcpDefs, null, null, null, List.of(),
-                "sequential", List.of(), List.of(), new CopyOnWriteArrayList<>(), List.of());
+                "sequential", List.of(), List.of(), new CopyOnWriteArrayList<>(), List.of(), null);
         }
     }
 

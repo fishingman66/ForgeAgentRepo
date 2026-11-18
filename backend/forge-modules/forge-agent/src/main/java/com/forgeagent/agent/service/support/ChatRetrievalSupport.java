@@ -181,13 +181,24 @@ public class ChatRetrievalSupport {
      * 条数截断 → 邻块扩展 → token 预算裁剪。单个知识库检索失败不阻断对话,仅告警
      */
     public RetrievalResult retrieveKnowledge(List<Long> knowledgeIds, String query) {
-        return retrieveKnowledge(knowledgeIds, query, null);
+        return retrieveKnowledge(knowledgeIds, query, null, null);
     }
 
     /**
      * 带调用方上下文的重载:顺带落一条检索日志(排障用),context 为 null 时不记
      */
     public RetrievalResult retrieveKnowledge(List<Long> knowledgeIds, String query, RetrievalTrace context) {
+        return retrieveKnowledge(knowledgeIds, query, context, null);
+    }
+
+    /**
+     * 免登录调用方重载(A2):callerWorkspaceId 非空时改走 searchInternalOutcome
+     * (callerWorkspaceId 归属校验,不依赖 Sa-Token)——客服访客无登录态,
+     * 登录口径的成员校验必失败并被逐库吞掉,此前表现为静默零命中。
+     * callerWorkspaceId 为 null 时行为与旧签名完全一致(控制台路径)。
+     */
+    public RetrievalResult retrieveKnowledge(List<Long> knowledgeIds, String query, RetrievalTrace context,
+                                             Long callerWorkspaceId) {
         if (knowledgeIds == null || knowledgeIds.isEmpty() || StringUtils.isBlank(query)) {
             return new RetrievalResult(Collections.emptyList(), Map.of());
         }
@@ -212,7 +223,9 @@ public class ChatRetrievalSupport {
                 sbo.setQuery(query);
                 sbo.setTopK(knowledgeProperties.getRagTopK() == null ? 3 : knowledgeProperties.getRagTopK());
                 sbo.setCacheable(Boolean.TRUE);
-                com.forgeagent.rag.service.retrieve.SearchOutcome outcome = knowledgeService.searchOutcome(sbo);
+                com.forgeagent.rag.service.retrieve.SearchOutcome outcome = callerWorkspaceId != null
+                    ? knowledgeService.searchInternalOutcome(sbo)
+                    : knowledgeService.searchOutcome(sbo);
                 searched++;
                 vectorHits += outcome.vectorHits();
                 keywordHits += outcome.keywordHits();
@@ -641,6 +654,20 @@ public class ChatRetrievalSupport {
      * 知识库检索结果:最终注入的命中分块 + 各分块经邻块扩展后的注入文本
      */
     public record RetrievalResult(List<KnowledgeSearchHitVo> hits, Map<Long, String> contextByChunk) {
+    }
+
+    /**
+     * A2:客服预取结果可复用判定——预取的 KB 集合必须与 Agent 绑定的 KB 集合完全一致
+     * (渠道级 KB 与 Agent 级 KB 可能不同,不一致时丢弃预取、链路自行检索)。
+     * 两边都非空且集合相等才复用;顺序不敏感。
+     */
+    public static boolean prefetchedUsable(java.util.Collection<Long> prefetchedIds,
+                                           java.util.Collection<Long> agentKnowledgeIds) {
+        if (prefetchedIds == null || prefetchedIds.isEmpty()
+            || agentKnowledgeIds == null || agentKnowledgeIds.isEmpty()) {
+            return false;
+        }
+        return new java.util.HashSet<>(prefetchedIds).equals(new java.util.HashSet<>(agentKnowledgeIds));
     }
 
     /**

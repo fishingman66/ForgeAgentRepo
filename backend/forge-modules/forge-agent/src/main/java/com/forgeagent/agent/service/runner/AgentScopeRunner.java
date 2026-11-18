@@ -154,7 +154,7 @@ public class AgentScopeRunner implements AgentRunner {
     private RunnerResult replySingleStream(RunnerContext ctx, String content, StreamListener listener) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()), ctx.sqlCollector(), ctx.attachments(),
-            ctx.skills());
+            ctx.skills(), ctx.csGuardDecorator());
         ReActAgent agent;
         TokenBudgetHook budgetHook = null;
         try {
@@ -234,7 +234,7 @@ public class AgentScopeRunner implements AgentRunner {
     private RunnerResult replySingle(RunnerContext ctx, String content) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()), ctx.sqlCollector(), ctx.attachments(),
-            ctx.skills());
+            ctx.skills(), ctx.csGuardDecorator());
         ReActAgent agent;
         TokenBudgetHook budgetHook = null;
         try {
@@ -290,7 +290,7 @@ public class AgentScopeRunner implements AgentRunner {
     private RunnerResult replyTeam(RunnerContext ctx, String content) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()), ctx.sqlCollector(), ctx.attachments(),
-            ctx.skills());
+            ctx.skills(), ctx.csGuardDecorator());
         List<ReActAgent> agents = new ArrayList<>();
         ReActAgent registered = null;
         try {
@@ -386,7 +386,7 @@ public class AgentScopeRunner implements AgentRunner {
     private RunnerResult replyTeamStream(RunnerContext ctx, String content, StreamListener listener) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()), ctx.sqlCollector(), ctx.attachments(),
-            ctx.skills());
+            ctx.skills(), ctx.csGuardDecorator());
         List<ReActAgent> agents = new ArrayList<>();
         ReActAgent registered = null;
         try {
@@ -520,7 +520,7 @@ public class AgentScopeRunner implements AgentRunner {
     private RunnerResult replyTeamParallel(RunnerContext ctx, String content) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()),
-            ctx.sqlCollector(), ctx.attachments(), ctx.skills());
+            ctx.sqlCollector(), ctx.attachments(), ctx.skills(), ctx.csGuardDecorator());
         List<ReActAgent> agents = new ArrayList<>();
         ReActAgent registered = null;
         try {
@@ -579,7 +579,7 @@ public class AgentScopeRunner implements AgentRunner {
                                                  StreamListener listener) {
         Assembly assembly = toolAssembler.build(ctx.toolDefs(), ctx.mcpDefs(),
             new ApprovalContext(ctx.sessionId(), ctx.agentId(), ctx.roundId()),
-            ctx.sqlCollector(), ctx.attachments(), ctx.skills());
+            ctx.sqlCollector(), ctx.attachments(), ctx.skills(), ctx.csGuardDecorator());
         List<ReActAgent> agents = new ArrayList<>();
         ReActAgent registered = null;
         try {

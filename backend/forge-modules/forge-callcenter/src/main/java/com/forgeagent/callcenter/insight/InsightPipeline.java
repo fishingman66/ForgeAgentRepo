@@ -1,5 +1,8 @@
 package com.forgeagent.callcenter.insight;
 
+import com.forgeagent.callcenter.common.sentiment.LexiconSentimentAnalyzer;
+import com.forgeagent.callcenter.common.sentiment.SentimentAnalyzer;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.forgeagent.callcenter.common.CsEventEnvelope;
 import com.forgeagent.callcenter.common.CsEventTypes;

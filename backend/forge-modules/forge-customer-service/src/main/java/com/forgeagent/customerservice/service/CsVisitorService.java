@@ -86,6 +86,7 @@ public class CsVisitorService {
     private final CsAgentRouteService agentRouteService;
     /** A1:坐席辅助触发源,消息受理完成后异步发布(见 CsVisitorMessageSavedEvent)。 */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    private final CsTurnSignalService turnSignalService;
     /** M3 后续:图谱辅助检索,把访客口语扩展成领域实体词。 */
     private final CsKgQueryExpander kgQueryExpander;
     /** M4 后续:检索扩展效果指标。 */
@@ -200,10 +201,17 @@ public class CsVisitorService {
             content = sensitiveWordService.mask(content, inboundHit.words());
         }
 
-        // P0:转人工关键词前置——客户明确要人工时不跑检索与模型,直接建单并回转接文案;
-        // A1 推荐照常发布,让坐席接单时已经有候选话术
-        if (CsHandoffKeywords.matches(content, handoffKeywords(channel))) {
-            return keywordHandoff(channel, conv, dedupKey, clientMsgId, content);
+        // B1:每轮信号一次计算入账(意图/情绪/重复进线/轮次),写会话字段随既有 updateById 落库
+        com.forgeagent.customerservice.domain.CsTurnSignals signals =
+            turnSignalService.compute(channel.getWorkspaceId(), conv, content);
+        // B2:转人工规则引擎收口(关键词/情绪阈值/重复进线/轮次上限),规则命中即转,
+        // 不跑检索与模型;A1 推荐照常发布,让坐席接单时已经有候选话术。
+        // 敏感词 BLOCK 与知识零命中仍是流程内固有闸门(依赖后续结果),不进引擎
+        CsHandoffRuleEngine.HandoffDecision decision = CsHandoffRuleEngine.evaluate(
+            content, channel.getHandoffRules(), handoffKeywords(channel), signals);
+        if (decision.hit()) {
+            return keywordHandoff(channel, conv, dedupKey, clientMsgId, content,
+                decision.ruleType(), decision.reason());
         }
 
         // P2:配额——空间当日 token 超限时拒绝并转人工(转人工不再消耗模型)
@@ -244,13 +252,18 @@ public class CsVisitorService {
                 // M3 后续:图谱把访客口语扩展成领域实体词,只扩检索 query,缓存键与模型入参不变
                 CsKgQueryExpander.Expansion expansion =
                     kgQueryExpander.expandDetailed(channel.getWorkspaceId(), content);
-                List<KnowledgeSearchHitVo> hits = knowledgeGateway.search(
+                // A2:链路同构检索(阈值/RRF/邻块/父块/预算),闸门判定与模型应答同源;
+                // 免登录口径 callerWorkspaceId,不依赖 Sa-Token
+                CsKnowledgeGateway.RetrievalOutcome outcome = knowledgeGateway.retrieve(
                     channel.getWorkspaceId(), knowledgeIds, expansion.query());
+                List<KnowledgeSearchHitVo> hits = outcome.hits();
                 // M4 后续:检索扩展效果埋点(对比扩展/未扩展的零命中率)
                 kgExpandMetricService.record(channel.getWorkspaceId(),
                     !expansion.terms().isEmpty(), hits.isEmpty());
 
-                if (hits.isEmpty()) {
+                // A1 批次A(过渡闸门):知识零命中不再是绝对兜底——Agent 配了工具时放行模型,
+                // 让查询类意图有机会走 SQL/HTTP 工具应答;未配工具维持原兜底 + 建单口径
+                if (hits.isEmpty() && !chatFacade.hasExecutableTools(agentId)) {
                     fallback = true;
                     knowledgeGateway.recordZeroHit(channel.getAgentId(), dedupKey,
                         channel.getOwnerUserId(), content, knowledgeIds);
@@ -269,9 +282,21 @@ public class CsVisitorService {
                     ChatSendVo vo = chatFacade.send(new CsChatFacade.CsChatRequest(
                         conv.getAgentSessionId(), agentId, content,
                         channel.getOwnerUserId(), channel.getWorkspaceId(),
-                        visitorId, channel.getChannelCode(), conv.getTicketId()));
+                        visitorId, channel.getChannelCode(), conv.getTicketId(),
+                        knowledgeIds.isEmpty() ? null : new CsChatFacade.PrefetchedRetrieval(
+                            expansion.query(), knowledgeIds, outcome.hits(), outcome.contextByChunk()),
+                        guardContext(channel, conv, visitorId)));
                     reply = vo.getAssistantMessage() == null ? "" : vo.getAssistantMessage().getContent();
                     messageId = vo.getAssistantMessage() == null ? null : vo.getAssistantMessage().getId();
+                    // A1 终态:运营信号改由链路权威零命中信号统一兜住,覆盖两类场景——
+                    // ①A1B 工具放行分支(KB 零命中,模型经工具应答,缺口照记驱动 FAQ 补录,
+                    // KB 级零命中日志由 agent 链内部落不重复写);②闸门有命中但链路检索零命中
+                    // (渠道 KB 与 Agent KB 不一致、预取被弃用),这类此前会被漏记。
+                    if (Boolean.TRUE.equals(vo.getZeroHit())) {
+                        knowledgeGapService.record(channel.getWorkspaceId(), content);
+                        badcaseService.record(channel.getWorkspaceId(), "ZERO_HIT", conv.getId(),
+                            conv.getTicketId(), null, content, null);
+                    }
                 }
             }
         }
@@ -318,12 +343,13 @@ public class CsVisitorService {
     }
 
     /**
-     * 关键词触发的转人工(P0 差距 4.1):建单 + 回转接文案 + 推终态事件 + 发布 A1 推荐事件。
-     * 与正常路径共用幂等回执与事件格式,前端不需要区分两条分支。
+     * 规则触发的转人工(P0 差距 4.1 / B2 规则引擎):建单 + 回转接文案 + 推终态事件 + 发布 A1 推荐事件。
+     * 与正常路径共用幂等回执与事件格式,前端不需要区分两条分支;reason 记录命中规则便于归因。
      */
     private Map<String, Object> keywordHandoff(CsChannel channel, CsConversation conv,
-                                               long dedupKey, String clientMsgId, String content) {
-        CsTicket ticket = ticketService.requestHandoff(conv, "keyword");
+                                               long dedupKey, String clientMsgId, String content,
+                                               String handoffBy, String reason) {
+        CsTicket ticket = ticketService.requestHandoff(conv, reason);
         String reply = "正在为你转接人工客服，请稍候。";
         saveReceipt(dedupKey, clientMsgId, null, reply);
         conv.setLastVisitorAt(new Date());
@@ -346,9 +372,16 @@ public class CsVisitorService {
         result.put("fallback", false);
         result.put("faqHit", false);
         result.put("handoff", true);
-        result.put("handoffBy", "keyword");
+        result.put("handoffBy", handoffBy);
         result.put("ticketId", ticket.getId());
         return result;
+    }
+
+    /** C2:护栏上下文——identity_binding 未配置的渠道写操作工具会被 fail-closed 拦截。 */
+    private CsChatFacade.GuardContext guardContext(CsChannel channel, CsConversation conv, Long visitorId) {
+        String binding = channel.getIdentityBinding();
+        return new CsChatFacade.GuardContext(conv.getId(), visitorId, channel.getWorkspaceId(),
+            channel.getChannelCode(), binding != null && !binding.isBlank());
     }
 
     /** 转人工关键词:渠道配置优先,空则平台默认(判定口径见 CsHandoffKeywords)。 */

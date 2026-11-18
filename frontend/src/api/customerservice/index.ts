@@ -134,6 +134,12 @@ export interface CsKnowledgeAnswer {
 
 export interface CsMetricDaily {
   statDate: string;
+  /** 渠道编码(全渠道汇总行为空) */
+  channelCode?: string;
+  /** B3:重复进线率(%) */
+  repeatContactRate?: number;
+  /** B3:AI 自动解决率(%) */
+  containmentRate?: number;
   botSessions: number;
   handoffCount: number;
   firstResponseP95Ms: number;

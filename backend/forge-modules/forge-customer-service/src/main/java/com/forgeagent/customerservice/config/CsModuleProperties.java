@@ -102,6 +102,10 @@ public class CsModuleProperties {
 
     /** 参考单价(元/千 token);0 表示不计算金额,只报 token,不伪造 0 成本。 */
     private Double costPer1kTokens = 0.0;
+    /** B3:日指标定时重建开关(默认关;cron 走 metric-rebuild-cron,独立开关避免配 0 崩溃)。 */
+    private Boolean metricRebuildEnabled = false;
+    /** B3:日指标定时重建 cron(默认每日 04:00,与留存清理 03:00 错峰)。 */
+    private String metricRebuildCron = "0 0 4 * * ?";
 
     /** 金额币种。 */
     private String costCurrency = "CNY";

@@ -45,6 +45,13 @@ public interface IAgentKnowledgeService {
     List<KnowledgeSearchHitVo> searchInternal(KnowledgeSearchBo bo);
 
     /**
+     * 内部检索入口(带回执):与 {@link #searchInternal} 同一套 callerWorkspaceId 归属校验,
+     * 返回完整 SearchOutcome(降级原因/各路召回数),供客服访客等免登录链路复用检索管线;
+     * 不得为该方法暴露任何 Controller 端点
+     */
+    com.forgeagent.rag.service.retrieve.SearchOutcome searchInternalOutcome(KnowledgeSearchBo bo);
+
+    /**
      * 异步记录知识库零命中查询(静默失败,不阻塞对话);
      * 用于运营发现知识缺口、反哺内容建设
      */

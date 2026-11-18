@@ -236,7 +236,7 @@ public class CsOperationController extends BaseController {
     }
 
     @PostMapping("/metrics/rebuild")
-    public R<CsMetricDaily> rebuildMetrics(@RequestParam(required = false) String statDate) {
+    public R<java.util.List<CsMetricDaily>> rebuildMetrics(@RequestParam(required = false) String statDate) {
         Date day = statDate == null || statDate.isBlank()
             ? new Date() : parseDate(statDate);
         return R.ok(metricService.rebuild(currentWorkspaceId(), day));

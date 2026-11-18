@@ -68,7 +68,7 @@ class ToolAssemblerMcpPoolTest {
     private static ToolAssembler.Assembly build(ToolAssembler assembler) {
         return assembler.build(null, List.of(mcpDef()),
             new ApprovalGateTool.ApprovalContext(null, null, null),
-            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of(), List.of());
+            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of(), List.of(), null);
     }
 
     @Test

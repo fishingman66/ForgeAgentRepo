@@ -1,11 +1,9 @@
-package com.forgeagent.callcenter.insight;
-
-import org.springframework.stereotype.Component;
+package com.forgeagent.callcenter.common.sentiment;
 
 import java.util.List;
 
 /**
- * 词典法情绪分析(C4 默认实现):不依赖模型与网络,可离线可复现。
+ * 词典法情绪分析(C4/B1 默认实现):不依赖模型与网络,可离线可复现。
  *
  * <p>算法:统计负面词与正面词命中次数,{@code score = (pos - neg) / max(1, pos + neg)},
  * 取值收敛到 [-1,1]。词表覆盖中文口语与英文常见表达——
@@ -15,7 +13,6 @@ import java.util.List;
  * 语音情绪还应结合声学特征;这两点都留给 LLM/声学实现(C4-real 与 C5 双引擎),
  * 本实现作为无外部依赖的基线,保证管道在无模型时也产出可用信号。</p>
  */
-@Component
 public class LexiconSentimentAnalyzer implements SentimentAnalyzer {
 
     /** 引擎标识。 */

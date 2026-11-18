@@ -29,6 +29,12 @@
             <artifactId>forge-rag</artifactId>
         </dependency>
 
+        <!-- C2/C5:客服工具护栏复用 CsPiiMasker(callcenter-common 为零依赖契约层,方向安全) -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-callcenter-common</artifactId>
+        </dependency>
+
         <!-- 长期记忆 -->
         <dependency>
             <groupId>com.forgeagent</groupId>

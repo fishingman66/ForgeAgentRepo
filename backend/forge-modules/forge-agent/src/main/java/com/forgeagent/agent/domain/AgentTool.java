@@ -94,6 +94,21 @@ public class AgentTool extends BaseEntity {
     private String sandboxCpus;
 
     /**
+     * C1:风险分级(READ/WRITE/HIGH_RISK,默认 READ)——客服护栏按此决定放行/拦截/审计
+     */
+    private String riskLevel;
+
+    /**
+     * C3:幂等业务键模板(如 refund:{orderNo},占位符从工具入参取值;空则不做操作幂等)
+     */
+    private String actionKey;
+
+    /**
+     * C3:动作级日限次(按 空间+访客+工具 日窗口,空则不限)
+     */
+    private Integer dailyLimit;
+
+    /**
      * 状态(0正常 1停用)
      */
     private String status;

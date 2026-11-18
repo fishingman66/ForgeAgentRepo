@@ -1,6 +1,10 @@
 package com.forgeagent.customerservice.config;
 
+import com.forgeagent.callcenter.common.sentiment.LexiconSentimentAnalyzer;
+import com.forgeagent.callcenter.common.sentiment.SentimentAnalyzer;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -14,4 +18,14 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnCustomerServiceEnabled
 @EnableConfigurationProperties(CsModuleProperties.class)
 public class CsModuleConfiguration {
+
+    /**
+     * B1:文本侧情绪分析——复用上移到 callcenter-common 的词表实现(与语音洞察同一口径)。
+     * @ConditionalOnMissingBean 允许语音模块或后续 LLM 实现按优先级接管,同一容器只留一个。
+     */
+    @Bean
+    @ConditionalOnMissingBean(SentimentAnalyzer.class)
+    public SentimentAnalyzer csSentimentAnalyzer() {
+        return new LexiconSentimentAnalyzer();
+    }
 }

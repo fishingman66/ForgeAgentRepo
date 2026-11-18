@@ -147,15 +147,15 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **710 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **750 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
-# Agent 平台 132：20 个测试类（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
+# Agent 平台 155：25 个测试类（批次 A/B 增量 + 批次 C 工具护栏 1 类）（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
 # 知识库/RAG 199：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
-# 智能客服域 92：22 个测试类（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
-mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
+# 智能客服域 109：26 个测试类（批次 A 闸门/信号测试 + 批次 B 新增规则引擎/每轮信号/分渠道指标 3 类）（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
+mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest,CsVisitorServiceZeroHitTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
 # 契约层 13：事件常量 8 / 验签 3 / PII 脱敏 2

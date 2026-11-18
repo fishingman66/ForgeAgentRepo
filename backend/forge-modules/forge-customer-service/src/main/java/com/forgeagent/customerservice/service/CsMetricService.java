@@ -19,13 +19,19 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
- * 客服日指标(C2):首响 P95 / 解决率 / 转人工率 / CSAT / SLA 达标率。
+ * 客服日指标(C2 / B3 补维):首响 P95 / 解决率 / 转人工率 / CSAT / SLA 达标率,
+ * B3 追加重复进线率与 AI 自动解决率(containment),并按渠道拆行(全渠道行 channel_code 为 NULL)。
  *
- * <p>聚合走同步触发 + 手动补算,不引入新调度框架;按 (stat_date, workspace_id)
- * 幂等 upsert。所有过滤条件下推到 SQL,不在应用层全表捞。</p>
+ * <p>聚合走同步触发 + 手动补算 + 定时调度(CsMetricScheduler,默认关)三入口,
+ * 不引入新调度框架;按 (stat_date, workspace_id, channel_code) 幂等 upsert。
+ * 所有过滤条件下推到 SQL,不在应用层全表捞。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -46,8 +52,8 @@ public class CsMetricService {
             .orderByDesc(CsMetricDaily::getStatDate));
     }
 
-    /** 重建指定日期的全渠道汇总指标,重复执行覆盖同一行。 */
-    public CsMetricDaily rebuild(Long workspaceId, Date statDate) {
+    /** 重建指定日期的全渠道 + 分渠道指标,重复执行覆盖同一行。 */
+    public List<CsMetricDaily> rebuild(Long workspaceId, Date statDate) {
         Date[] range = dayRange(statDate);
         Date start = range[0];
         Date end = range[1];
@@ -66,6 +72,30 @@ public class CsMetricService {
             .ge(CsCsat::getInvitedAt, start)
             .lt(CsCsat::getInvitedAt, end));
 
+        // B3:同访客 24h 内已有过进线的访客集合(查当日之前一个窗口,一次查出)
+        Set<Long> visitorsWithPrior = visitorsWithPriorConversation(conversations, start);
+
+        Map<String, List<CsConversation>> convByChannel = groupByChannel(conversations);
+        Map<String, List<CsTicket>> ticketByChannel = groupTicketsByChannel(tickets);
+        Map<String, List<CsCsat>> csatByChannel = groupCsatsByChannel(csats);
+
+        List<CsMetricDaily> rows = new ArrayList<>();
+        rows.add(buildRow(workspaceId, start, null, conversations, tickets, csats, visitorsWithPrior));
+        for (Map.Entry<String, List<CsConversation>> entry : convByChannel.entrySet()) {
+            rows.add(buildRow(workspaceId, start, entry.getKey(), entry.getValue(),
+                ticketByChannel.getOrDefault(entry.getKey(), List.of()),
+                csatByChannel.getOrDefault(entry.getKey(), List.of()),
+                visitorsWithPrior));
+        }
+        for (CsMetricDaily row : rows) {
+            upsertRow(row, start);
+        }
+        return rows;
+    }
+
+    private CsMetricDaily buildRow(Long workspaceId, Date statDate, String channelCode,
+                                   List<CsConversation> conversations, List<CsTicket> tickets,
+                                   List<CsCsat> csats, Set<Long> visitorsWithPrior) {
         long resolved = tickets.stream().filter(t ->
             "RESOLVED".equals(t.getStatus()) || "CLOSED".equals(t.getStatus())).count();
         List<Long> responseTimes = new ArrayList<>();
@@ -84,15 +114,10 @@ public class CsMetricService {
             .map(c -> (long) c.getScore()).toList();
         long submitted = scores.size();
 
-        CsMetricDaily metric = metricMapper.selectOne(new LambdaQueryWrapper<CsMetricDaily>()
-            .eq(CsMetricDaily::getWorkspaceId, workspaceId)
-            .eq(CsMetricDaily::getStatDate, start)
-            .isNull(CsMetricDaily::getChannelCode).last("limit 1"));
-        if (metric == null) {
-            metric = new CsMetricDaily();
-            metric.setWorkspaceId(workspaceId);
-            metric.setStatDate(start);
-        }
+        CsMetricDaily metric = new CsMetricDaily();
+        metric.setWorkspaceId(workspaceId);
+        metric.setStatDate(statDate);
+        metric.setChannelCode(channelCode);
         metric.setBotSessions(conversations.size());
         metric.setHandoffCount(tickets.size());
         metric.setFirstResponseP95Ms(percentile95(responseTimes));
@@ -102,12 +127,82 @@ public class CsMetricService {
             : Math.round(scores.stream().mapToLong(Long::longValue).average().orElse(0) * 100) / 100.0);
         metric.setCsatResponseRate(rate(submitted, csats.size()));
         metric.setSlaPassRate(rate(slaPass, responseTimes.size()));
-        if (metric.getId() == null) {
-            metricMapper.insert(metric);
-        } else {
-            metricMapper.updateById(metric);
-        }
+        // B3:重复进线率——当日会话中,同访客 24h 内已有过进线的会话占比
+        long repeatConversations = conversations.stream()
+            .filter(c -> visitorsWithPrior.contains(c.getVisitorId())).count();
+        metric.setRepeatContactRate(rate(repeatConversations, conversations.size()));
+        // B3:AI 自动解决率——未产生转人工工单即终结的会话占比
+        long contained = conversations.stream().filter(c -> c.getTicketId() == null).count();
+        metric.setContainmentRate(rate(contained, conversations.size()));
         return metric;
+    }
+
+    private void upsertRow(CsMetricDaily metric, Date statDate) {
+        String channelCode = metric.getChannelCode();
+        CsMetricDaily existing = metricMapper.selectOne(new LambdaQueryWrapper<CsMetricDaily>()
+            .eq(CsMetricDaily::getWorkspaceId, metric.getWorkspaceId())
+            .eq(CsMetricDaily::getStatDate, statDate)
+            .eq(channelCode != null, CsMetricDaily::getChannelCode, channelCode)
+            .isNull(channelCode == null, CsMetricDaily::getChannelCode)
+            .last("limit 1"));
+        if (existing != null) {
+            metric.setId(existing.getId());
+            metricMapper.updateById(metric);
+        } else {
+            metricMapper.insert(metric);
+        }
+    }
+
+    /** 同访客 24h 内已有过进线的访客集合:取当日访客,回查窗口内(当日之前)的会话。 */
+    private Set<Long> visitorsWithPriorConversation(List<CsConversation> conversations, Date start) {
+        if (conversations.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> visitorIds = conversations.stream()
+            .map(CsConversation::getVisitorId).distinct().toList();
+        Date windowStart = new Date(start.getTime() - CsTurnSignalService.REPEAT_WINDOW_MS);
+        List<CsConversation> priors = conversationMapper.selectList(
+            new LambdaQueryWrapper<CsConversation>()
+                .in(CsConversation::getVisitorId, visitorIds)
+                .lt(CsConversation::getCreateTime, start)
+                .ge(CsConversation::getCreateTime, windowStart)
+                .select(CsConversation::getVisitorId));
+        Set<Long> withPrior = new HashSet<>();
+        for (CsConversation prior : priors) {
+            withPrior.add(prior.getVisitorId());
+        }
+        return withPrior;
+    }
+
+    private Map<String, List<CsConversation>> groupByChannel(List<CsConversation> conversations) {
+        Map<String, List<CsConversation>> groups = new LinkedHashMap<>();
+        for (CsConversation conversation : conversations) {
+            groups.computeIfAbsent(channelKey(conversation.getChannelCode()), k -> new ArrayList<>())
+                .add(conversation);
+        }
+        return groups;
+    }
+
+    private Map<String, List<CsTicket>> groupTicketsByChannel(List<CsTicket> tickets) {
+        Map<String, List<CsTicket>> groups = new LinkedHashMap<>();
+        for (CsTicket ticket : tickets) {
+            groups.computeIfAbsent(channelKey(ticket.getChannelCode()), k -> new ArrayList<>())
+                .add(ticket);
+        }
+        return groups;
+    }
+
+    private Map<String, List<CsCsat>> groupCsatsByChannel(List<CsCsat> csats) {
+        Map<String, List<CsCsat>> groups = new LinkedHashMap<>();
+        for (CsCsat csat : csats) {
+            groups.computeIfAbsent(channelKey(csat.getChannelCode()), k -> new ArrayList<>())
+                .add(csat);
+        }
+        return groups;
+    }
+
+    private static String channelKey(String channelCode) {
+        return channelCode == null || channelCode.isBlank() ? "" : channelCode;
     }
 
     private static long percentile95(List<Long> values) {

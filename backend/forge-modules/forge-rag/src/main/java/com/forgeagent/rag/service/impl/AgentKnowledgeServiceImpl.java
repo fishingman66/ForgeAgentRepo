@@ -501,6 +501,11 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
 
     @Override
     public List<KnowledgeSearchHitVo> searchInternal(KnowledgeSearchBo bo) {
+        return searchInternalOutcome(bo).hits();
+    }
+
+    @Override
+    public com.forgeagent.rag.service.retrieve.SearchOutcome searchInternalOutcome(KnowledgeSearchBo bo) {
         AgentKnowledge kb = knowledgeMapper.selectById(bo.getKnowledgeId());
         if (kb == null) {
             throw new ServiceException("知识库不存在");
@@ -512,7 +517,7 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             && (callerWs == null || !callerWs.equals(kb.getWorkspaceId()))) {
             throw new ServiceException("知识库不存在或无权访问");
         }
-        return doSearch(bo, kb).hits();
+        return doSearch(bo, kb);
     }
 
     /**

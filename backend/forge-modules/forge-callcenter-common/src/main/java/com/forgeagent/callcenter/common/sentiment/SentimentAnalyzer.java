@@ -1,9 +1,9 @@
-package com.forgeagent.callcenter.insight;
+package com.forgeagent.callcenter.common.sentiment;
 
 /**
- * 情绪分析 SPI(C4):输入一段脱敏后的 caller 文本,输出标签与分值。
+ * 情绪分析 SPI(C4,B1 上移):输入一段脱敏后的 caller 文本,输出标签与分值。
  *
- * <p>实现两态:{@link LexiconSentimentAnalyzer}(词典法,零外部依赖,C4 默认)与
+ * <p>实现两态:{@link LexiconSentimentAnalyzer}(词典法,零外部依赖,C4/B1 默认)与
  * 后续 LLM 实现(与 C5 双引擎共用模型客户端)。分值与标签的语义固定:
  * score ∈ [-1,1],负值偏负面;标签取值见 {@link Labels}。</p>
  *

@@ -52,6 +52,17 @@ public class ChatSendBo implements Serializable {
     private Long callerWorkspaceId;
 
     /**
+     * A2:客服预取检索结果(仅客服链路传;控制台路径恒为 null,行为不变)。
+     * 链路侧按 KB 集合一致性核对后整体复用,免二次检索。
+     */
+    private com.forgeagent.agent.api.customerservice.CsChatFacade.PrefetchedRetrieval prefetched;
+
+    /**
+     * C2:客服工具护栏上下文(仅客服链路非空;控制台路径恒为 null,行为不变)。
+     */
+    private com.forgeagent.agent.api.customerservice.CsChatFacade.GuardContext csGuardContext;
+
+    /**
      * 调试会话ID(UX-01):非空时进入调试模式,复用该临时会话;为空且 agentDraft 非空则新建临时会话
      */
     private Long debugSessionId;

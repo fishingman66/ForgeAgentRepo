@@ -1,5 +1,7 @@
 package com.forgeagent.callcenter.config;
 
+import com.forgeagent.callcenter.common.sentiment.LexiconSentimentAnalyzer;
+import com.forgeagent.callcenter.common.sentiment.SentimentAnalyzer;
 import com.forgeagent.callcenter.provider.NoopNumberProvider;
 import com.forgeagent.callcenter.provider.NoopTrunkProvider;
 import com.forgeagent.callcenter.provider.NumberProvider;
@@ -24,6 +26,12 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnCallcenterEnabled
 @EnableConfigurationProperties(CallcenterProperties.class)
 public class CallcenterConfiguration {
+
+    /** B1:情绪分析 SPI 实现(词表版,类在 callcenter-common 零依赖层,由宿主模块注册)。 */
+    @Bean
+    public SentimentAnalyzer sentimentAnalyzer() {
+        return new LexiconSentimentAnalyzer();
+    }
 
     /** D8:暂无号码与中继,V1 一律装配 noop;接真实 AICC 号码池时新增实现并按配置切换。 */
     @Bean

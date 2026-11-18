@@ -132,7 +132,8 @@ public class ToolAssembler {
     public Assembly build(List<ToolDef> toolDefs, List<McpDef> mcpDefs, ApprovalGateTool.ApprovalContext approvalCtx,
                           List<Map<String, Object>> sqlCollector,
                           List<AgentRunner.RunnerContext.AttachmentRef> attachments,
-                          List<SkillDef> skills) {
+                          List<SkillDef> skills,
+                          java.util.function.UnaryOperator<AgentTool> csGuardDecorator) {
         Toolkit toolkit = new Toolkit();
         List<AutoCloseable> closables = new ArrayList<>();
         RegisterOpts opts = registerOpts(approvalCtx);
@@ -140,20 +141,20 @@ public class ToolAssembler {
             // P3/M1:工作记忆取回工具;自身不参与压缩,避免递归
             registerIfAbsent(toolkit, new RecallWorkingMemoryTool(workingMemory, opts.runId(),
                 intValue(chatProperties.getWorkingMemoryRecallLimitChars(), 4000)),
-                "recall_working_memory", opts);
+                "recall_working_memory", opts, csGuardDecorator);
         }
         // P0/A4:内置时间工具,让模型经工具调用获取实时北京时间(不污染 system prompt 前缀)
-        registerIfAbsent(toolkit, new CurrentTimeTool(), "get_current_time", opts);
+        registerIfAbsent(toolkit, new CurrentTimeTool(), "get_current_time", opts, csGuardDecorator);
         if (attachments != null && !attachments.isEmpty()) {
             // 只读会话临时索引,不发外部请求,不经审批门
             registerIfAbsent(toolkit, new ReadAttachmentTool(attachments, kbChunkMapper, knowledgeService),
-                "read_attachment", opts);
+                "read_attachment", opts, csGuardDecorator);
         }
         if (skills != null && !skills.isEmpty()) {
             // 08方案 / A2:懒加载技能工具;只读平台数据,免审批门;目录由服务层拼进 system prompt
             Long skillAgentId = approvalCtx == null ? null : approvalCtx.agentId();
             registerIfAbsent(toolkit, new LoadSkillTool(skillService, skillAgentId, skills),
-                "load_skill", opts);
+                "load_skill", opts, csGuardDecorator);
         }
         if (toolDefs != null) {
             BuildContext buildCtx = new BuildContext(sqlCollector);
@@ -183,7 +184,7 @@ public class ToolAssembler {
                         ? inner
                         : gate(inner, "platform-" + provider.type(), "",
                             def.approvalMode(), def.approvalTimeout(), approvalCtx);
-                    registerIfAbsent(toolkit, wrapped, inner.getName(), opts);
+                    registerIfAbsent(toolkit, wrapped, inner.getName(), opts, csGuardDecorator);
                 }
             }
         }
@@ -194,7 +195,7 @@ public class ToolAssembler {
                 McpConnectionPool.Pooled pooled = poolEnabled
                     ? mcpPool.acquire(mcpPool.fingerprint(def)) : null;
                 if (pooled != null) {
-                    registerMcpTools(toolkit, def, pooled.wrapper(), pooled.tools(), opts, approvalCtx);
+                    registerMcpTools(toolkit, def, pooled.wrapper(), pooled.tools(), opts, approvalCtx, csGuardDecorator);
                     continue;
                 }
                 McpClientWrapper wrapper = null;
@@ -214,7 +215,7 @@ public class ToolAssembler {
                     } else {
                         closables.add(wrapper);
                     }
-                    registerMcpTools(toolkit, def, wrapper, mcpTools, opts, approvalCtx);
+                    registerMcpTools(toolkit, def, wrapper, mcpTools, opts, approvalCtx, csGuardDecorator);
                 } catch (Exception e) {
                     log.warn("[ToolAssembler] MCP 服务器 [{}] 连接失败,已跳过: {}", def.name(), rootMessage(e));
                     if (wrapper != null) {
@@ -235,11 +236,12 @@ public class ToolAssembler {
      */
     private void registerMcpTools(Toolkit toolkit, McpDef def, McpClientWrapper wrapper,
                                   List<McpSchema.Tool> mcpTools, RegisterOpts opts,
-                                  ApprovalGateTool.ApprovalContext approvalCtx) {
+                                  ApprovalGateTool.ApprovalContext approvalCtx,
+                                  java.util.function.UnaryOperator<AgentTool> csGuardDecorator) {
         for (McpSchema.Tool t : mcpTools) {
             McpAgentTool mcpTool = new McpAgentTool(t, wrapper);
             registerIfAbsent(toolkit, gate(mcpTool, "mcp", def.name(),
-                def.approvalMode(), def.approvalTimeout(), approvalCtx), t.name(), opts);
+                def.approvalMode(), def.approvalTimeout(), approvalCtx), t.name(), opts, csGuardDecorator);
         }
         log.info("[ToolAssembler] MCP 服务器 [{}] 注册 {} 个工具", def.name(), mcpTools.size());
     }
@@ -259,7 +261,7 @@ public class ToolAssembler {
             .toList();
         return build(normalized, List.of(),
             new ApprovalGateTool.ApprovalContext(null, null, null),
-            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of(), List.of());
+            new java.util.concurrent.CopyOnWriteArrayList<>(), List.of(), List.of(), null);
     }
 
     /**
@@ -282,7 +284,8 @@ public class ToolAssembler {
     /**
      * 注册时统一套上工作记忆装饰器;取回工具本身不包装,避免把「取回结果」再次压缩。
      */
-    private void registerIfAbsent(Toolkit toolkit, AgentTool tool, String expectName, RegisterOpts opts) {
+    private void registerIfAbsent(Toolkit toolkit, AgentTool tool, String expectName, RegisterOpts opts,
+                                  java.util.function.UnaryOperator<AgentTool> csGuardDecorator) {
         String name = tool.getName();
         if (toolkit.getTool(name) != null) {
             log.warn("[ToolAssembler] 工具 [{}] 重名,跳过注册(来源: {})", name, expectName);
@@ -292,6 +295,10 @@ public class ToolAssembler {
         if (opts.runId() != null && !(tool instanceof RecallWorkingMemoryTool)) {
             registered = new WorkingMemoryGuard(tool, workingMemory, opts.runId(),
                 opts.thresholdTokens(), opts.previewChars());
+        }
+        if (csGuardDecorator != null) {
+            // C2:客服护栏挂审批门之后(最后一道);map 未命中的工具原样透传
+            registered = csGuardDecorator.apply(registered);
         }
         toolkit.registerAgentTool(registered);
     }
