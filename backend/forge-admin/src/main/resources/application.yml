@@ -453,3 +453,8 @@ agent:
       media-sample-rate: 8k
     # P3 媒体流实现:mock(无 FS 环境) / fs(mod_audio_stream WebSocket)
     media-stream-provider: mock
+    # P3 IVR 自动驱动:provider=FS 且开启时,接通即跑 ivr-route-code 指定的流程
+    ivr-autodrive: false
+    ivr-pool-size: 4
+    # 开发剧本:mock ASR 预置脚本 + TTS 自动步进,无 API key 真机联调(prod 禁止)
+    dev-script: true

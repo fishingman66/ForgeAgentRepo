@@ -11,6 +11,9 @@ import com.forgeagent.callcenter.domain.CsCallChannelConfig;
 import com.forgeagent.callcenter.domain.CsCallSegment;
 import com.forgeagent.callcenter.domain.CsCallStatus;
 import com.forgeagent.callcenter.engine.FsChannelRegistrar;
+import com.forgeagent.callcenter.engine.FsIvrSessionCoordinator;
+import com.forgeagent.callcenter.engine.LiveChannelRegistry;
+import com.forgeagent.callcenter.engine.ivr.IvrSessionDriver;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.gateway.CsVoiceGateway;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
@@ -69,6 +72,12 @@ public class CallEventDispatcher {
     private final ObjectProvider<SeatAssistService> seatAssistProvider;
     /** C1-real 真实通道注册器:接通登记、挂机注销,使转人工真实下发(无 ESL 时静默跳过)。 */
     private final ObjectProvider<FsChannelRegistrar> channelRegistrarProvider;
+    /** P3 IVR 会话协调器:接通自动驱动 IVR 流程(ivr-autodrive=true 且 provider=FS 时生效)。 */
+    private final ObjectProvider<FsIvrSessionCoordinator> ivrCoordinatorProvider;
+    /** IVR 会话的活通道快照(registrar 登记后此处取用)。 */
+    private final LiveChannelRegistry liveChannels;
+    /** P3:IVR 驱动器,call.dtmf 事件投递进活跃会话的收号队列(无会话时静默)。 */
+    private final ObjectProvider<IvrSessionDriver> ivrDriverProvider;
 
     /** 回调总入口;五个失败点全部收敛到 REJECTED,成功路径永远返回 SUCCESS。 */
     public Map<String, String> dispatch(String provider, String channelCode, String timestamp, String nonce,
@@ -217,8 +226,8 @@ public class CallEventDispatcher {
         call.setStatus(to);
         call.setUpdateTime(now);
         callMapper.updateById(call);
-        // C1-real:接通登记真实通道(让转人工从留痕变为真实下发),挂机注销
-        syncLiveChannel(channel, callId, to, from);
+        // C1-real:接通登记真实通道(让转人工从留痕变为真实下发) + 驱动 IVR 会话,挂机统一收尾
+        syncLiveChannel(channel, call, to, from);
         // 挂机结案钩子:状态实际推进到 ENDED 才触发;迟到的 CDR 不重复触发(否则质检/指标重复)
         if ("ENDED".equals(to) && !"ENDED".equals(from)) {
             businessBinder.onHangup(call);
@@ -230,21 +239,34 @@ public class CallEventDispatcher {
      * 真实通道生命周期挂点:接通(ANSWERED 及之后的服务态)登记,ENDED 注销。
      * 只在 media_provider=FS 时生效,注册器内部再做一次判断与 ESL 可用性检查。
      */
-    private void syncLiveChannel(CsCallChannelConfig channel, String callId, String to, String from) {
+    private void syncLiveChannel(CsCallChannelConfig channel, CsCall call, String to, String from) {
         FsChannelRegistrar registrar = channelRegistrarProvider.getIfAvailable();
-        if (registrar == null) {
+        FsIvrSessionCoordinator coordinator = ivrCoordinatorProvider.getIfAvailable();
+        if (registrar == null && coordinator == null) {
             return;
         }
+        String callId = call.getCallId();
         try {
             if ("ENDED".equals(to)) {
                 if (!"ENDED".equals(from)) {
-                    registrar.onEnded(callId);
+                    if (registrar != null) {
+                        registrar.onEnded(callId);
+                    }
+                    if (coordinator != null) {
+                        coordinator.onEnded(callId);
+                    }
                 }
                 return;
             }
             // 首次进入 ANSWERED(或后续服务态)登记;重复调用由注册器幂等
             if (CsCallStatus.wasAnswered(to)) {
-                registrar.onAnswered(channel.getMediaProvider(), callId);
+                if (registrar != null) {
+                    registrar.onAnswered(channel.getMediaProvider(), callId);
+                }
+                if (coordinator != null) {
+                    // 通道由 registrar 刚登记,直接取用;IVR 内部失败只降级
+                    coordinator.onAnswered(channel.getMediaProvider(), call, liveChannels.find(callId));
+                }
             }
         } catch (Exception e) {
             // 通道登记失败不能阻断事件处理
@@ -269,8 +291,14 @@ public class CallEventDispatcher {
                 transcriptIngest.ingest(call, event);
                 call.setBotHandled("1");
             }
-            // 按键:追加 dtmf_digits,IVR 菜单轨迹(扩展点:IVR 节点停留时长分析)
-            case "call.dtmf" -> appendDtmf(call, event.str("digits"));
+            // 按键:追加 dtmf_digits 落库;同时在跑的 IVR 会话收号队列投递(P3,无会话时 driver 返回 false)
+            case "call.dtmf" -> {
+                appendDtmf(call, event.str("digits"));
+                IvrSessionDriver driver = ivrDriverProvider.getIfAvailable();
+                if (driver != null) {
+                    driver.offerDtmf(call.getCallId(), event.str("digits"));
+                }
+            }
             // 转人工:回填技能组轨迹并建工单入 ACD 队列(V2)
             case "call.transfer" -> applyTransfer(call, event);
             // 坐席状态:更新 agent_cc_call_seat_state;READY 顺带触发一次 ACD 分配(V2)

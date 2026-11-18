@@ -439,19 +439,24 @@ agent:
       media-sample-rate: 8k                # 与 MediaStream/AsrEngine 接口口径一致
 ```
 
-### 13.4 P3 仍未完成（不谎称已做）
+### 13.4 P3 收尾（2026-11-18：IVR 生产装配三件套已交付）
 
-| 项 | 状态 | 阻塞原因 |
+| 项 | 状态 | 说明 |
 |---|---|---|
-| 真实 ASR 引擎（DashScope） | ❌ 未实现 | 需要 API key；接口 SPI 已留位（`AsrEngine`），`asr-engine=dashscope` 时 `VoiceEngineRegistry` 会报未装配 |
-| 真实 TTS 引擎（DashScope） | ❌ 未实现 | 同上；当前 `tts-engine=mock` 下会走静音脚本 |
-| IVR 会话自动驱动 | ❌ 未接 | `IvrSessionDriver.drive()` 需业务决定「何时启动哪条 IVR 流程」（routeCode），当前无自动触发点 |
+| IVR 会话自动驱动 | ✅ 已交付 | `FsIvrSessionCoordinator`：接通 open 媒体流 → 会话线程池跑 `drive()`（route-code 配置，默认 demo_inbound）→ 挂机置位 hangupFlag 节点边界退出；`ivr-autodrive` 开关 + `ivr-pool-size` 线程池；流程失败只降级不挂回调线程 |
+| DTMF 会话投递 | ✅ 已交付 | `CallerChannel` 改为 `drive()` 内部装配并登记活跃表（原签名无调用方，安全移除）；`call.dtmf` 事件经 `IvrSessionDriver.offerDtmf` 投进收号队列，会话结束自动失效 |
+| confidence 字符串缺陷 | ✅ 已修复 | `FsEventNormalizer` 把 ESL 字符串 confidence 转 Double（非法值按缺失），业务层不再静默丢置信度 |
+| 开发剧本（无 key 联调） | ✅ 已交付 | `DevVoiceScriptConfig`（`dev-script: true`）：mock ASR 预置 2 段脚本 + TTS autoPump（spawn 继承），真机拨测可验证全链路，唯一假的是识别内容；prod 校验器拒绝开启 |
+| 真实 ASR 引擎（DashScope） | ❌ 等 key | SPI 已留位，`asr-engine=dashscope` 时注册表报未装配 |
+| 真实 TTS 引擎（DashScope） | ❌ 等 key | 同上 |
 
-> 结论：**音频管道（进/出/打断）已通，但"听懂"和"说话"还需要接真实 ASR/TTS**。这两项要 API key，不能用 mock 假装完成。
+> 结论：**除"真实识别/合成"外，P3 全部就绪**。开发态用 `dev-script: true` 可无 key 真机联调；拿到 API key 后切 `asr/tts-engine=dashscope` 即完成最后一步。
+>
+> 测试：新增 `FsIvrSessionCoordinatorTest`(4) + `IvrSessionDriverTest`(2) + confidence 回归(1)；callcenter 188→**202 条，0 失败**；全仓 696→**710 条，0 失败**。
 
 ### 13.5 用户侧待办（P3）
 
 1. 在 FusionPBX 编译并加载 `mod_audio_stream`（AGPL-3.0，需协议评审），`modules.conf.xml` 加 `<load module="mod_audio_stream"/>`，`fs_cli -x 'module_exists mod_audio_stream'` 验证。
 2. FusionPBX 与后端同机，`media-ws-base` 用 `ws://127.0.0.1:<后端端口>`；若不同机改成内网地址。
-3. 确认后端端口（默认 8080）与 `media-ws-base` 一致，防火墙放行同机回环即可（不开放公网）。
-4. 提供 ASR/TTS 选型与 API key（DashScope 或其他），才能完成 P3 剩余两项。
+3. 云主机部署时配 `provider: FS` + `ivr-autodrive: true` + `media-stream-provider: fs`，确认 `agent_cc_ivr_flow` 里 `demo_inbound` 流程存在（workspace 对应）。
+4. 联调先 `dev-script: true` 无 key 拨测；验证识别质量时提供 DashScope API key（走环境变量，不落文件）。

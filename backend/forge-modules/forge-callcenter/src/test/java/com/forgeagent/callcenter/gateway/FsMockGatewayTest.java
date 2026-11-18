@@ -121,6 +121,28 @@ class FsMockGatewayTest {
         assertThrows(IllegalArgumentException.class, () -> gateway.parse("FS_MOCK", "CH", "not-json"));
     }
 
+    /**
+     * 真实 ESL header 全是字符串:confidence 必须转成 Number 落 content,
+     * 否则 TranscriptIngestService 只认 Number,置信度会静默丢成 null(P3 修复回归)。
+     */
+    @Test
+    void parseCoercesStringConfidenceToNumber() {
+        String body = "{\"events\":[{\"eslEventName\":\"forgeagent::asr_result\","
+            + "\"eventGenTimeMs\":1794278403200,\"workNo\":\"\","
+            + "\"headers\":{\"Unique-ID\":\"FS-CALL-1\",\"speaker\":\"caller\","
+            + "\"text\":\"查订单\",\"confidence\":\"0.87\",\"isFinal\":\"true\","
+            + "\"startMs\":\"1800\",\"endMs\":\"3200\"}}]}";
+        List<CsVoiceEvent> events = gateway.parse("FS_MOCK", "CH", body);
+        assertEquals(1, events.size());
+        assertEquals(0.87, events.get(0).content().get("confidence"));
+        assertEquals("true", events.get(0).content().get("isFinal"));
+        // startMs/endMs 走 longValue 的字符串兼容,不在此转换
+        assertEquals(1800L, events.get(0).longValue("startMs"));
+        // 非法置信度按缺失处理,不抛异常
+        String bad = body.replace("\"0.87\"", "\"abc\"");
+        assertEquals(1, gateway.parse("FS_MOCK", "CH", bad).size());
+    }
+
     @Test
     void fetchRecordingReturnsFixedSilentWav() {
         byte[] bytes = gateway.fetchRecording("mock://wav/8k-mono-1s");

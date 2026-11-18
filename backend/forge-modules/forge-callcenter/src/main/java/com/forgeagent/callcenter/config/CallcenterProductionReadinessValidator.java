@@ -59,5 +59,9 @@ public class CallcenterProductionReadinessValidator {
         if (prod && realFs && "ClueCon".equals(eslPassword)) {
             throw new IllegalStateException("[CC] ESL 默认密码 ClueCon 未修改,prod 必须通过 FS_ESL_PASSWORD 覆盖");
         }
+        // 开发剧本仅限联调:prod 开启会让机器人按固定脚本"假装识别"
+        if (prod && Boolean.TRUE.equals(properties.getDevScript())) {
+            throw new IllegalStateException("[CC] agent.callcenter.dev-script 在 prod 下必须为 false");
+        }
     }
 }

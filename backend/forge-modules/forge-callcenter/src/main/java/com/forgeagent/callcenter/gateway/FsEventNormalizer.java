@@ -123,7 +123,16 @@ public final class FsEventNormalizer {
             case "call.asr_result", "call.bot_utterance" -> {
                 // 转写/话术事件的业务字段由内部管道产生,fixture 直接放 headers 同名键
                 content.put("callId", headers.getOrDefault("Unique-ID", ""));
-                copyIfPresent(headers, content, "speaker", "text", "confidence", "isFinal", "startMs", "endMs");
+                copyIfPresent(headers, content, "speaker", "text", "isFinal", "startMs", "endMs");
+                // 置信度单独转数字:真实 ESL header 全是字符串,业务层只认 Number(字符串会静默丢置信度)
+                Object confidence = headers.get("confidence");
+                if (confidence != null) {
+                    try {
+                        content.put("confidence", Double.valueOf(String.valueOf(confidence)));
+                    } catch (NumberFormatException ignored) {
+                        // 非法置信度按缺失处理,不阻断转写
+                    }
+                }
             }
             case "call.dtmf" -> {
                 content.put("callId", headers.getOrDefault("Unique-ID", ""));

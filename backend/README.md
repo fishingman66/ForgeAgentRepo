@@ -147,7 +147,7 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **696 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **710 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
 # Agent 平台 132：20 个测试类（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
@@ -162,7 +162,7 @@ mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardT
 mvn -Pdev test "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am
-# 呼叫中心 188：AICC 基线 + FreeSWITCH 真实对接(P1 事件面/P2 控制面/P3 媒体面)；新增 Fs* 契约测试
+# 呼叫中心 202：AICC 基线 + FreeSWITCH 真实对接(P1 事件面/P2 控制面/P3 媒体面)；新增 Fs* 契约测试
 mvn -Pdev test "-Dtest=*GatewayTest,CallStateMachineTest,CallFingerprintsTest,LocalFsRecordingStorageTest,CallBusinessBinderTest,FsEslEventHandlerTest,FsChannelControlTest,FsChannelRegistrarTest,FsMediaStreamTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-callcenter -am
 # 知识图谱 20：门面 9 + MySQL 存图 11

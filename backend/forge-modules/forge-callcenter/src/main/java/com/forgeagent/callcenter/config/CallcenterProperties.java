@@ -77,6 +77,21 @@ public class CallcenterProperties {
     private String mediaStreamProvider = "mock";
 
     /**
+     * P3 IVR 自动驱动开关:接通后自动跑 IVR 流程(route-code 指定)。
+     * 关闭时接通只登记通道与媒体流,IVR 由外部触发(默认关,生产按需开)。
+     */
+    private Boolean ivrAutodrive = false;
+
+    /** IVR 会话线程池大小:每路通话占一个线程跑阻塞式流程循环。 */
+    private Integer ivrPoolSize = 4;
+
+    /**
+     * 开发剧本开关(dev-script):给 mock ASR 预置默认对话脚本 + TTS 自动步进,
+     * 无 API key 也能真机拨测全链路(唯一假的是识别内容)。prod 由校验器拒绝开启。
+     */
+    private Boolean devScript = false;
+
+    /**
      * 不允许打断词组兜底表(C2):DB 表 agent_cc_voice_no_interrupt 之外的开发兜底;
      * 精确匹配 partial 文本(trim 后全等),命中即忽略本次打断。
      */
@@ -171,5 +186,8 @@ public class CallcenterProperties {
 
         /** 音频采样率:8k(电话口径,与 MediaStream 接口一致) / 16k(ASR 精度更高)。 */
         private String mediaSampleRate = "8k";
+
+        /** IVR 自动驱动时加载的流程编码(对应 agent_cc_ivr_flow.route_code,种子为 demo_inbound)。 */
+        private String ivrRouteCode = "demo_inbound";
     }
 }

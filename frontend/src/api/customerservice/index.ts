@@ -321,13 +321,31 @@ export interface CsCallbackTask {
   updateTime: string | null;
 }
 
-/** 电话坐席就绪态:按 AICC 工号维护;seatId/userId 在坐席绑定关系落地后回填。 */
+/** 电话坐席就绪态:按 AICC 工号维护;seatId/userId/extension 由坐席绑定维护回填。 */
 export interface CsCallSeatState {
   id: number;
+  seatId: number | null;
+  userId: number | null;
+  workspaceId: number | null;
   workNo: string;
+  extension: string | null;
   readyState: string;
   pauseReason: string | null;
   loginAt: string | null;
+  updateTime: string | null;
+}
+
+/** 语音渠道配置(agent_cc_channel_config):密钥不在本入口维护,只回显已配置标记。 */
+export interface CsVoiceChannel {
+  id: number | null;
+  channelCode: string;
+  mediaProvider: string;
+  serviceNumber: string | null;
+  workspaceId: number;
+  agentId: number;
+  callbackSecret: string | null;
+  status: string;
+  createTime: string | null;
   updateTime: string | null;
 }
 
@@ -365,6 +383,19 @@ export const getCallRecording = (id: number): AxiosPromise<{ url: string; ossKey
 
 export const listCallSeats = (): AxiosPromise<CsCallSeatState[]> =>
   request({ url: '/agent/customerservice/calls/call-seats', method: 'get' });
+
+/* ---- 语音运营维护(cc-ops):此前只能 SQL 维护的渠道记录与坐席分机绑定 ---- */
+export const listVoiceChannels = (): AxiosPromise<CsVoiceChannel[]> =>
+  request({ url: '/agent/customerservice/cc-ops/voice-channels', method: 'get' });
+
+export const saveVoiceChannel = (data: Partial<CsVoiceChannel>): AxiosPromise<void> =>
+  request({ url: '/agent/customerservice/cc-ops/voice-channels', method: 'post', data });
+
+export const toggleVoiceChannel = (id: number, status: '0' | '1'): AxiosPromise<void> =>
+  request({ url: `/agent/customerservice/cc-ops/voice-channels/${id}/status`, method: 'post', data: { status } });
+
+export const bindSeatExtension = (workNo: string, extension: string, seatId?: number): AxiosPromise<void> =>
+  request({ url: '/agent/customerservice/cc-ops/seat-bindings', method: 'post', data: { workNo, extension, seatId } });
 
 export const callStats = (): AxiosPromise<CsCallMetric> =>
   request({ url: '/agent/customerservice/calls/stats', method: 'get' });

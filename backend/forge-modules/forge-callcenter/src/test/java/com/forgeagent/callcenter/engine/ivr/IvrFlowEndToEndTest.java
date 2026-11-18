@@ -107,7 +107,9 @@ class IvrFlowEndToEndTest {
         });
         driver.setUncaughtExceptionHandler((t, e) -> driverError.set(e));
         driver.start();
-        Thread.sleep(120);
+        // 异步 driver 线程:轮询等待 say 播报进入播放队列(固定 sleep 在高负载下会竞争失败)
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3))
+            .until(() -> rig.stream().isBotPlaying());
 
         // 1) say 播报(SpEL 渲染 caller)进入播放队列
         assertTrue(rig.stream().isBotPlaying(), "say 节点话术已进入播放队列");

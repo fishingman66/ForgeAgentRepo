@@ -20,14 +20,18 @@
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
+  bindSeatExtension,
   callStats,
   getCallDetail,
   getCallProfile,
   getCallRecording,
   listCallbackTasks,
   listCallSeats,
+  listVoiceChannels,
   listCalls,
-  markCallbackTask
+  markCallbackTask,
+  saveVoiceChannel,
+  toggleVoiceChannel
 } from '@/api/customerservice';
 import type {
   CsCall,
@@ -36,7 +40,8 @@ import type {
   CsCallMetric,
   CsCallProfile,
   CsCallSeatState,
-  CsCallSegment
+  CsCallSegment,
+  CsVoiceChannel
 } from '@/api/customerservice';
 
 const rows = ref<CsCall[]>([]);
@@ -59,6 +64,101 @@ const profileLoading = ref(false);
 const callbacks = ref<CsCallbackTask[]>([]);
 const callbackFilter = ref('');
 const callbackLoading = ref(false);
+
+/* ---------------- P3 收尾:语音渠道与坐席绑定运营入口 ---------------- */
+const channels = ref<CsVoiceChannel[]>([]);
+const channelLoading = ref(false);
+/** 渠道编辑对话框:扁平 ref(模板 v-model 用);编辑态带 id。 */
+const channelDialog = ref(false);
+const channelForm = ref<{ id: number | null; channelCode: string; mediaProvider: string; serviceNumber: string; workspaceId: number; agentId: number }>(
+  { id: null, channelCode: '', mediaProvider: 'FS', serviceNumber: '', workspaceId: 1, agentId: 0 }
+);
+const channelSaving = ref(false);
+
+const providerProviders = ['AICC', 'AICC_MOCK', 'FS', 'FS_MOCK'] as const;
+
+const loadChannels = async () => {
+  channelLoading.value = true;
+  try {
+    const res = await listVoiceChannels();
+    channels.value = res.data ?? [];
+  } catch {
+    ElMessage.error('语音渠道加载失败');
+  } finally {
+    channelLoading.value = false;
+  }
+};
+
+const openChannelDialog = (row?: CsVoiceChannel) => {
+  channelForm.value = row
+    ? { id: row.id, channelCode: row.channelCode, mediaProvider: row.mediaProvider,
+        serviceNumber: row.serviceNumber ?? '', workspaceId: row.workspaceId, agentId: row.agentId }
+    : { id: null, channelCode: '', mediaProvider: 'FS', serviceNumber: '', workspaceId: 1, agentId: 0 };
+  channelDialog.value = true;
+};
+
+const submitChannel = async () => {
+  const form = channelForm.value;
+  if (!form.channelCode.trim()) {
+    ElMessage.warning('渠道编码不能为空');
+    return;
+  }
+  if (!form.agentId) {
+    ElMessage.warning('请填写客服机器人 AgentID');
+    return;
+  }
+  channelSaving.value = true;
+  try {
+    await saveVoiceChannel({
+      id: form.id,
+      channelCode: form.channelCode.trim(),
+      mediaProvider: form.mediaProvider,
+      serviceNumber: form.serviceNumber.trim() || null,
+      workspaceId: form.workspaceId,
+      agentId: form.agentId
+    });
+    ElMessage.success(form.id ? '渠道已更新' : '渠道已创建');
+    channelDialog.value = false;
+    await loadChannels();
+  } catch {
+    // 校验失败原因由拦截器提示
+  } finally {
+    channelSaving.value = false;
+  }
+};
+
+const switchChannel = async (row: CsVoiceChannel) => {
+  const target = row.status === '0' ? '1' : '0';
+  try {
+    await toggleVoiceChannel(row.id as number, target);
+    ElMessage.success(target === '0' ? '渠道已启用' : '渠道已停用');
+    await loadChannels();
+  } catch {
+    // 拦截器提示
+  }
+};
+
+/** 坐席绑定分机:prompt 收集,可留空清除绑定。 */
+const bindExtension = async (row: CsCallSeatState) => {
+  let extension = '';
+  try {
+    const result = await ElMessageBox.prompt(
+      `为坐席 ${row.workNo} 绑定分机号(留空清除绑定)`,
+      '坐席分机绑定',
+      { inputValue: row.extension ?? '', inputPlaceholder: '如 1001', confirmButtonText: '确定', cancelButtonText: '取消' }
+    );
+    extension = (result.value ?? '').trim();
+  } catch {
+    return;
+  }
+  try {
+    await bindSeatExtension(row.workNo, extension);
+    ElMessage.success(extension ? '分机已绑定' : '绑定已清除');
+    await load();
+  } catch {
+    // 拦截器提示
+  }
+};
 
 /** 统计卡片:key 与 CsCallMetric 字段一一对应,新增指标只需扩接口与卡片定义。 */
 const cards: Array<{ key: keyof CsCallMetric; label: string; suffix: string }> = [
@@ -277,6 +377,7 @@ const markCallback = async (row: CsCallbackTask, status: 'CALLED' | 'CLOSED') =>
 onMounted(async () => {
   await load();
   await loadCallbacks();
+  await loadChannels();
 });
 </script>
 
@@ -376,16 +477,100 @@ onMounted(async () => {
     </el-card>
 
     <el-card shadow="never" class="cs-card">
-      <template #header><span>电话坐席就绪态</span></template>
+      <template #header>
+        <div class="cs-header">
+          <span>电话坐席就绪态</span>
+          <span class="cs-muted">分机号供 FusionPBX 坐席与 workNo 映射,转人工按此路由</span>
+        </div>
+      </template>
       <el-table :data="seats" size="small">
-        <el-table-column prop="workNo" label="工号" width="140" />
-        <el-table-column prop="readyState" label="就绪态" width="120" />
-        <el-table-column prop="pauseReason" label="小休原因" min-width="140" />
-        <el-table-column prop="loginAt" label="签入时间" width="170" />
-        <el-table-column prop="updateTime" label="更新时间" width="170" />
+        <el-table-column prop="workNo" label="工号" width="120" />
+        <el-table-column prop="extension" label="分机号" width="100">
+          <template #default="{ row }">{{ (row as CsCallSeatState).extension || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="readyState" label="就绪态" width="110" />
+        <el-table-column prop="pauseReason" label="小休原因" min-width="120" />
+        <el-table-column prop="loginAt" label="签入时间" width="160" />
+        <el-table-column prop="updateTime" label="更新时间" width="160" />
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="bindExtension(row as CsCallSeatState)">绑定分机</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <el-empty v-if="!seats.length" description="暂无坐席签入" :image-size="60" />
     </el-card>
+
+    <el-card shadow="never" class="cs-card">
+      <template #header>
+        <div class="cs-header">
+          <span>语音渠道配置</span>
+          <el-button size="small" type="primary" @click="openChannelDialog()">新增渠道</el-button>
+        </div>
+      </template>
+      <el-table v-loading="channelLoading" :data="channels" size="small">
+        <el-table-column label="来源" width="110">
+          <template #default="{ row }">
+            <el-tag size="small" :type="providerTag((row as CsVoiceChannel).mediaProvider)">
+              {{ providerLabel((row as CsVoiceChannel).mediaProvider) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="channelCode" label="渠道编码" width="140" />
+        <el-table-column prop="serviceNumber" label="服务号码" width="120">
+          <template #default="{ row }">{{ (row as CsVoiceChannel).serviceNumber || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="workspaceId" label="空间" width="80" />
+        <el-table-column prop="agentId" label="机器人" width="90" />
+        <el-table-column label="密钥" width="80">
+          <template #default="{ row }">
+            <el-tag size="small" :type="(row as CsVoiceChannel).callbackSecret ? 'success' : 'info'">
+              {{ (row as CsVoiceChannel).callbackSecret ? '已配置' : '未配置' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="updateTime" label="更新时间" width="160" />
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="openChannelDialog(row as CsVoiceChannel)">编辑</el-button>
+            <el-button link :type="(row as CsVoiceChannel).status === '0' ? 'danger' : 'success'" size="small"
+              @click="switchChannel(row as CsVoiceChannel)">
+              {{ (row as CsVoiceChannel).status === '0' ? '停用' : '启用' }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!channelLoading && !channels.length" description="暂无语音渠道(如 CC_FS)" :image-size="60" />
+    </el-card>
+
+    <el-dialog v-model="channelDialog" :title="channelForm.id ? '编辑语音渠道' : '新增语音渠道'" width="460px">
+      <el-form label-width="130px" size="small">
+        <el-form-item label="渠道编码" required>
+          <el-input v-model="channelForm.channelCode" placeholder="如 CC_FS(ESL 事件按此路由)" :disabled="!!channelForm.id" />
+        </el-form-item>
+        <el-form-item label="供应商" required>
+          <el-select v-model="channelForm.mediaProvider" style="width: 100%">
+            <el-option v-for="p in providerProviders" :key="p" :label="providerLabel(p)" :value="p" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="服务号码">
+          <el-input v-model="channelForm.serviceNumber" placeholder="可空,由回调事件带入" />
+        </el-form-item>
+        <el-form-item label="空间 ID" required>
+          <el-input-number v-model="channelForm.workspaceId" :min="1" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="机器人 AgentID" required>
+          <el-input-number v-model="channelForm.agentId" :min="1" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="">
+          <span class="cs-muted">渠道密钥不在本页维护(走加密配置);停用渠道后 ESL 事件将被拒绝。</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button size="small" @click="channelDialog = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="channelSaving" @click="submitChannel">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-drawer v-model="drawerVisible" title="通话详情" size="560px">
       <template v-if="detailCall">

@@ -46,10 +46,10 @@ public class MockTtsEngine implements TtsEngine {
         this.engineCode = engineCode;
     }
 
-    /** 会话原型:新实例(队列/取消标记天然隔离)。 */
+    /** 会话原型:新实例继承 autoPump 与 engineCode(队列/取消标记天然隔离)。 */
     @Override
     public TtsEngine spawn() {
-        return new MockTtsEngine(engineCode);
+        return new MockTtsEngine(engineCode).setAutoPump(autoPump);
     }
 
     @Override
