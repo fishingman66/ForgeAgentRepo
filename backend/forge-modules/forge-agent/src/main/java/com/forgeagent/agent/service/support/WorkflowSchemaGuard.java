@@ -29,11 +29,11 @@ public class WorkflowSchemaGuard implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
-            checkTable("agent_workflow_version", "backend/sql/agent_workflow_version.sql",
+            checkTable("agent_workflow_version", "deploy/docker/mysql/init/01-schema.sql",
                 "工作流保存(版本快照)将直接失败");
-            checkTable("agent_workflow_run", "backend/sql/agent_step5.sql",
+            checkTable("agent_workflow_run", "deploy/docker/mysql/init/01-schema.sql",
                 "工作流试运行/触发器执行将直接失败");
-            checkColumnNullable("agent_approval", "session_id", "backend/sql/agent_step5.sql",
+            checkColumnNullable("agent_approval", "session_id", "deploy/docker/mysql/init/01-schema.sql",
                 "含人工审批节点的工作流执行将失败(审批单写入被非空约束拒绝)");
         } catch (Exception e) {
             log.warn("[工作流自检] 表结构检查未完成(不影响应用启动): {}", e.getMessage());
@@ -45,7 +45,7 @@ public class WorkflowSchemaGuard implements ApplicationRunner {
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
             Long.class, table);
         if (count == null || count == 0) {
-            log.warn("[工作流自检] 缺少表 {},请先执行增量脚本 {}。影响: {}", table, script, impact);
+            log.warn("[工作流自检] 缺少表 {},请核对结构基线 {}。影响: {}", table, script, impact);
         }
     }
 
@@ -55,7 +55,7 @@ public class WorkflowSchemaGuard implements ApplicationRunner {
                 + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? AND is_nullable = 'NO'",
             Long.class, table, column);
         if (count != null && count > 0) {
-            log.warn("[工作流自检] 表 {}.{} 仍为 NOT NULL,请执行增量脚本 {} 放开非空约束。影响: {}",
+            log.warn("[工作流自检] 表 {}.{} 仍为 NOT NULL,请按基线 {} 放开非空约束。影响: {}",
                 table, column, script, impact);
         }
     }

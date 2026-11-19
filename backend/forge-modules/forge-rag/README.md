@@ -136,7 +136,7 @@ src/main/java/com/forgeagent/rag
 
 外部工具扩展点：`McpExternalToolProvider` SPI（本模块 `rag/mcp` 定义，`supportedTools()` + `definitions(om)` + `invoke(om, name, args)`）；其他域（如 forge-agent 的技能）实现并注册为 Bean 即进入 tools/list，无实现支持的工具保持「未知工具」语义。当前单 token = 平台全量只读，token→工作空间粒度鉴权待后续。
 
-协议能力：`Mcp-Session-Id`（30min TTL）、版本协商（2025-06-18 / 2025-03-26）、JSON-RPC 批处理、`structuredContent`、规范错误码（-32700/-32600/-32601/-32602）、GET/DELETE 405。限制：无 SSE 响应、无服务器发起能力。**`/mcp`、`/mcp/**` 必须留在 `security.excludes`**（存量缺陷：曾一直被登录拦截返回 401）；未握手时 MCP 不下发 `structuredContent`，调用方要能从 `content[0].text` 解析。
+协议能力：`Mcp-Session-Id`（30min TTL）、版本协商（2025-06-18 / 2025-03-26）、JSON-RPC 批处理、`structuredContent`、规范错误码（-32700/-32600/-32601/-32000/-32001；参数错误走工具结果 isError，不发 -32602）、GET/DELETE 405。限制：无 SSE 响应、无服务器发起能力。**`/mcp`、`/mcp/**` 必须留在 `security.excludes`**（存量缺陷：曾一直被登录拦截返回 401）；未握手时 MCP 不下发 `structuredContent`，调用方要能从 `content[0].text` 解析。
 
 ## 图片描述与视觉模型配置（R5-5 + 追加）
 
@@ -163,7 +163,7 @@ API Key 经 `KbSecretCipher`（AES-GCM，`ENC:` 前缀，密钥由 `rag.knowledg
 
 | 值 | 实现 | 适用 | 说明 |
 | --- | --- | --- | --- |
-| `milvus`（默认） | `MilvusVectorStore` | 本地 milvus-lite + 生产 standalone | `milvus-sdk-java 3.0.12` 走 **gRPC**（`MilvusClientV2`），AUTOINDEX + COSINE；集合启动时懒创建，SDK 自带 shaded gRPC/Netty |
+| `milvus`（默认） | `MilvusVectorStore` | 本地 milvus-lite + 生产 standalone | `milvus-sdk-java 3.0.13` 走 **gRPC**（`MilvusClientV2`），AUTOINDEX + COSINE；集合启动时懒创建，SDK 自带 shaded gRPC/Netty |
 | `mysql` | `MysqlVectorStore` | 本地开发 | 向量存 `agent_kb_chunk.embedding`（float32 小端 BLOB），检索在应用层算余弦 |
 
 ```yaml
@@ -186,7 +186,7 @@ rag:
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `vector-store` / `milvus-host/port/token` | `milvus` / 127.0.0.1:19530 / 空 | gRPC 连接；SDK 3.0.12，lite 与 standalone 通用 |
+| `vector-store` / `milvus-host/port/token` | `milvus` / 127.0.0.1:19530 / 空 | gRPC 连接；SDK 3.0.13，lite 与 standalone 通用 |
 | `milvus-database` / `milvus-secure` / `milvus-consistency-level` | 空 / false / BOUNDED（dev 配 STRONG） | 库隔离 / TLS / 一致性 |
 | `collection-name` / `vector-dim` | `agent_kb_chunk` / 384 | 集合名与兜底维度（真实维度以模型输出为准） |
 | `file-dir` / `max-file-size-mb` | `./data/knowledge` / 20 | 文档存储 |
@@ -234,13 +234,13 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 
 分组：解析与清洗 34（`DocumentCleaner` 12 / `DocumentParseGuard` 10 / `CleanRules` 7 / `GarbledTextDetector` 5）、HTML/PDF/抽图/描述 18、分块与指纹 17、父子偏移 12、阈值与检索回执 16、向量编解码与集合分片 11、MCP 端点协议 18（含 A5 外部工具 3 条）、证据判定与指标 15、门禁判决 9、可见性解析 5、图路 8、SSRF 4、参数覆盖 4、摄取管线 2、Key 加密 5、模型解析 6。
 
-端到端脚本（含编译、打包、jar 冒烟、造数、断言与清理）：`temp/r5_verify.py` 28/28（ACL 与治理）、`temp/r5b_verify.py` 18/18（图谱 / 外部源 / MCP）、`temp/r5c_verify.py` 15/15（图片描述）、`temp/r5d_verify.py` 16/16（工作空间视觉模型配置）。检索基线 `docs/baseline/kb_baseline.py --no-write` 多轮不降。
+端到端脚本（含编译、打包、jar 冒烟、造数、断言与清理）：`scripts/acceptance/r5_verify.py` 28/28（ACL 与治理）、`scripts/acceptance/r5b_verify.py` 18/18（图谱 / 外部源 / MCP）、`scripts/acceptance/r5c_verify.py` 15/15（图片描述）、`scripts/acceptance/r5d_verify.py` 16/16（工作空间视觉模型配置）。检索基线 `docs/baseline/kb_baseline.py --no-write` 多轮不降。
 
 **纪律**：根 pom `maven.test.skip=true`，必须同时覆盖 `-Dmaven.test.skip=false -DskipTests=false`；验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，不认 EXIT=0。e2e 断言用「目标 documentId 是否在命中集」，别用 `hits==0`（local-hash 伪向量会误召其他可见文档）；MySQL NATURAL LANGUAGE MODE 只有一行时所有词算高频被忽略，造数至少 2 个分块。
 
 ## 已知边界与扩展点
 
-- MySQL 向量后端是 O(n) 全扫（上限 5000），生产上万分块须用 Milvus；**Milvus 3.0 gRPC 是本地 lite 与生产 standalone 的唯一通道**（SDK 3.0.12，切环境只改连接配置）；pgvector / Qdrant 未实现。
+- MySQL 向量后端是 O(n) 全扫（上限 5000），生产上万分块须用 Milvus；**Milvus 3.0 gRPC 是本地 lite 与生产 standalone 的唯一通道**（SDK 3.0.13，切环境只改连接配置）；pgvector / Qdrant 未实现。
 - S3 / Confluence 外部源为 SPI 骨架，实现 `fetch` 即启用；URL 源已真抓取。
 - 图谱第三路默认关，抽取需配真实模型；`kg.extract-model` 留空不会抽。
 - 图片描述不做 OCR，扫描件 PDF 仍由解析守卫明确报错。

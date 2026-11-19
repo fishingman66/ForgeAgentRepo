@@ -2,7 +2,7 @@
 
 文本客服（C0~C4）、坐席辅助（A1~A5）、运营增强（P0~P3）与知识图谱领域能力的完整实现：访客免登录接入、七态工单与 ACD、流式 SSE、CSAT / 质检 / FAQ 数据飞轮、合规擦除，以及基于对话内容与语音转写的坐席话术推荐、意图打标、建议动作与效果度量；另有客服域知识图谱维护页与检索词扩展。
 
-模块开关 `agent.customer-service.enabled`（默认 `false`），关闭时全部 Bean 与端点不装配，主应用行为零变化。**92 个单元测试 / 22 类**。
+模块开关 `agent.customer-service.enabled`（默认 `true`，`matchIfMissing=true`），关闭时全部 Bean 与端点不装配，主应用行为零变化。**109 个单元测试 / 26 类**。
 
 ## 包结构
 
@@ -32,7 +32,7 @@ com.forgeagent.customerservice
 
 ## P0 增强（2026-11-10）
 
-对标同类产品补齐的六项基础能力，脚本 `temp/p0_verify.py`（38/38）：
+对标同类产品补齐的六项基础能力，脚本 `scripts/acceptance/p0_verify.py`（38/38）：
 
 | 项 | 类 / 表 | 说明 |
 | --- | --- | --- |
@@ -144,6 +144,7 @@ com.forgeagent.customerservice
 运营与合规
   GET/POST /agent/customerservice/knowledge-answers、/quality/rules、/quality/checks/{id}/review
   GET    /agent/customerservice/metrics、/csat、/csat/stats、/badcases
+  POST   /agent/customerservice/metrics/rebuild            指标定时重建（statDate 可选）
   GET    /agent/customerservice/compliance/audit
   POST   /agent/customerservice/compliance/erase/{cid}、/compliance/purge
   GET/POST/DELETE /agent/customerservice/sensitive-words         敏感词词库(P0)
@@ -182,7 +183,9 @@ com.forgeagent.customerservice
 | 合规 | `agent_cs_audit_log` |
 | 图谱（M4） | `agent_cs_kg_expand_metric`（检索扩展日指标）；图谱本体 `kg_node` / `kg_edge` 属 `forge-kg`，菜单脚本 `agent_cs_kg_menu.sql` |
 
-SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql` + `agent_cs_a2.sql`（来源与通话追溯）、`agent_cs_a3.sql`（意图表 + 菜单 40010）、`agent_cs_a5.sql`（日指标表 + 回流列 + 菜单 40011）、`agent_cs_p0/p1/p2/p2b/p3.sql`（P0~P3 增强）、`agent_cs_kg_menu.sql`（图谱维护页菜单）。A4 无表结构变更。`forge_kg_core.sql` 提供图谱两表。
+C5 工具审计（`agent_cs_audit_log`）带 `result_code`（SUCCESS/ERROR/DENIED/INTERRUPTED/QUOTA_BLOCKED）与 `duration_ms` 两列，WRITE 全量 + READ 失败留痕，参数经 PII 脱敏。
+
+SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql` + `agent_cs_a2.sql`（来源与通话追溯）、`agent_cs_a3.sql`（意图表 + 菜单 40010）、`agent_cs_a5.sql`（日指标表 + 回流列 + 菜单 40011）、`agent_cs_p0/p1/p2/p2b/p3.sql`（P0~P3 增强）、`agent_cs_b1.sql`（B1 会话三信号列 + 渠道 handoff_rules + 指标两率）、`agent_cs_c5_tool_guard.sql`（C1 agent_tool 三列 / C2 identity_binding / C3 agent_cs_action_log）、`agent_cs_kg_menu.sql`（图谱维护页菜单）。A4 无表结构变更。**新库**把 B/C 折进 `deploy/docker/mysql/init/01-schema.sql`，这两份脚本供存量库升级，只执行增量、不重跑全量。`forge_kg_core.sql` 提供图谱两表。
 
 ## 配置
 
@@ -190,7 +193,7 @@ SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `enabled` | `false` | 模块总开关 |
+| `enabled` | `true` | 模块总开关（缺省装配，`matchIfMissing=true`） |
 | `transport` | `sse` | 实时通道实现 |
 | `visitor-token-ttl-seconds` | `1800` | 访客令牌有效期 |
 | `channel-rate-limit-per-minute` | `60` | 渠道默认每分钟上限（Redis 原子计数） |
@@ -226,11 +229,11 @@ SQL 脚本（全部幂等，可重复执行）：`backend/sql/agent_cs_c0~c5.sql
 
 ## 测试
 
-22 类 **92 用例**，全部标 `@Tag("dev")`：
+26 类 **109 用例**，全部标 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test \
-  "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest" \
+  "-Dtest=CsAgentRouteServiceTest,CsAssistMetricServiceTest,CsChannelGuardTest,CsCostServiceTest,CsHandoffKeywordsTest,CsHandoffRuleEngineTest,CsIntentServiceTest,CsKgExpandMetricServiceTest,CsKgQueryExpanderTest,CsKnowledgeAnswerServiceTest,CsKnowledgeGapServiceTest,CsKnowledgeGraphServiceTest,CsLocalePolicyTest,CsMetricServiceChannelTest,CsModulePropertiesTest,CsSecretCipherTest,CsSemanticCacheServiceTest,CsSensitiveWordServiceTest,CsSlotFillingServiceTest,CsTicketStatusTest,CsTurnSignalServiceTest,CsVisitorServiceZeroHitTest,SeatAssistActionsTest,SeatAssistServiceTest,SeatAssistVoiceTest,WechatMpChannelAdapterTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
 ```
@@ -243,13 +246,13 @@ mvn -Pdev test \
 - 图谱相关：`CsKnowledgeGraphServiceTest`（维护与范围隔离 7）、`CsKgQueryExpanderTest`（实体扩展 7）、`CsKgExpandMetricServiceTest`（日指标 4）。
 - 基础与渠道相关：`WechatMpChannelAdapterTest`(3)、`CsLocalePolicyTest`(3)、`CsSecretCipherTest`(3)、`CsModulePropertiesTest`(2)、`CsTicketStatusTest`(3)、`CsChannelGuardTest`(3)、`CsKnowledgeAnswerServiceTest`(2)，共 19。
 
-以上分组合计 **92 用例**（22 类）。
+以上分组合计 **109 用例**（26 类，含批次 A 的零命中/信号/CsGovernance 与批次 B/C 的规则引擎/渠道指标/工具护栏用例）。
 - 新增测试必须加 `@Tag("dev")`：根 pom `maven.test.skip=true` + surefire `<groups>${profiles.active}</groups>`，缺注解会被静默过滤（EXIT=0 但 0 tests）。还必须同时写 `-DskipTests=false`，只覆盖前者 test-compile 与执行都会被跳过。
 - 验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，不认 EXIT=0。
 
 ## 端到端验证脚本
 
-`temp/a1_verify.py` ~ `temp/a5_verify.py`（25/25、29/29、32/32、32/32、34/34），每份自带编译、打包、jar 冒烟、造数、断言与清理。跑 e2e 时的三个固定坑：
+`scripts/acceptance/a1_verify.py` ~ `scripts/acceptance/a5_verify.py`（25/25、29/29、32/32、32/32、34/34），每份自带编译、打包、jar 冒烟、造数、断言与清理。跑 e2e 时的三个固定坑：
 
 1. 访客消息令牌走 `X-Visitor-Token` 头，不是 `Bearer`；
 2. 渠道 `cors_allowlist` 要求请求带 `Origin`；

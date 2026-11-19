@@ -118,7 +118,7 @@ token 计价真正起作用的是**无标题长文**与**中英混排**：中文
 ```powershell
 # 1. 确保 MySQL(3306)、Redis(6379) 在跑，18093 端口空闲
 # 2. 打包（若 jar 不是最新）
-python temp/run_mvn.py package temp/pkg_baseline.txt
+python scripts/tools/run_mvn.py package temp/pkg_baseline.txt
 # 3. 跑基线：写回 kb-baseline-r0.{json,md}
 python docs/baseline/kb_baseline.py
 # 4. 只校验不覆盖（每批改动后的回归）

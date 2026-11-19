@@ -1,0 +1,135 @@
+# ForgeAgent 独立 Milvus 3.0 服务（容器环境）
+#
+# 用法：docker compose -f deploy/milvus/docker-compose.yaml up -d
+# 用途：单独起一套 Milvus 3.0 standalone，把 19530(gRPC) 暴露给宿主机回环；
+#       ForgeAgent 的 rag.knowledge.milvus-host/port 指向它即可。
+#       本地 milvus-lite 与这里的 standalone 共用 milvus-sdk-java 3.0.12 与同一套业务代码，
+#       切环境只改 rag.knowledge.milvus-* 连接项，不需要改 Java 代码。
+#
+# 版本与 deploy/docker/docker-compose.yml（一键部署）保持一致：
+#   milvusdb/milvus:v3.0.6 + etcd v3.5.25 + MinIO + 一次性 volume-init。
+#   Milvus 3.0 起不再支持 COMMON_STORAGETYPE=local，必须配对象存储；
+#   消息队列用内嵌 Woodpecker（MinIO 作 WAL），无需单独 MQ 容器。
+#
+# 注意：
+# 1) 19530/9091 只绑定 127.0.0.1。若同机已有 milvus-lite 占用 19530，先停掉它
+#    或改左侧宿主机端口并同步改 rag.knowledge.milvus-port。
+# 2) 一键部署 compose 的 milvus 不映射宿主机端口，两者不会抢 19530。
+# 3) 上线前替换 MinIO 凭据：可在本文件同目录放 .env 或导出环境变量
+#    MILVUS_MINIO_USER / MILVUS_MINIO_PASSWORD。MinIO 容器读 MINIO_ACCESS_KEY /
+#    MINIO_SECRET_KEY，Milvus 读 MINIO_ACCESS_KEY_ID / MINIO_SECRET_ACCESS_KEY，
+#    下面已用同一组变量映射两边，改一处即可。若改用外部 S3，还需覆盖
+#    milvus.yaml 的 minio 段（挂载到 /milvus/configs/user.yaml）。
+# 4) 首次启动约 90s 才健康（healthcheck start_period），等 healthy 后再连；
+#    2.x 数据卷不能直接就地升级到 3.0，按官方升级文档先备份。
+
+services:
+  # 3.0 镜像以 milvus 用户运行，先把共享数据卷属主改好；一次性任务，跑完即退出
+  milvus-volume-init:
+    image: milvusdb/milvus:v3.0.6
+    container_name: forge-milvus-volume-init
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        uid="$$(id -u milvus)"
+        gid="$$(id -g milvus)"
+        marker="/var/lib/milvus/.milvus-volume-owner-$${uid}-$${gid}"
+        if [ ! -e "$${marker}" ]; then
+          chown -R "$${uid}:$${gid}" /var/lib/milvus
+          touch "$${marker}"
+          chown "$${uid}:$${gid}" "$${marker}"
+        fi
+    volumes:
+      - milvus-data:/var/lib/milvus
+
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.25
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd-data:/etcd
+    command: etcd -advertise-client-urls http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  minio:
+    container_name: milvus-minio
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: ${MILVUS_MINIO_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MILVUS_MINIO_PASSWORD:-minioadmin}
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  standalone:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v3.0.6
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_REGION: us-east-1
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      # 与 minio 服务同一组凭据；Milvus 3.0 的环境变量名与 MinIO 容器不同，见文件头注释
+      MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_USER:-minioadmin}
+      MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_PASSWORD:-minioadmin}
+    volumes:
+      - milvus-data:/var/lib/milvus
+    ports:
+      - "127.0.0.1:19530:19530"
+      - "127.0.0.1:9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 10
+    depends_on:
+      milvus-volume-init:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  etcd-data:
+  minio-data:
+  milvus-data:

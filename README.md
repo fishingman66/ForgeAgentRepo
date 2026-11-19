@@ -7,7 +7,7 @@
 | 速览 | 值 |
 | --- | --- |
 | 模块 | `backend/forge-modules/` 下 12 个，依赖单向无环 |
-| 后端单测 | **750 用例**（8 个模块有测试类，全部 `@Tag("dev")`） |
+| 后端单测 | **817 用例**（8 个模块有测试类，全部 `@Tag("dev")`） |
 | 前端 | 15 单测 + `vue-tsc --noEmit` 零错误，已接入构建门禁 |
 | 检索基线 | HitRate@5 **93.33%** / MRR **0.8667** / NDCG@5 **0.8841** |
 | 端到端 | 4 套逐期脚本（28 / 18 / 15 / 16）全通过 |
@@ -42,7 +42,7 @@ docker compose up -d
 
 默认管理员：`admin / admin123`。
 
-> **Docker 新库表结构与种子已补齐**（2026-11-12）：`01-schema.sql` 现含全部 **128 张表**，与 `forge-vue` 开发库的表/列完全对齐（含客服 `agent_cs_*`、语音 `agent_cc_*`、图谱 `kg_node`/`kg_edge`、记忆归档与评测门禁）。全部 `CREATE TABLE IF NOT EXISTS`、增量列直接写进建表定义，可重复执行；中文注释乱码已修复。`02-seed.sql` 含 **261 条菜单**（含智能客服 12 个页面入口与知识库「检索日志」，否则表有了但导航里没入口），`03-demo.sql` 的演示账号/空间/Agent 可重复执行。`backend/sql/` 下 78 个幂等增量脚本仍用于**存量库升级**，新库（含 Docker）无需逐个执行。
+> **Docker 新库表结构与种子已补齐**（2026-11-19 复检）：`01-schema.sql` 现含全部 **139 张表**，与 `forge-vue` 开发库的表/列/索引**三方零差异**（脚本核验见 `scripts/sql/schema_drift_audit.py`，空库全量回放见 `scripts/sql/baseline_replay_verify.py`，两者均通过）。全部 `CREATE TABLE IF NOT EXISTS`、增量列直接写进建表定义，可重复执行；中文注释乱码已修复。`02-seed.sql` 含 **262 条菜单**（含智能客服 12 个页面入口与知识库「检索日志」，否则表有了但导航里没入口），`03-demo.sql` 的演示账号/空间/Agent 可重复执行。`backend/sql/` 已清空（2026-11-19）：139 表结构与全部业务种子已收口到 `init/` 下 01~04 四个文件，新库按序执行即可，无需再跑增量脚本；历史脚本快照归档在 `docs/archive/backend_sql_snapshot_20261119.zip`（仅供追溯）。`04-seed-agent.sql` 承载模型供应商、内置工具、客服意图/敏感词/质检规则、呼叫中心渠道/打断词/IVR/路由等运行必需数据。**唯一保留差异**：`flow_node.version`（Warm-Flow 引擎表，开发库是旧版残留，加列会影响引擎行为，需随引擎升级单独评估）。
 >
 > **演示环境每日重置**：`.env` 里 `DEMO_ENABLED=true` 会开启后端写保护并在登录页展示「演示账号一键登录」；配合 `bash demo/reset-demo.sh`（建议 crontab `0 4 * * *`）清空 demo 账号与演示空间产生的运行时数据、恢复演示种子、清空 Redis。清理范围与保留项见脚本头部注释。
 
@@ -50,7 +50,7 @@ docker compose up -d
 
 **1. 环境**：JDK 21、Maven 3.9+、**Node ≥ 22.22.0 与 pnpm ≥ 12.0.0**（见 `frontend/package.json` 的 `engines`）；MySQL 8、Redis 6 必装，Milvus 3.0（本地 milvus-lite 3.x / 生产 standalone v3.0.6，均为 gRPC）必装。
 
-> dev 默认直连本机 milvus-lite 的 19530（**gRPC**）；生产 compose 用 Milvus 3.0 standalone，二者共用 `milvus-sdk-java 3.0.12` 与同一套业务代码，切环境只改 `rag.knowledge.milvus-*` 连接项。不装 Milvus 时可临时改 `vector-store: mysql` 用 MySQL 向量列跑通全链路，详见 §4.2 与 [forge-rag README](backend/forge-modules/forge-rag/README.md)。
+> dev 默认直连本机 milvus-lite 的 19530（**gRPC**）；生产 compose 用 Milvus 3.0 standalone，二者共用 `milvus-sdk-java 3.0.13` 与同一套业务代码，切环境只改 `rag.knowledge.milvus-*` 连接项。不装 Milvus 时可临时改 `vector-store: mysql` 用 MySQL 向量列跑通全链路，详见 §4.2 与 [forge-rag README](backend/forge-modules/forge-rag/README.md)。
 
 **2. 初始化数据库**（创建 `forge-vue` 与 `forge-job`，均 utf8mb4）：
 
@@ -63,15 +63,13 @@ CREATE DATABASE `forge-job` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicod
 mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < backend/script/sql/mysql/forge_vue.sql
 mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < backend/script/sql/mysql/forge_workflow.sql
 mysql --default-character-set=utf8mb4 -u用户名 -p forge-job < backend/script/sql/mysql/forge_job.sql
-# Agent 平台增量脚本（78 个，全部幂等）
-for f in backend/sql/agent_*.sql; do mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < "$f"; done
-# 图谱两表是 forge_ 前缀，不在上面通配范围内，必须单独导入
-mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < backend/sql/forge_kg_core.sql
+# Agent 平台业务表（替代原 backend/sql 增量脚本，一份全量基线）
+mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < deploy/docker/mysql/init/01-schema.sql
 ```
 
 > - 导入务必带 `--default-character-set=utf8mb4`，否则中文双重编码。
-> - **新库**可通配全量导入；**升级存量库只执行新增脚本，不要重跑全量**——字母序不等于依赖序，重跑 `agent_mcp.sql` 会 drop 并重建 `agent_approval`，把 `agent_step5.sql` 已放开的 `session_id` 非空约束带回来，导致含人工审批节点的工作流执行失败。应用启动时 `WorkflowSchemaGuard` 会自检并输出 WARN 与脚本路径指引。
-> - 资源域双模式升级执行 `backend/sql/agent_resource_scope.sql` + `backend/sql/agent_mcp_scope.sql`（均幂等），现有资源自动保持平台共享。
+> - `01-schema.sql` 是**全量结构基线**（139 表，含知识图谱与所有 Agent 域表），可重复执行；`02-seed.sql` / `03-demo.sql` / `04-seed-agent.sql` 依次导入即得到与 Docker 完全一致的数据。
+> - 原 `backend/sql/` 下 95 个增量脚本已于 2026-11-19 全部折进上述文件并清空（快照见 `docs/archive/`），**不要再按字母序通配跑增量脚本**。
 > - Windows 终端执行前先 `chcp 65001`，避免控制台中文乱码。
 
 **3. 配置**：编辑 `backend/forge-admin/src/main/resources/application-dev.yml`，填入 MySQL 与 Redis 连接信息。
@@ -83,8 +81,8 @@ pip install -U milvus-lite pymilvus
 milvus-lite server --data-dir D:/temp/milvus-data --port 19530
 ```
 
-> milvus-lite 3.x 的 19530 **只提供 gRPC**，不提供 HTTP/1.1 REST v2。后端统一使用 `milvus-sdk-java 3.0.12` 的 `MilvusClientV2`，本地 lite 与生产 Milvus 3.0 standalone 走同一条代码路径；生产 compose 为 `milvusdb/milvus:v3.0.6` + MinIO + etcd（3.0 起不再支持 `COMMON_STORAGETYPE=local`）。
-> **从 `vector-store: mysql` 切过来时**，存量分块仍是 `SYNCED` 而新后端没有向量，必须先执行一次 `backend/sql/manual_vector_backend_resync.sql`（非幂等，仅切后端时跑），由补偿任务回填，否则语义召回会静默为空。
+> milvus-lite 3.x 的 19530 **只提供 gRPC**，不提供 HTTP/1.1 REST v2。后端统一使用 `milvus-sdk-java 3.0.13` 的 `MilvusClientV2`，本地 lite 与生产 Milvus 3.0 standalone 走同一条代码路径；生产 compose 为 `milvusdb/milvus:v3.0.6` + MinIO + etcd（3.0 起不再支持 `COMMON_STORAGETYPE=local`）。
+> **从 `vector-store: mysql` 切过来时**，存量分块仍是 `SYNCED` 而新后端没有向量，必须先把这些分块置回 `PENDING`（切后端时跑一次，非幂等），由补偿任务回填，否则语义召回会静默为空。
 
 **5. 后端**：
 
@@ -117,6 +115,9 @@ pnpm run dev
 | 后端 | Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus |
 | 运行内核 | AgentScope 2.0 |
 | 存储 | MySQL 8+（utf8mb4）+ Redis 6（Redisson）+ Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone）。无 Milvus 时可切 `vector-store: mysql`，向量以 `BLOB`（float32 小端）存于分块表/记忆表，由应用层算余弦，扫描上限 5000 |
+
+> **依赖版本基线（2026-11-18 升级后）**：统一管理在 `backend/pom.xml` 的 `<properties>`。Spring Boot 4.1.2、Spring AI 2.0.2、Spring Boot Admin 4.1.5、springdoc 3.2.0、MyBatis 3.5.19 + MyBatis-Plus 3.5.18.1、Sa-Token 1.46.0、Redisson 4.8.0、Hutool 5.8.48、Lombok 1.18.48、AgentScope 2.0.5、Milvus SDK 3.0.13、AWS SDK 2.59.3、BouncyCastle 1.87、Fory 1.7.8、ip2region 3.3.8、mica-mqtt 2.6.15、Elasticsearch Client 7.17.29、pdfbox 3.0.8、MCP SDK 2.2.0。Maven 插件：compiler 3.16.0 / surefire 3.6.1 / jar 3.5.1 / flatten 1.9.0。
+> **升级边界**：跨 major/RC/Beta 不自动升（Boot 4.2-RC、Spring AI 2.1-RC、Agentscope 2.1-BETA、ES 7→9、Scala 2→3、compiler/jar 4.0-beta）；MyBatis 3.6 与 MyBatis-Plus 3.5.x 二进制不兼容（`Cursor.close()` 签名 + `ReflectorFactory.findForClass` 变更），须等 MP 同步大版本再一起升。详见工作日志。
 
 ### 3.2 模块地图
 
@@ -193,14 +194,14 @@ pnpm run dev
 | R5-3/4/6 规模化 | 图谱第三路（异步抽实体、≤2 跳、只走 RRF）；URL 外部源 + SSRF 防护 + S3·Confluence SPI 骨架；MCP `filters.documentIds` / `knowledge_chunks`；库级检索参数覆盖 |
 | R5-5 与视觉模型 | PDF/docx 抽图 → 描述插入对应页/段落（双开关默认关、≤20 张、同图 MD5 复用、失败不阻断，**不做 OCR**）；按工作空间配置平台或第三方 OpenAI 兼容模型，Key AES-GCM 加密 / 掩码回显 / 编辑留空沿用 / 连通性测试 |
 
-向量后端 `milvus`（本地 lite / 生产 standalone 统一 gRPC，SDK 3.0.12）/ `mysql`（无 Milvus 时 `BLOB` + 应用层余弦，上限 5000）一个配置切换；切后端需回填存量分块（见 `backend/sql/manual_vector_backend_resync.sql`）。完整口径见 [forge-rag README](backend/forge-modules/forge-rag/README.md) 与 [`docs/05-知识库与RAG增强方案.md`](docs/05-知识库与RAG增强方案.md)。
+向量后端 `milvus`（本地 lite / 生产 standalone 统一 gRPC，SDK 3.0.13）/ `mysql`（无 Milvus 时 `BLOB` + 应用层余弦，上限 5000）一个配置切换；切后端需把存量分块置回 `PENDING` 由补偿任务回填。完整口径见 [forge-rag README](backend/forge-modules/forge-rag/README.md) 与 [`docs/05-知识库与RAG增强方案.md`](docs/05-知识库与RAG增强方案.md)。
 
 ### 4.3 智能客服与语音呼叫中心
 
-三个模块共享零业务依赖契约层，依赖单向 `callcenter → customer-service → callcenter-common`；默认全关（`agent.customer-service.enabled` / `agent.callcenter.enabled`），开启不影响既有功能。
+三个模块共享零业务依赖契约层，依赖单向 `callcenter → customer-service → callcenter-common`；`agent.customer-service.enabled` 默认开启（`matchIfMissing=true`）、`agent.callcenter.enabled` 默认关闭，关闭时对应 Bean 与端点不装配。
 
-- **文本客服**：免登录 `/chat-api/**`（HMAC 访客令牌 + Origin 白名单 + 限流）、渠道回调 `/chat-channel/**`（验签 + 时间窗 + nonce）、七态工单与 ACD、逐字 SSE、CSAT / 质检 / FAQ 飞轮、PII 与留存擦除、渠道密钥加密。P0~P3 补齐关键词转人工 / SLA / 敏感词 / 交接摘要、语义缓存 / 槽位 / 知识缺口 / badcase、成本 / 配额 / 附件 / 死信、意图路由 / 坐席 SSE / OpenAI 兼容端点。
-- **语音呼叫**：`POST /chat-voice/{provider}/{code}` 免登录回调（`AiccGateway` 收口供应商差异，验签 + 时间窗 + nonce + 事件幂等，固定返 `{message, retcode}` + HTTP 200）、8 态状态机单调推进（乱序与迟到 CDR 不回退）、通话↔会话↔工单打通与挂机结案自动 CSAT、录音 `local-fs` / `oss` 一个配置切换且只存对象键 + 短期签名 URL + 审计。
+- **文本客服**：免登录 `/chat-api/**`（HMAC 访客令牌 + Origin 白名单 + 限流）、渠道回调 `/chat-channel/**`（验签 + 时间窗 + nonce）、七态工单与 ACD、逐字 SSE、CSAT / 质检 / FAQ 飞轮、PII 与留存擦除、渠道密钥加密。P0~P3 补齐关键词转人工 / SLA / 敏感词 / 交接摘要、语义缓存 / 槽位 / 知识缺口 / badcase、成本 / 配额 / 附件 / 死信、意图路由 / 坐席 SSE / OpenAI 兼容端点。**2026-11-18 对标增强批次 A/B/C 已交付**：A 修主链路（工具闸门放宽 + 可发布门禁接评测只读评估 + 检索结果链路同构复用、访客无登录态静默零命中缺陷修复、终态 zeroHit/citationCount 信号）；B 收口每轮意图情绪信号、四级转人工规则链（渠道 JSON 覆盖默认）、指标按渠道拆行 + 定时重建；C 落地工具风险分级/日限次、渠道身份绑定校验、动作日志幂等与 WRITE 审计（C4 异步 HITL 回调桥仍为明确残留）。**已知残留**：流式路径闸门尚未与 send 对称（流式零命中仍兜底）。C5 审计已补齐 READ 失败留痕 + 结果码/耗时结构化列（2026-11-19）。
+- **语音呼叫**：`POST /chat-voice/{provider}/{code}` 免登录回调（`AiccGateway` 收口供应商差异，验签 + 时间窗 + nonce + 事件幂等，固定返 `{message, retcode}` + HTTP 200）、8 态状态机单调推进（乱序与迟到 CDR 不回退）、通话↔会话↔工单打通与挂机结案自动 CSAT、录音 `local-fs` / `oss` 一个配置切换且只存对象键 + 短期签名 URL + 审计。**真实 FreeSWITCH 对接已交付**（P1 ESL 事件面 / P2 `FsChannelControl` 五个 uuid_* 控制面 / P3 `mod_audio_stream` 媒体面 WebSocket `/cc/media/**`，FS 为 WS 客户端、上行 PCM16LE 二进制、下行 `streamAudio` base64、`clearAudio` 打断；IVR 生产装配由 `FsIvrSessionCoordinator` 在 `ivr-autodrive=true` 时提交 `IvrSessionDriver.drive`，详见 docs/09）；**E 组运营增强已交付**（画像 / 呼损回拨 / 转接时间轴 / 质检幂等 / 指标扩维 + 前端 11 指标卡片）。真实 ASR/TTS（DashScope）待 API key。
 - **坐席辅助 A1~A5**：文本 / 语音转写双触发（异步旁路、语音五道判定）、规则意图打标与检索加权、白名单动作 `REPLY` / `LINK` / `RESOLVE`（坐席确认后执行）、采纳率按**推荐条数**、连续零采纳自动生成待审 FAQ。
 - **图谱领域能力**：`forge-kg` 提供关系维护端点与空间隔离、`CsKgQueryExpander` 检索词扩展、日指标对比卡（观测口径非 A/B）。
 
@@ -249,11 +250,11 @@ pnpm run dev
 
 | 模块 | 用例 | 模块 | 用例 |
 | --- | --- | --- | --- |
-| Agent 平台 | 155 | 知识库/RAG | 199 |
-| 智能客服域 | 109 | 长期记忆 | 51 |
+| Agent 平台 | 206 | 知识库/RAG | 204 |
+| 智能客服域 | 120 | 长期记忆 | 51 |
 | 知识图谱 | 20 | 呼叫中心 | 196 |
 | 契约层 | 19 | 管理端模板 | 1 |
-| **后端合计** | **750** | | |
+| **后端合计** | **817** | | |
 
 前端 15 单测（`sse-events` 10 + `governance` 5），`pnpm typecheck` 零错误，`build` / `build:dev` / `build:prod` 均前置 `vue-tsc --noEmit`。
 
@@ -275,7 +276,7 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 
 ### 端到端与基线
 
-`temp/` 下逐期脚本各自包含编译、打包、jar 冒烟、造数、断言与清理：`r5_verify.py` 28/28（ACL 与治理）、`r5b_verify.py` 18/18（图谱 / 外部源 / MCP）、`r5c_verify.py` 15/15（图片描述）、`r5d_verify.py` 16/16（工作空间视觉模型配置）。
+`scripts/acceptance/` 下逐期脚本各自包含编译、打包、jar 冒烟、造数、断言与清理：`r5_verify.py` 28/28（ACL 与治理）、`r5b_verify.py` 18/18（图谱 / 外部源 / MCP）、`r5c_verify.py` 15/15（图片描述）、`r5d_verify.py` 16/16（工作空间视觉模型配置）。
 
 检索评测基线 `docs/baseline/kb_baseline.py --no-write` 定版 **HitRate@5 93.33% / MRR 0.8667 / NDCG@5 0.8841**，多轮回归不降。可复现三前提：同分排序破平、夹具串行摄取、每轮 `OPTIMIZE TABLE agent_kb_chunk`（详见 [`docs/README.md`](docs/README.md)）。
 
@@ -303,7 +304,7 @@ cd frontend && pnpm typecheck && pnpm test:unit && pnpm build
 
 **本地 milvus-lite 为什么必须走 gRPC？**
 
-milvus-lite 3.x 只实现 gRPC，19530 用 HTTP/1.1 访问会拿到 HTTP/2 SETTINGS 帧而不是 JSON（旧版 REST v2 客户端已移除）。后端统一用 `milvus-sdk-java 3.0.12` 的 `MilvusClientV2`，本地与生产是同一条代码路径，切环境只改 `rag.knowledge.milvus-host/port/token/database/secure` 和 `milvus-consistency-level`。SDK 自带 shaded gRPC/Netty，protobuf-java 由父 pom 锁到 4.36.2，不与平台其他依赖冲突。
+milvus-lite 3.x 只实现 gRPC，19530 用 HTTP/1.1 访问会拿到 HTTP/2 SETTINGS 帧而不是 JSON（旧版 REST v2 客户端已移除）。后端统一用 `milvus-sdk-java 3.0.13` 的 `MilvusClientV2`，本地与生产是同一条代码路径，切环境只改 `rag.knowledge.milvus-host/port/token/database/secure` 和 `milvus-consistency-level`。SDK 自带 shaded gRPC/Netty，protobuf-java 由父 pom 锁到 4.36.2，不与平台其他依赖冲突。
 
 **不部署 Milvus 能用吗？**
 

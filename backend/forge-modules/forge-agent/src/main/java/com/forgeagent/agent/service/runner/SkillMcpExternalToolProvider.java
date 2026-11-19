@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.forgeagent.agent.domain.AgentSkill;
 import com.forgeagent.agent.mapper.AgentSkillMapper;
 import com.forgeagent.common.core.utils.StringUtils;
+import com.forgeagent.rag.mcp.McpCaller;
 import com.forgeagent.rag.mcp.McpExternalToolProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,20 +66,24 @@ public class SkillMcpExternalToolProvider implements McpExternalToolProvider {
     }
 
     @Override
-    public ObjectNode invoke(ObjectMapper om, String toolName, JsonNode args) {
+    public ObjectNode invoke(ObjectMapper om, String toolName, JsonNode args, McpCaller caller) {
         return switch (toolName) {
-            case TOOL_LIST -> listTool(om);
-            case TOOL_GET -> getTool(om, args);
+            case TOOL_LIST -> listTool(om, caller);
+            case TOOL_GET -> getTool(om, args, caller);
             default -> throw new IllegalArgumentException("未知技能工具:" + toolName);
         };
     }
 
-    private ObjectNode listTool(ObjectMapper om) {
+    private ObjectNode listTool(ObjectMapper om, McpCaller caller) {
         List<AgentSkill> skills = skillMapper.selectList(
             new LambdaQueryWrapper<AgentSkill>()
                 .select(AgentSkill::getId, AgentSkill::getName, AgentSkill::getDescription,
                     AgentSkill::getVersion, AgentSkill::getStatus, AgentSkill::getWorkspaceId)
                 .eq(AgentSkill::getStatus, "0")
+                // A5 增强:客户端只看到平台共享 + 自己空间的技能
+                .and(caller.workspaceId() != null, w -> w
+                    .isNull(AgentSkill::getWorkspaceId)
+                    .or().eq(AgentSkill::getWorkspaceId, caller.workspaceId()))
                 .orderByDesc(AgentSkill::getId));
         ObjectNode result = om.createObjectNode();
         ArrayNode rows = result.putArray("rows");
@@ -93,7 +98,7 @@ public class SkillMcpExternalToolProvider implements McpExternalToolProvider {
         return result;
     }
 
-    private ObjectNode getTool(ObjectMapper om, JsonNode args) {
+    private ObjectNode getTool(ObjectMapper om, JsonNode args, McpCaller caller) {
         String name = args.path("name").asText("");
         if (StringUtils.isBlank(name)) {
             throw new IllegalArgumentException("name 不能为空");
@@ -102,7 +107,8 @@ public class SkillMcpExternalToolProvider implements McpExternalToolProvider {
             .eq(AgentSkill::getName, name)
             .eq(AgentSkill::getStatus, "0")
             .last("limit 1"));
-        if (skill == null) {
+        // 越权与不存在同口径:不泄露别家空间有同名技能
+        if (skill == null || !caller.canReadWorkspace(skill.getWorkspaceId())) {
             throw new IllegalArgumentException("技能不存在或已停用:" + name);
         }
         ObjectNode result = om.createObjectNode();

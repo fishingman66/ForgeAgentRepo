@@ -1,6 +1,6 @@
 # 09 - 智能坐席对接 FreeSWITCH（FusionPBX）开发方案
 
-> 状态：方案稿 v1.0（2026-11-17）。目标环境：FusionPBX 5.6（Ubuntu 24.04，前端 `https://<FusionPBX管理端地址>`），FreeSWITCH 随 FusionPBX 安装。
+> 状态：方案稿 v1.0（2026-11-17）+ **实施收尾（2026-11-18）：P1 事件面 / P2 控制面 / P3 媒体面 / IVR 生产装配三件套全部交付并验证**。目标环境：FusionPBX 5.6（Ubuntu 24.04，前端 `https://<FusionPBX管理端地址>`），FreeSWITCH 随 FusionPBX 安装。
 > 上游依据：`docs/07-呼叫中心增强方案.md`（v2.1）、`docs/04-语音呼叫中心.md`。本文只讲"真实对接怎么落地"，不重复上游设计取舍。
 > 一句话结论：**项目的四层 SPI 已经为真实 FS 留好了插槽，缺的是 4 个真实实现 + 1 个生产会话入口 + FusionPBX 侧事件发射器。对接工作是"填空 + 接通"，不是重构。**
 
@@ -22,7 +22,7 @@
 | 坐席辅助 | `route/DirectAnswerRouter.java`、`insight/InsightPipeline.java` | 无通道时留痕 `PENDING_NO_CHANNEL`，接上真通道即自动生效 |
 | 零依赖契约层 | `forge-callcenter-common` | 不得引入 Spring/Jackson |
 
-### 1.2 必须新增的空槽（当前完全不存在）
+### 1.2 对接前的空槽清单（**已全部实现，本节为对接前基线**）
 
 | 空槽 | 应实现接口 | 当前状态 | 批次 |
 |---|---|---|---|

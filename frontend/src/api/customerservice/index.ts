@@ -929,3 +929,36 @@ export interface CsKgExpandMetricRow {
 export const listKgExpandMetrics = (days = 7): AxiosPromise<CsKgExpandMetricRow[]> =>
   request({ url: '/agent/customerservice/knowledge/graph/expand-metrics', method: 'get', params: { days } });
 
+/** D2 评测回流:用例行(后端直出 SQL 列名,保持下划线) */
+export interface CsEvalCaseRow {
+  id: number;
+  dataset_id: number;
+  question: string;
+  reference_answer?: string | null;
+  /** cs_badcase / cs_sampled */
+  source: string;
+  source_ref_id?: number | null;
+  /** 0 待确认 / 1 已通过 / 2 已驳回 */
+  review_status: string;
+  create_time?: string;
+}
+
+/** D2:回流用例列表(默认待确认) */
+export const listEvalCases = (reviewStatus = '0', limit = 50) =>
+  request({
+    url: '/agent/customerservice/eval/cases',
+    method: 'get',
+    params: { reviewStatus, limit }
+  });
+
+/** D2:待确认用例数 */
+export const evalPendingCount = () =>
+  request({ url: '/agent/customerservice/eval/pending-count', method: 'get' });
+
+/** D2:确认或驳回一条回流用例 */
+export const reviewEvalCase = (id: number, approve: boolean) =>
+  request({
+    url: `/agent/customerservice/eval/cases/${id}/review`,
+    method: 'post',
+    data: { approve }
+  });

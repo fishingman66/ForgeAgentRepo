@@ -81,6 +81,15 @@ public class ReleaseGateService {
             problems.add("未绑定模型");
         }
 
+        // 1.1 技能绑定(P1-B):已安装但停用的技能仍会出现在 system prompt 目录里,
+        //     模型看得到却 load_skill 加载不到 —— 属于基础检查,不受指标豁免覆盖
+        List<String> disabledSkills = disabledSkillNames(agent.getId());
+        checks.put("skillBindingReady", disabledSkills.isEmpty());
+        checks.put("disabledSkills", disabledSkills);
+        if (!disabledSkills.isEmpty()) {
+            problems.add("已安装技能已停用: " + String.join("、", disabledSkills));
+        }
+
         // 2. 策略:空间级优先,否则平台级,都没有则用内置默认值
         Map<String, Object> policy = loadPolicy(agent.getWorkspaceId());
         double minScore = decimal(policy.get("min_eval_score"), 60);
@@ -105,6 +114,16 @@ public class ReleaseGateService {
         boolean metricPassed = true;
         if (sampleAvailable && !waived) {
             if (!eval.isEmpty()) {
+                // D2:评测必须是针对「当前配置」跑的,否则分数再高也说明不了要发的这一版
+                String evalHash = text(eval.get("config_hash"));
+                String currentHash = agent.getConfigHash();
+                boolean covers = StringUtils.isBlank(evalHash) || StringUtils.isBlank(currentHash)
+                    || evalHash.equals(currentHash);
+                checks.put("evalCoversConfig", covers);
+                if (!covers) {
+                    metricPassed = false;
+                    problems.add("评测结果早于当前配置(config_hash 已变),请重新跑评测后再发布");
+                }
                 double score = decimal(eval.get("avg_score"), 0);
                 checks.put("evalScore", score);
                 if (score < minScore) {
@@ -232,7 +251,7 @@ public class ReleaseGateService {
 
     private Map<String, Object> latestEval(Long agentId) {
         List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT avg_score,tool_success_rate,refusal_rate,p95_latency_ms
+                SELECT avg_score,tool_success_rate,refusal_rate,p95_latency_ms,config_hash
                 FROM agent_eval_run WHERE agent_id=? AND status='success' ORDER BY id DESC LIMIT 1
                 """, agentId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
@@ -261,6 +280,27 @@ public class ReleaseGateService {
                 WHERE agent_id=? AND status='approved' AND expires_at > NOW()
                 """, Integer.class, agentId);
         return count != null && count > 0;
+    }
+
+    /**
+     * 已安装但停用/已删的技能名。走 idx_skill_agent_agent(agent_id) 索引,
+     * evaluate 被客服高频调用也不会成为瓶颈。
+     */
+    private List<String> disabledSkillNames(Long agentId) {
+        if (agentId == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+                SELECT s.name FROM agent_skill_install i
+                JOIN agent_skill s ON s.id = i.skill_id
+                WHERE i.agent_id=? AND i.del_flag=0 AND s.del_flag=0 AND s.status <> '0'
+                ORDER BY s.id
+                """, agentId);
+        List<String> names = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            names.add(text(row.get("name")));
+        }
+        return names;
     }
 
     private Map<String, Object> parseMetrics(String json) {

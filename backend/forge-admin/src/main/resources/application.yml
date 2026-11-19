@@ -124,8 +124,6 @@ security:
     - /*/api-docs
     - /*/api-docs/**
     - /warm-flow-ui/config
-    - /snail-chat/**
-    - /api/snail/chat/**
     - /auth/login
     - /auth/code
     # 触发器 Webhook 入口:以 secret 鉴权,免登录
@@ -139,7 +137,9 @@ security:
     - /chat-channel/**
     # 语音与呼叫中心回调(V1):AICC 验签 + 时间窗 + nonce + 事件幂等,免登录
     - /chat-voice/**
-    # 知识库 MCP 端点(R1):以 rag.knowledge.mcp-token 鉴权(空=不校验),免登录
+    # 对外 MCP 端点(R1/A5):优先 agent_mcp_client 客户端令牌(绑定工作空间与授权域),
+    # 未命中时回落 rag.knowledge.mcp-token(平台全量只读);两者都空则不校验。整体另需 rag.knowledge.mcp-enabled=true
+    # 免登录
     - /mcp
     - /mcp/**
 

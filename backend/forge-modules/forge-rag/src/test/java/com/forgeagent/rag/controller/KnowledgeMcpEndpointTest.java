@@ -37,7 +37,8 @@ class KnowledgeMcpEndpointTest {
         properties.setMcpEnabled(true);
         // mapper/service 传 null:协议层用例不触达检索实现,
         // tools/call 的检索路径走参数校验失败与异常脱敏分支,同样可断言
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of());
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(),
+            java.util.List.of(), null);
     }
 
     private ResponseEntity<String> post(String body) {
@@ -263,13 +264,15 @@ class KnowledgeMcpEndpointTest {
         org.mockito.Mockito.when(provider.supportedTools()).thenReturn(java.util.Set.of("skill_list", "skill_get"));
         org.mockito.Mockito.when(provider.definitions(org.mockito.Mockito.any()))
             .thenReturn(java.util.List.of((JsonNode) def));
+        org.mockito.Mockito.when(provider.scope()).thenReturn("skill");
         return provider;
     }
 
     @Test
     @DisplayName("A5:外部工具定义进入 tools/list")
     void externalToolDefinitionAppearsInToolsList() throws Exception {
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(stubProvider()));
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(stubProvider()),
+            java.util.List.of(), null);
         String sessionId = initialize();
         ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
             "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
@@ -291,9 +294,11 @@ class KnowledgeMcpEndpointTest {
         ObjectNode rows = result.putArray("rows").addObject();
         rows.put("name", "退换货处理");
         org.mockito.Mockito.when(provider.invoke(org.mockito.Mockito.any(),
-                org.mockito.Mockito.eq("skill_get"), org.mockito.Mockito.any()))
+                org.mockito.Mockito.eq("skill_get"), org.mockito.Mockito.any(),
+                org.mockito.Mockito.any()))
             .thenReturn(result);
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(provider));
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(provider),
+            java.util.List.of(), null);
 
         String sessionId = initialize();
         ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
@@ -306,10 +311,114 @@ class KnowledgeMcpEndpointTest {
             .path("name").asText("").contains("退换货"), "rows 结构化输出透传");
     }
 
+    // ---------------- A5 增强:令牌 -> 工作空间 + 授权域 ----------------
+
+    /** 构造一个"只认 fgm_test_token"的端点 */
+    private KnowledgeMcpEndpoint scopedEndpoint(com.forgeagent.rag.mcp.McpCaller caller) {
+        com.forgeagent.rag.mcp.McpClientAuthenticator auth = token ->
+            "fgm_test_token".equals(token)
+                ? java.util.Optional.of(caller) : java.util.Optional.empty();
+        return new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(stubProvider()),
+            java.util.List.of(auth), null);
+    }
+
+    @Test
+    @DisplayName("A5 增强:授权域为 skill 时 tools/list 不暴露 knowledge 工具")
+    void scopedClientOnlySeesAllowedTools() throws Exception {
+        endpoint = scopedEndpoint(new com.forgeagent.rag.mcp.McpCaller("DSH", 100L,
+            java.util.Set.of(com.forgeagent.rag.mcp.McpCaller.SCOPE_SKILL)));
+
+        ResponseEntity<String> resp = endpoint.handlePost("fgm_test_token", null,
+            "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/list\"}");
+
+        JsonNode tools = parse(resp.getBody()).path("result").path("tools");
+        boolean knowledge = false;
+        boolean skill = false;
+        for (JsonNode node : tools) {
+            if ("knowledge_search".equals(node.path("name").asText())) {
+                knowledge = true;
+            }
+            if ("skill_list".equals(node.path("name").asText())) {
+                skill = true;
+            }
+        }
+        assertFalse(knowledge, "未授权 knowledge 域时不得暴露检索工具");
+        assertTrue(skill, "授权 skill 域后外部工具仍可见");
+    }
+
+    @Test
+    @DisplayName("A5 增强:越域调用 knowledge_search 返回未授权而非执行")
+    void scopedClientCannotCallKnowledgeTools() throws Exception {
+        endpoint = scopedEndpoint(new com.forgeagent.rag.mcp.McpCaller("DSH", 100L,
+            java.util.Set.of(com.forgeagent.rag.mcp.McpCaller.SCOPE_SKILL)));
+
+        ResponseEntity<String> resp = endpoint.handlePost("fgm_test_token", null,
+            "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\","
+                + "\"params\":{\"name\":\"knowledge_search\",\"arguments\":{\"query\":\"退换货\"}}}");
+
+        JsonNode body = parse(resp.getBody());
+        assertTrue(body.path("result").path("isError").asBoolean(false), "越域调用必须报错");
+        assertTrue(body.path("result").path("content").get(0).path("text").asText("").contains("未授权"));
+    }
+
+    @Test
+    @DisplayName("A5 增强:启用客户端表后旧单 token 仍可用(回落不破坏既有部署)")
+    void legacyTokenStillAcceptedAlongsideClients() throws Exception {
+        properties.setMcpToken("legacy-secret");
+        endpoint = scopedEndpoint(com.forgeagent.rag.mcp.McpCaller.platformWide("legacy"));
+
+        ResponseEntity<String> resp = endpoint.handlePost("legacy-secret", null,
+            "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/list\"}");
+
+        assertEquals(HttpStatus.OK, resp.getStatusCode());
+        assertTrue(parse(resp.getBody()).path("result").path("tools").size() >= 3,
+            "平台全量身份应看到全部内置工具");
+    }
+
+    @Test
+    @DisplayName("A5 增强:平台令牌停用后拒绝,不得回落成不校验")
+    void disabledClientTokenIsRejectedNotFallenBack() {
+        // 回落条件故意满足(mcpToken 为空即放行):若实现退化成回落,这个用例会挂
+        properties.setMcpToken("");
+        com.forgeagent.rag.mcp.McpClientAuthenticator auth =
+            new com.forgeagent.rag.mcp.McpClientAuthenticator() {
+                @Override
+                public java.util.Optional<com.forgeagent.rag.mcp.McpCaller> authenticate(String token) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
+                public boolean managed(String token) {
+                    return token != null && token.startsWith("fgm_");
+                }
+            };
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(),
+            java.util.List.of(auth), null);
+
+        ResponseEntity<String> resp = endpoint.handlePost("fgm_disabled_or_rotated", null,
+            "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/list\"}");
+
+        assertEquals(HttpStatus.UNAUTHORIZED, resp.getStatusCode(),
+            "归客户端表管辖但校验失败时必须拒绝,不能回落放行");
+    }
+
+    @Test
+    @DisplayName("A5 增强:未知令牌仍被 401 拒绝")
+    void unknownTokenIsRejectedWhenClientsConfigured() {
+        properties.setMcpToken("legacy-secret");
+        endpoint = scopedEndpoint(com.forgeagent.rag.mcp.McpCaller.platformWide("legacy"));
+
+        ResponseEntity<String> resp = endpoint.handlePost("not-a-valid-token", null,
+            "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/list\"}");
+
+        assertEquals(HttpStatus.UNAUTHORIZED, resp.getStatusCode());
+    }
+
     @Test
     @DisplayName("A5:无 Provider 支持时保持未知工具错误语义")
     void unknownToolStaysUnknownWithoutProvider() throws Exception {
-        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of());
+        endpoint = new KnowledgeMcpEndpoint(properties, null, null, null, java.util.List.of(),
+            java.util.List.of(), null);
         String sessionId = initialize();
         ResponseEntity<String> resp = endpoint.handlePost(null, sessionId,
             "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\","

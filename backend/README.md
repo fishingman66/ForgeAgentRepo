@@ -1,6 +1,6 @@
 # 智造 ForgeAgent 后端
 
-后端采用单体多模块架构：一个进程承载全部业务，模块按领域内聚划分、依赖单向。技术栈为 Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus，运行内核基于 AgentScope 2.0，存储为 MySQL 8 + Redis 6 + Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone v3.0.6，SDK 3.0.12；无 Milvus 时可切 MySQL 向量列替代，见 [`forge-rag` README](forge-modules/forge-rag/README.md)）。
+后端采用单体多模块架构：一个进程承载全部业务，模块按领域内聚划分、依赖单向。技术栈为 Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus，运行内核基于 AgentScope 2.0，存储为 MySQL 8 + Redis 6 + Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone v3.0.6，SDK 3.0.13；无 Milvus 时可切 MySQL 向量列替代，见 [`forge-rag` README](forge-modules/forge-rag/README.md)）。
 
 选择单体而非微服务的理由：当前阶段业务耦合在对话主链路上，拆分会把一次对话变成跨服务长事务；各模块已按边界隔离，后续出现独立扩缩容需求时再按模块平移。
 
@@ -47,7 +47,7 @@ customer-service → kg
 - **事件驱动**：文本与语音共用零依赖契约层的事件信封与通道接口（SSE 实现留在 customerservice）；语音 8 态状态机单调推进（乱序 / 迟到 CDR 不回退），事件指纹为跨语言对齐的 sha256 契约（Python 调试端同向量）。
 - **业务绑定**：`CallBusinessBinder` 是通话与文本域关联的唯一写入口（ring 建会话、transfer 建工单入 ACD、挂机按合法跃迁结案，RESOLVED 自动发 CSAT）；转写质检与通话日指标在挂机钩子收敛。
 - **录音存储抽象**：`RecordingStorage` 接口下 `oss`（sys_oss_config）与 `local-fs`（开发环境本地目录 + HMAC 签名下载 + 路径穿越防护）两个实现，`recording-store` 一个配置切换，对象键规则一致；留存清理与隐私擦除（Spring 事件 `CsConversationErasedEvent` 级联）都会删除录音对象并写审计。
-- **开关纪律**：`agent.customer-service.enabled` 与 `agent.callcenter.enabled` 默认关闭；关闭时对应 Bean 与端点不装配，DDL 存在不影响启动。prod 下 `CallcenterProductionReadinessValidator` 拒绝 Mock 供应商与默认密钥。
+- **开关纪律**：`agent.customer-service.enabled` 默认 **开启**（`matchIfMissing=true`）、`agent.callcenter.enabled` 默认关闭；关闭时对应 Bean 与端点不装配，DDL 存在不影响启动。prod 下 `CallcenterProductionReadinessValidator` 拒绝 Mock 供应商与默认密钥。
 
 ### 坐席辅助（A1~A5）
 
@@ -102,7 +102,7 @@ customer-service → kg
 - **R5 治理与规模化**：`DocVisibilityResolver` 将治理谓词 + ACL 角色求交算成 hidden 集并**检索前下推**（全文 `NOT IN` / Milvus `not in` / MySQL 向量列 `notIn`），缓存键带可见性签名；回收站软删 + 30 天物理清理；图谱第三路（异步抽实体、≤2 跳、只走 RRF）；URL 外部源真抓取 + SSRF 防护 + S3/Confluence SPI 骨架；MCP 3 工具（`knowledge_search` 支持 `filters.documentIds`、`knowledge_list`、`knowledge_chunks`）；库级 `retrieval_overrides`；PDF/docx 抽图 + 视觉模型描述（双开关默认关、每篇 ≤20 张、失败不阻断）。
 - **图片识别模型按工作空间配置**：`agent_kb_vlm_config`（`workspace_id=0` 为平台默认），PLATFORM / CUSTOM 两类来源，API Key 经 `KbSecretCipher`（AES-GCM，`rag.knowledge.secret-key`）加密落库，任何接口只回显掩码；`KbVlmConfigResolver` 优先级 空间行 > 平台默认行 > 全局 `vlm-model`。端点 `GET/PUT /agent/knowledge/vlm-config`、`POST /agent/knowledge/vlm-config/test`。
 
-**端点补充**：`/agent/knowledge/doc`（含 `restore/{ids}`、`governance/{id}`、`review/{id}`、`chunks/{documentId}`）、`/agent/knowledge/ext-source`、`/agent/kb/eval`（含 `fingerprint` / `compare` / `gate`）、`/agent/kb/quality`（含 `case-from-hit`）、`/mcp`（3 工具，已在 `security.excludes` 放行）。
+**端点补充**：`/agent/knowledge/doc`（含 `restore/{ids}`、`governance/{id}`、`review/{id}`、`chunks/{documentId}`）、`/agent/knowledge/ext-source`、`/agent/kb/eval`（含 `fingerprint` / `compare` / `gate`）、`/agent/kb/quality`（含 `case-from-hit`）、`/mcp`（3 内置工具 + 外部 SPI 工具 `skill_list`/`skill_get`，已在 `security.excludes` 放行）。
 
 ### 长期记忆与知识图谱
 
@@ -147,14 +147,14 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **750 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **817 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
-# Agent 平台 155：25 个测试类（批次 A/B 增量 + 批次 C 工具护栏 1 类）（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
+# Agent 平台 206：32 个测试类（批次 A/B 增量 + 批次 C 工具护栏/审计 + 技能安装管理 + P1-B 技能版本/快照）（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
-# 知识库/RAG 199：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
+# 知识库/RAG 204：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
-# 智能客服域 109：26 个测试类（批次 A 闸门/信号测试 + 批次 B 新增规则引擎/每轮信号/分渠道指标 3 类）（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
+# 智能客服域 120：27 个测试类（批次 A 闸门/信号测试 + 批次 B 新增规则引擎/每轮信号/分渠道指标 3 类）（含 A1~A5、P0~P3 与图谱维护/检索扩展指标）
 mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest,CsVisitorServiceZeroHitTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
@@ -176,7 +176,7 @@ mvn -Pdev test "-Dtest=AgentMemoryServiceImplTest,MemoryVectorServiceTest,Memory
 cd ../frontend && pnpm typecheck && pnpm test:unit && pnpm build
 ```
 
-三点注意：surefire 按 `@Tag("dev")` 过滤（**所有测试类均已标注解**，新增测试先加注解再写断言，否则被静默过滤呈现 EXIT=0 假绿）；PowerShell 下含点号的 `-D` 参数需加引号，多个 `-D` 建议用 Python `subprocess.run(argv)` 传参（模板 `temp/run_mvn.py`）；多模块 `-Dtest=X -pl` 需 `-Dsurefire.failIfNoSpecifiedTests=false`。验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，**不认 EXIT=0**——报告目录只有 `*.dumpstream` 就是假绿。
+三点注意：surefire 按 `@Tag("dev")` 过滤（**所有测试类均已标注解**，新增测试先加注解再写断言，否则被静默过滤呈现 EXIT=0 假绿）；PowerShell 下含点号的 `-D` 参数需加引号，多个 `-D` 建议用 Python `subprocess.run(argv)` 传参（模板 `scripts/tools/run_mvn.py`）；多模块 `-Dtest=X -pl` 需 `-Dsurefire.failIfNoSpecifiedTests=false`。验收以 `target/surefire-reports/TEST-*.xml` 的 `tests/failures/errors` 为准，**不认 EXIT=0**——报告目录只有 `*.dumpstream` 就是假绿。
 
 ## 运行保障约定
 
@@ -197,7 +197,7 @@ cd ../frontend && pnpm typecheck && pnpm test:unit && pnpm build
 - `deploy/docker/mysql/init/01-schema.sql`（2026-11-12 已补齐）现含 **128 张表**，与 `forge-vue` 开发库表/列完全对齐：框架基座 + Agent 平台 + 知识库 RAG + 客服 `agent_cs_*` + 语音 `agent_cc_*` + 图谱 `kg_node`/`kg_edge` + 记忆归档 `agent_message_archive`/`agent_memory_archive` + 评测门禁 `agent_eval_*` / `release_gate_*` / `agent_prompt_*` / `agent_version` + 工作流 `flow_event_wait`。全部 `CREATE TABLE IF NOT EXISTS`、增量列写进建表定义（无 `ALTER TABLE`），可重复执行，中文注释乱码已修复；
 - `deploy/docker/mysql/init/02-seed.sql` 含 **261 条菜单**，其中 13 条为业务域补齐（智能客服目录 + 坐席工作台/会话满意度/质检/知识答案/运营看板/渠道接入/合规与模板/通话记录/意图管理/辅助看板/知识图谱 + 知识库「检索日志」），采用 `INSERT ... SELECT ... FROM DUAL WHERE NOT EXISTS` 可重复执行；超管（`SUPER_ADMIN_USER_ID`）自动可见全部菜单，无需 `sys_role_menu`；
 - `deploy/docker/mysql/init/03-demo.sql` 的只读账号授权改为按 `DATABASE()` 动态取库名（原先硬编码 `forge-vue`），演示数据可重复执行；数据源密码密文由 `agent.datasource.secret`（默认 `forgeDsSecret2026`）加密，换该密钥后需在「数据源」页重新保存密码；
-- `backend/sql/` 下 78 个幂等增量脚本仅用于**存量库升级**，新库无需逐个执行；
+- `backend/sql/` 已清空（2026-11-19）：全部增量脚本折进 `deploy/docker/mysql/init/` 的 01~04 四个文件，新库按序执行即可；
 - **存量库启用资源域双模式**：单独执行 `sql/agent_resource_scope.sql`（三表加 `workspace_id` 与索引，自带幂等过程，可重复运行），现有资源保持平台共享；新库已由 `deploy/docker/mysql/init/01-schema.sql` 直接带列；
 - 应用启动时 `WorkflowSchemaGuard` 会自检工作流相关表结构，缺失时输出 WARN 与脚本路径指引。
 

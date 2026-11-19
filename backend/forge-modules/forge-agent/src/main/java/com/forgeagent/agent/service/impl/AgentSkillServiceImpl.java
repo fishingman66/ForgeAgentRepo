@@ -7,10 +7,15 @@ import lombok.extern.slf4j.Slf4j;
 import com.forgeagent.agent.domain.AgentSkill;
 import com.forgeagent.agent.domain.AgentSkillInstall;
 import com.forgeagent.agent.domain.bo.AgentSkillBo;
+import com.forgeagent.agent.domain.vo.AgentSkillBindVo;
 import com.forgeagent.agent.domain.vo.AgentSkillVo;
+import com.forgeagent.agent.domain.vo.SkillInstallTargetVo;
 import com.forgeagent.agent.mapper.AgentSkillInstallMapper;
 import com.forgeagent.agent.mapper.AgentSkillMapper;
 import com.forgeagent.agent.service.IAgentSkillService;
+import com.forgeagent.agent.service.support.AgentSkillVersionService;
+import com.forgeagent.agentcore.domain.AgentInfo;
+import com.forgeagent.agentcore.mapper.AgentInfoMapper;
 import com.forgeagent.agentcore.service.ResourceAccessGuard;
 import com.forgeagent.common.core.domain.PageResult;
 import com.forgeagent.common.core.exception.ServiceException;
@@ -20,7 +25,14 @@ import com.forgeagent.common.mybatis.core.page.PageQuery;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 技能包 Service 实现(08方案 / A1)
@@ -37,7 +49,9 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
 
     private final AgentSkillMapper skillMapper;
     private final AgentSkillInstallMapper installMapper;
+    private final AgentInfoMapper agentMapper;
     private final ResourceAccessGuard resourceGuard;
+    private final AgentSkillVersionService skillVersionService;
 
     @Override
     public PageResult<AgentSkillVo> queryPageList(AgentSkillBo bo, PageQuery pageQuery) {
@@ -71,7 +85,12 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
         entity.setWorkspaceId(scope);
         entity.setStatus("0");
         entity.setVersion(1);
-        return skillMapper.insert(entity) > 0;
+        boolean ok = skillMapper.insert(entity) > 0;
+        if (ok) {
+            // P1-B:首版即归档,保证快照里的 contentHash 永远有出处
+            skillVersionService.archive(entity);
+        }
+        return ok;
     }
 
     @Override
@@ -87,7 +106,12 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
         update.setWorkspaceId(null); // 归属空间一经创建不可变
         // 内容变更版本自增:发布门禁与 KV Cache 语义依赖版本可辨
         update.setVersion(exists.getVersion() == null ? 2 : exists.getVersion() + 1);
-        return skillMapper.updateById(update) > 0;
+        boolean ok = skillMapper.updateById(update) > 0;
+        if (ok) {
+            // 只归档新版本,旧版本内容保持不可变;已钉旧版的 Agent 不受影响
+            skillVersionService.archive(skillMapper.selectById(bo.getId()));
+        }
+        return ok;
     }
 
     @Override
@@ -116,9 +140,8 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
         }
         boolean removed = skillMapper.deleteByIds(ids) > 0;
         if (removed) {
-            // 技能删除后安装绑定失去意义,级联解绑
-            installMapper.delete(new LambdaQueryWrapper<AgentSkillInstall>()
-                .in(AgentSkillInstall::getSkillId, ids));
+            // 技能删除后安装绑定失去意义,级联解绑(物理删除,避免残留占用 uk_skill_agent)
+            installMapper.physicalUnbindBySkillIds(ids);
         }
         return removed;
     }
@@ -139,32 +162,46 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
         if (existsCount > 0) {
             return true; // 幂等安装
         }
+        // 历史卸载若留下逻辑删除记录,仍占用 uk_skill_agent,直接插入会报 Duplicate entry
+        installMapper.physicalUnbind(skillId, agentId);
         AgentSkillInstall install = new AgentSkillInstall();
         install.setSkillId(skillId);
         install.setAgentId(agentId);
         install.setWorkspaceId(skill.getWorkspaceId());
+        // P1-B:安装即钉当前版本,后续技能内容变更不会自动影响该 Agent(需重新发布才跟随)
+        install.setPinnedVersion(skill.getVersion() == null ? 1 : skill.getVersion());
         return installMapper.insert(install) > 0;
     }
 
     @Override
     public Boolean uninstallFromAgent(Long skillId, Long agentId) {
-        return installMapper.delete(new LambdaQueryWrapper<AgentSkillInstall>()
-            .eq(AgentSkillInstall::getSkillId, skillId)
-            .eq(AgentSkillInstall::getAgentId, agentId)) > 0;
+        // 关联表语义:卸载即断关系,物理删除
+        return installMapper.physicalUnbind(skillId, agentId) > 0;
     }
 
     @Override
     public List<AgentSkill> listInstalledByAgent(Long agentId) {
-        List<Long> skillIds = installMapper.selectList(new LambdaQueryWrapper<AgentSkillInstall>()
-                .select(AgentSkillInstall::getSkillId)
-                .eq(AgentSkillInstall::getAgentId, agentId))
-            .stream().map(AgentSkillInstall::getSkillId).distinct().toList();
-        if (skillIds.isEmpty()) {
+        List<AgentSkillInstall> installs = installMapper.selectList(
+            new LambdaQueryWrapper<AgentSkillInstall>()
+                .select(AgentSkillInstall::getSkillId, AgentSkillInstall::getPinnedVersion)
+                .eq(AgentSkillInstall::getAgentId, agentId)
+                .orderByDesc(AgentSkillInstall::getId));
+        if (installs.isEmpty()) {
             return List.of();
         }
-        return skillMapper.selectList(new LambdaQueryWrapper<AgentSkill>()
-            .in(AgentSkill::getId, skillIds)
+        Map<Long, Integer> pins = new LinkedHashMap<>();
+        for (AgentSkillInstall install : installs) {
+            pins.putIfAbsent(install.getSkillId(), install.getPinnedVersion());
+        }
+        List<AgentSkill> skills = skillMapper.selectList(new LambdaQueryWrapper<AgentSkill>()
+            .in(AgentSkill::getId, pins.keySet())
             .eq(AgentSkill::getStatus, "0"));
+        List<AgentSkill> result = new ArrayList<>(skills.size());
+        for (AgentSkill skill : skills) {
+            // P1-B:按安装时钉住的版本返回内容,目录摘要与 load_skill 手册口径一致
+            result.add(skillVersionService.applyPinned(skill, pins.get(skill.getId())));
+        }
+        return result;
     }
 
     @Override
@@ -174,6 +211,97 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
             .filter(s -> s.getName().equals(name))
             .findFirst()
             .orElse(null);
+    }
+
+    @Override
+    public List<SkillInstallTargetVo> listInstallTargets(Long skillId) {
+        AgentSkill skill = skillMapper.selectById(skillId);
+        if (skill == null) {
+            throw new ServiceException("技能不存在");
+        }
+        resourceGuard.assertReadable(skill.getWorkspaceId());
+
+        Map<Long, LocalDateTime> installedAt = new HashMap<>();
+        for (AgentSkillInstall install : installMapper.selectList(
+            new LambdaQueryWrapper<AgentSkillInstall>()
+                .select(AgentSkillInstall::getAgentId, AgentSkillInstall::getCreateTime)
+                .eq(AgentSkillInstall::getSkillId, skillId))) {
+            installedAt.putIfAbsent(install.getAgentId(), install.getCreateTime());
+        }
+
+        LambdaQueryWrapper<AgentInfo> wrapper = new LambdaQueryWrapper<AgentInfo>()
+            .select(AgentInfo::getId, AgentInfo::getName, AgentInfo::getStatus, AgentInfo::getWorkspaceId)
+            .eq(AgentInfo::getStatus, "1")
+            .orderByDesc(AgentInfo::getId);
+        resourceGuard.applyVisible(wrapper, AgentInfo::getWorkspaceId);
+
+        List<SkillInstallTargetVo> rows = new ArrayList<>();
+        for (AgentInfo agent : agentMapper.selectList(wrapper)) {
+            SkillInstallTargetVo vo = new SkillInstallTargetVo();
+            vo.setAgentId(agent.getId());
+            vo.setAgentName(agent.getName());
+            vo.setAgentStatus(agent.getStatus());
+            vo.setWorkspaceId(agent.getWorkspaceId());
+            LocalDateTime at = installedAt.get(agent.getId());
+            vo.setInstalled(at != null);
+            vo.setInstallTime(toDate(at));
+            rows.add(vo);
+        }
+        return rows;
+    }
+
+    @Override
+    public List<AgentSkillBindVo> listInstalledSkills(Long agentId) {
+        List<AgentSkillInstall> installs = installMapper.selectList(
+            new LambdaQueryWrapper<AgentSkillInstall>()
+                .select(AgentSkillInstall::getSkillId, AgentSkillInstall::getCreateTime,
+                    AgentSkillInstall::getPinnedVersion)
+                .eq(AgentSkillInstall::getAgentId, agentId)
+                .orderByDesc(AgentSkillInstall::getId));
+        if (installs.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, AgentSkillInstall> bySkill = new LinkedHashMap<>();
+        for (AgentSkillInstall install : installs) {
+            bySkill.putIfAbsent(install.getSkillId(), install);
+        }
+        List<AgentSkill> skills = skillMapper.selectList(new LambdaQueryWrapper<AgentSkill>()
+            .select(AgentSkill::getId, AgentSkill::getName, AgentSkill::getDescription,
+                AgentSkill::getVersion, AgentSkill::getStatus, AgentSkill::getWorkspaceId)
+            .in(AgentSkill::getId, bySkill.keySet()));
+        Map<Long, AgentSkill> byId = new HashMap<>();
+        for (AgentSkill skill : skills) {
+            byId.put(skill.getId(), skill);
+        }
+        List<AgentSkillBindVo> rows = new ArrayList<>();
+        for (Map.Entry<Long, AgentSkillInstall> entry : bySkill.entrySet()) {
+            Long sid = entry.getKey();
+            AgentSkillInstall install = entry.getValue();
+            AgentSkill skill = byId.get(sid);
+            if (skill == null) {
+                // 技能已被删除,绑定成为孤儿:不在列表展示,交由技能管理的级联解绑清理
+                log.warn("[Skill] 应用 {} 存在孤儿技能绑定 skillId={}", agentId, sid);
+                continue;
+            }
+            Integer pinned = install.getPinnedVersion();
+            AgentSkillBindVo vo = new AgentSkillBindVo();
+            vo.setSkillId(sid);
+            vo.setName(skill.getName());
+            vo.setDescription(StringUtils.defaultString(skill.getDescription()));
+            // 显示实际生效版本(被钉住时即钉住的版本),便于看出技能是否已升级但未重新发布
+            vo.setVersion(pinned != null ? pinned : (skill.getVersion() == null ? 1 : skill.getVersion()));
+            vo.setPinnedVersion(pinned);
+            // 运维需要看到停用技能并手动卸载,因此这里不按状态过滤
+            vo.setStatus(skill.getStatus());
+            vo.setWorkspaceId(skill.getWorkspaceId());
+            vo.setInstallTime(toDate(install.getCreateTime()));
+            rows.add(vo);
+        }
+        return rows;
+    }
+
+    private static Date toDate(LocalDateTime at) {
+        return at == null ? null : Date.from(at.atZone(ZoneId.systemDefault()).toInstant());
     }
 
     /** 名称唯一性:同空间(含平台共享 NULL)内查重 */

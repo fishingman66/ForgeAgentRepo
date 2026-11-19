@@ -1,0 +1,261 @@
+# ForgeAgent 一键部署
+# 用法: cp .env.example .env && docker compose up -d
+name: forge-agent
+
+services:
+  mysql:
+    image: mysql:9.7.4
+    container_name: forge-mysql
+    restart: unless-stopped
+    # 资源上限:防止单服务失控拖垮宿主机(Milvus+JVM 同机部署,总量须留宿主机余量)
+    mem_limit: 1g
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: forge-vue
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --lower_case_table_names=1
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动自动执行:01-schema.sql(全量表结构) 02-seed.sql(框架种子)
+      #   03-demo.sql(演示账号/空间,可删除) 04-seed-agent.sql(业务种子:供应商/工具/意图/敏感词/质检/渠道/IVR/路由)
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [forge]
+
+  redis:
+    image: redis:8.8.1
+    container_name: forge-redis
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [forge]
+
+  # Milvus 3.0 standalone：etcd(元数据) + MinIO(对象存储 / Woodpecker WAL) + standalone。
+  # 3.0 起不再支持 COMMON_STORAGETYPE=local，必须配对象存储；与 milvus-sdk-java 3.0.x 同代。
+  milvus-volume-init:
+    image: milvusdb/milvus:v3.0.6
+    container_name: forge-milvus-volume-init
+    user: "0:0"
+    network_mode: none
+    read_only: true
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        uid="$$(id -u milvus)"
+        gid="$$(id -g milvus)"
+        marker="/var/lib/milvus/.milvus-volume-owner-$${uid}-$${gid}"
+        if [ ! -e "$${marker}" ]; then
+          chown -R "$${uid}:$${gid}" /var/lib/milvus
+          touch "$${marker}"
+          chown "$${uid}:$${gid}" "$${marker}"
+        fi
+    volumes:
+      - milvus-data:/var/lib/milvus
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: forge-milvus-etcd
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd-data:/etcd
+    command: etcd -advertise-client-urls http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks: [forge]
+
+  minio:
+    image: milvusdb/minio:RELEASE.2024-12-18T13-15-44Z
+    container_name: forge-milvus-minio
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    volumes:
+      - minio-data:/minio_data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks: [forge]
+
+  milvus:
+    image: milvusdb/milvus:v3.0.6
+    container_name: forge-milvus
+    restart: unless-stopped
+    # 3.0 standalone + MinIO 同机部署；超限被 OOM kill 时按 restart 策略自愈
+    mem_limit: 4g
+    cpus: "2.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_REGION: us-east-1
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvus-data:/var/lib/milvus
+    # 不向宿主机映射 19530：backend 走 forge 内网 milvus:19530，也避免与本机 milvus-lite 抢端口
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 10
+    depends_on:
+      milvus-volume-init:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks: [forge]
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: ../deploy/docker/backend/Dockerfile
+    image: forge-agent-backend:latest
+    container_name: forge-backend
+    restart: unless-stopped
+    # 与 JAVA_OPTS 默认 -Xmx1g 匹配:堆 1g + 元空间/直接内存/线程栈余量
+    mem_limit: 2g
+    cpus: "2.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    environment:
+      TZ: Asia/Shanghai
+      JAVA_OPTS: ${JAVA_OPTS:--Xms512m -Xmx1g -XX:+UseZGC}
+      # Spring Boot 宽松绑定覆盖 prod 配置中的连接信息
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_URL: jdbc:mysql://mysql:3306/forge-vue?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8&autoReconnect=true&rewriteBatchedStatements=true&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_USERNAME: root
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      RAG_KNOWLEDGE_MILVUS_HOST: milvus
+      RAG_KNOWLEDGE_MILVUS_PORT: "19530"
+      RAG_KNOWLEDGE_FILE_DIR: /app/data/knowledge
+      # 演示模式: true 时开启写保护(仅放行登录/对话等白名单), 日常部署保持 false
+      AGENT_DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      # 体检 R5:监控端点 Basic 凭据(SPRING_* 环境变量经宽松绑定覆盖 application.yml,
+      # healthcheck 与应用读同一组变量,改 .env 不会出现探针 401);上线前务必覆盖
+      SPRING_BOOT_ADMIN_CLIENT_USERNAME: ${MONITOR_USERNAME:-forge}
+      SPRING_BOOT_ADMIN_CLIENT_PASSWORD: ${MONITOR_PASSWORD:-123456}
+    volumes:
+      - backend-data:/app/data
+      - backend-logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    # 体检 R5:探 /actuator/health(含 DB/Redis/diskSpace indicators),MySQL/Redis 宕机时
+    # 容器转为 unhealthy 而非假 healthy;凭据走环境变量,与 README「上线前必改清单」一致
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u \"$$SPRING_BOOT_ADMIN_CLIENT_USERNAME:$$SPRING_BOOT_ADMIN_CLIENT_PASSWORD\" http://127.0.0.1:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+    networks: [forge]
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deploy/docker/frontend/Dockerfile
+      additional_contexts:
+        deploy: ./frontend
+      args:
+        # 演示环境构建为 true 时登录页展示「演示账号一键登录」
+        VITE_APP_DEMO_LOGIN: ${DEMO_ENABLED:-false}
+    image: forge-agent-frontend:latest
+    container_name: forge-frontend
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [forge]
+
+volumes:
+  mysql-data:
+  redis-data:
+  etcd-data:
+  minio-data:
+  milvus-data:
+  backend-data:
+  backend-logs:
+
+networks:
+  forge:
+    driver: bridge

@@ -2,7 +2,9 @@ package com.forgeagent.agent.service;
 
 import com.forgeagent.agent.domain.AgentSkill;
 import com.forgeagent.agent.domain.bo.AgentSkillBo;
+import com.forgeagent.agent.domain.vo.AgentSkillBindVo;
 import com.forgeagent.agent.domain.vo.AgentSkillVo;
+import com.forgeagent.agent.domain.vo.SkillInstallTargetVo;
 import com.forgeagent.common.core.domain.PageResult;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
 
@@ -44,4 +46,10 @@ public interface IAgentSkillService {
 
     /** 按名称取技能(load_skill 工具按需加载用,仅限已安装且正常状态) */
     AgentSkill getInstalledByName(Long agentId, String name);
+
+    /** 技能视角:全部已发布应用 + 本技能的安装态(管理页安装/卸载用) */
+    List<SkillInstallTargetVo> listInstallTargets(Long skillId);
+
+    /** 应用视角:某 Agent 已装技能(含已停用,便于运营卸载) */
+    List<AgentSkillBindVo> listInstalledSkills(Long agentId);
 }

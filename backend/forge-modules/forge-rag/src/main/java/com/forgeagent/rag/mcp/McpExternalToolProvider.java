@@ -24,6 +24,14 @@ public interface McpExternalToolProvider {
     Set<String> supportedTools();
 
     /**
+     * 本 Provider 属于哪个授权域(与 {@link McpCaller#scopes()} 对应),
+     * 端点据此裁 tools/list 与 tools/call。默认「skill」。
+     */
+    default String scope() {
+        return McpCaller.SCOPE_SKILL;
+    }
+
+    /**
      * tools/list 定义:返回本 Provider 全部工具的定义(name/description/inputSchema)
      *
      * @param om 共享 ObjectMapper(rag 端点持有,fasterxml 版本与本模块一致)
@@ -33,8 +41,10 @@ public interface McpExternalToolProvider {
     /**
      * tools/call 执行:返回 {rows:[...]} 形态的结果(与内置工具同构)
      *
+     * @param caller 调用方身份,实现方**必须**用它裁剪可见范围(工作空间/授权域)
      * @throws IllegalArgumentException 业务校验类错误(消息可安全透出给客户端)
      */
-    com.fasterxml.jackson.databind.node.ObjectNode invoke(ObjectMapper om, String toolName, JsonNode args)
+    com.fasterxml.jackson.databind.node.ObjectNode invoke(ObjectMapper om, String toolName, JsonNode args,
+                                                          McpCaller caller)
         throws IllegalArgumentException;
 }

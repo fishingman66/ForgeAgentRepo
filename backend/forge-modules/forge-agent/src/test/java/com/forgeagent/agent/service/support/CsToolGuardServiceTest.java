@@ -9,9 +9,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
+import io.agentscope.core.message.ToolResultState;
 import org.mockito.quality.Strictness;
 import org.springframework.jdbc.core.JdbcTemplate;
 import reactor.core.publisher.Mono;
@@ -110,7 +112,7 @@ class CsToolGuardServiceTest {
         assertTrue(CsToolGuardService.CsToolGuard.extractSummary(block).contains("身份核验"));
         verify(delegate, never()).callAsync(any());
         // 拦截也要留痕(GUARD_DENY):INSERT 有 6 个占位参数
-        verify(jdbc).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any());
+        verify(jdbc).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -122,7 +124,7 @@ class CsToolGuardServiceTest {
         ToolResultBlock block = guarded.callAsync(param).block();
 
         assertEquals("退款已受理", CsToolGuardService.CsToolGuard.extractSummary(block));
-        verify(jdbc, never()).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any());
+        verify(jdbc, never()).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -138,7 +140,7 @@ class CsToolGuardServiceTest {
         // 幂等占位 + 收尾 + 审计
         verify(jdbc).update(contains("INSERT INTO agent_cs_action_log"), any(), any(), any(), any(), any(), any(), any());
         verify(jdbc).update(contains("UPDATE agent_cs_action_log SET status=?"), anyString(), any(), any());
-        verify(jdbc).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any());
+        verify(jdbc).update(contains("agent_cs_audit_log"), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -192,5 +194,85 @@ class CsToolGuardServiceTest {
 
         assertEquals("退款已受理", CsToolGuardService.CsToolGuard.extractSummary(guarded.callAsync(param).block()));
         verify(delegate).callAsync(any());
+    }
+
+
+    /** 捕获审计 INSERT 的参数数组(detail 在索引 4,result_code 索引 6,duration_ms 索引 7)。 */
+    @SuppressWarnings("unchecked")
+    private Object[] capturedAuditArgs() {
+        ArgumentCaptor<Object[]> captor = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc, org.mockito.Mockito.atLeastOnce()).update(
+            org.mockito.ArgumentMatchers.contains("INSERT INTO agent_cs_audit_log"), captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void readErrorStateIsAuditedWithResultCodeAndDuration() {
+        stubDelegateResult();
+        lenient().when(delegate.callAsync(any())).thenReturn(Mono.just(
+            ToolResultBlock.builder().id("t1").name("refund_order")
+                .output(io.agentscope.core.message.TextBlock.builder().text("失败").build())
+                .state(ToolResultState.ERROR).build()));
+        AgentTool guarded = service.decorator(ctx(true), Map.of("refund_order", def("READ", null, null)))
+            .apply(delegate);
+
+        guarded.callAsync(param).block();
+
+        Object[] args = capturedAuditArgs();
+        assertTrue(String.valueOf(args[4]).contains("result=ERROR"), "READ 失败必须审计结果码");
+        assertTrue(String.valueOf(args[4]).contains("ms="), "detail 必须带耗时");
+        assertEquals("ERROR", args[6], "结构化列 result_code 必须落库");
+        assertTrue(args[7] instanceof Integer, "结构化列 duration_ms 必须落库");
+    }
+
+    @Test
+    void readSuccessStateIsStillNotAudited() {
+        stubDelegateResult();
+        lenient().when(delegate.callAsync(any())).thenReturn(Mono.just(
+            ToolResultBlock.builder().id("t2").name("refund_order")
+                .output(io.agentscope.core.message.TextBlock.builder().text("成功").build())
+                .state(ToolResultState.SUCCESS).build()));
+        AgentTool guarded = service.decorator(ctx(true), Map.of("refund_order", def("READ", null, null)))
+            .apply(delegate);
+
+        guarded.callAsync(param).block();
+
+        verify(jdbc, never()).update(org.mockito.ArgumentMatchers.contains("INSERT INTO agent_cs_audit_log"),
+            any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void writeSuccessAuditCarriesStateAndDuration() {
+        stubDelegateResult();
+        lenient().when(jdbc.queryForObject(anyString(), any(Class.class), any(Object[].class))).thenReturn(7L);
+        lenient().when(delegate.callAsync(any())).thenReturn(Mono.just(
+            ToolResultBlock.builder().id("t3").name("refund_order")
+                .output(io.agentscope.core.message.TextBlock.builder().text("受理").build())
+                .state(ToolResultState.SUCCESS).build()));
+        AgentTool guarded = service.decorator(ctx(true), Map.of("refund_order", def("WRITE", null, null)))
+            .apply(delegate);
+
+        guarded.callAsync(param).block();
+
+        Object[] args = capturedAuditArgs();
+        assertTrue(String.valueOf(args[4]).contains("result=SUCCESS"));
+        assertTrue(String.valueOf(args[4]).contains("ms="));
+        assertEquals("SUCCESS", args[6]);
+        assertTrue(args[7] instanceof Integer);
+    }
+
+    @Test
+    void readExceptionIsAuditedAndConvertedToErrorBlock() {
+        stubDelegateResult();
+        lenient().when(delegate.callAsync(any())).thenReturn(Mono.error(new IllegalStateException("boom")));
+        AgentTool guarded = service.decorator(ctx(true), Map.of("refund_order", def("READ", null, null)))
+            .apply(delegate);
+
+        ToolResultBlock block = guarded.callAsync(param).block();
+
+        assertTrue(CsToolGuardService.CsToolGuard.extractSummary(block).contains("执行失败"));
+        Object[] args = capturedAuditArgs();
+        assertEquals("ERROR", args[6]);
+        assertTrue(String.valueOf(args[4]).contains("boom"), "异常消息进 extra,便于排障");
     }
 }

@@ -19,7 +19,7 @@ public class KnowledgeProperties {
      *
      * <p>mysql 模式把向量存进 {@code agent_kb_chunk.embedding} 并在应用层算余弦,
      * 目的是「不装 Milvus 也能跑通 RAG 全链路」;超过一万分块会明显变慢,不适合生产。
-     * 切换 vector-store 后需执行 backend/sql/manual_vector_backend_resync.sql 回填存量分块。</p>
+     * 切换 vector-store 后需手工回填存量分块(vector_backend 字段与向量库需一致)。</p>
      */
     private String vectorStore = "milvus";
 
@@ -231,7 +231,11 @@ public class KnowledgeProperties {
     private Integer syncPendingTimeoutMinutes = 5;
 
     /**
-     * MCP 检索端点访问令牌(非空时 MCP 调用须带 X-MCP-Token 请求头;空=不校验,仅建议内网使用)
+     * 兜底访问令牌。
+     *
+     * <p>鉴权优先走 agent_mcp_client(令牌 -> 工作空间 + 授权域),由
+     * {@code McpClientAuthenticator} SPI 提供;只有客户端表未命中时,才回落到本令牌
+     * (平台全量只读)。两者都为空则不校验,仅建议内网使用。</p>
      */
     private String mcpToken = "";
 

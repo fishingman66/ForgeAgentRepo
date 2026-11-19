@@ -57,6 +57,8 @@ public class CsTicketService {
     /** C2:结案写满意度邀请、坐席回复触发质检。 */
     private final CsatService csatService;
     private final CsQualityService qualityService;
+    /** D2:结案后按比例采样进评测集 */
+    private final CsEvalFeedbackService evalFeedbackService;
     /** P0:转人工建单后发布事件,异步生成交接摘要。 */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
@@ -235,6 +237,10 @@ public class CsTicketService {
                 conversationMapper.updateById(conv);
                 // C2:邀请记录与 cs_csat_invite 事件由 CsatService 统一收口
                 csatService.invite(conv.getId(), conv.getWorkspaceId(), conv.getChannelCode());
+                // D2:坐席人工结案才采样,SYSTEM(SLA 自动确认)不算人工处理结果
+                if (!"SYSTEM".equalsIgnoreCase(actorType)) {
+                    evalFeedbackService.sampleFromConversation(conv, ticket);
+                }
             }
         }
         transport.push(CsEventEnvelope.of(CsEventEnvelope.TICKET_EVENT,

@@ -11,6 +11,8 @@ import com.forgeagent.rag.domain.AgentKnowledge;
 import com.forgeagent.rag.domain.bo.KnowledgeSearchBo;
 import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import com.forgeagent.rag.mapper.AgentKnowledgeMapper;
+import com.forgeagent.rag.mcp.McpCaller;
+import com.forgeagent.rag.mcp.McpClientAuthenticator;
 import com.forgeagent.rag.service.IAgentKnowledgeService;
 import com.forgeagent.common.core.utils.StringUtils;
 import org.springframework.http.HttpStatus;
@@ -76,6 +78,10 @@ public class KnowledgeMcpEndpoint {
     private final IAgentKnowledgeService knowledgeService;
     /** 08方案 / A5:外部工具 Provider(其他域经 SPI 注入,如技能 skill_list/skill_get) */
     private final java.util.List<com.forgeagent.rag.mcp.McpExternalToolProvider> externalToolProviders;
+    /** 08方案 / A5 增强:令牌 -> 调用方身份(agent 侧实现;无实现时回落单 token) */
+    private final java.util.List<McpClientAuthenticator> clientAuthenticators;
+    /** 分块浏览需要按 documentId 反查所属知识库,才能判定调用方可见性 */
+    private final com.forgeagent.rag.mapper.AgentKnowledgeDocumentMapper documentMapper;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -98,7 +104,8 @@ public class KnowledgeMcpEndpoint {
         if (!Boolean.TRUE.equals(properties.getMcpEnabled())) {
             return notFound();
         }
-        if (!tokenOk(token)) {
+        McpCaller caller = authenticate(token);
+        if (caller == null) {
             return jsonResponse(HttpStatus.UNAUTHORIZED, error(null, -32001, "无效的 MCP 访问令牌"), null, null);
         }
         if (rawBody.length() > MAX_BODY_BYTES) {
@@ -122,7 +129,7 @@ public class KnowledgeMcpEndpoint {
                     sawNotification = true;
                     continue;
                 }
-                ResponseEntity<String> one = handleSingle(item, sessionId);
+                ResponseEntity<String> one = handleSingle(item, sessionId, caller);
                 if (one.getBody() != null && StringUtils.isNotBlank(one.getBody())) {
                     responses.add(one.getBody());
                 }
@@ -138,7 +145,7 @@ public class KnowledgeMcpEndpoint {
             || body.path("method").asText("").startsWith("notifications/")) {
             return ResponseEntity.accepted().build();
         }
-        return handleSingle(body, sessionId);
+        return handleSingle(body, sessionId, caller);
     }
 
     @GetMapping
@@ -164,7 +171,7 @@ public class KnowledgeMcpEndpoint {
 
     // ==================== 单请求处理 ====================
 
-    private ResponseEntity<String> handleSingle(JsonNode body, String sessionIdHeader) {
+    private ResponseEntity<String> handleSingle(JsonNode body, String sessionIdHeader, McpCaller caller) {
         String method = body.path("method").asText("");
         boolean isNotification = body.path("id").isMissingNode() || body.path("id").isNull();
         JsonNode id = isNotification ? null : body.path("id").deepCopy();
@@ -192,8 +199,8 @@ public class KnowledgeMcpEndpoint {
             case "initialize" -> resp = handleInitialize(id, body);
             case "ping" -> resp = okResponse(id, objectMapper.createObjectNode(), sessionIdHeader);
             case "tools/list" -> resp = okResponse(id,
-                objectMapper.createObjectNode().set("tools", toolDefs()), sessionIdHeader);
-            case "tools/call" -> resp = handleToolCall(id, body, sessionIdHeader);
+                objectMapper.createObjectNode().set("tools", toolDefs(caller)), sessionIdHeader);
+            case "tools/call" -> resp = handleToolCall(id, body, sessionIdHeader, caller);
             default -> resp = jsonResponse(HttpStatus.OK, error(id, -32601, "未知方法:" + method),
                 sessionIdHeader, null);
         }
@@ -239,7 +246,8 @@ public class KnowledgeMcpEndpoint {
             .body(toJson(resp));
     }
 
-    private ResponseEntity<String> handleToolCall(JsonNode id, JsonNode body, String sessionIdHeader) {
+    private ResponseEntity<String> handleToolCall(JsonNode id, JsonNode body, String sessionIdHeader,
+                                                  McpCaller caller) {
         String toolName = body.path("params").path("name").asText("");
         JsonNode args = body.path("params").path("arguments");
         McpSession session = StringUtils.isBlank(sessionIdHeader) ? null : sessions.get(sessionIdHeader);
@@ -248,10 +256,13 @@ public class KnowledgeMcpEndpoint {
         ObjectNode toolResult;
         try {
             toolResult = switch (toolName) {
-                case "knowledge_search" -> knowledgeSearchTool(args);
-                case "knowledge_list" -> knowledgeListTool();
-                case "knowledge_chunks" -> knowledgeChunksTool(args);
-                default -> externalToolCall(toolName, args);
+                case "knowledge_search" -> requireScope(caller, McpCaller.SCOPE_KNOWLEDGE,
+                    () -> knowledgeSearchTool(args, caller));
+                case "knowledge_list" -> requireScope(caller, McpCaller.SCOPE_KNOWLEDGE,
+                    () -> knowledgeListTool(caller));
+                case "knowledge_chunks" -> requireScope(caller, McpCaller.SCOPE_KNOWLEDGE,
+                    () -> knowledgeChunksTool(args, caller));
+                default -> externalToolCall(toolName, args, caller);
             };
         } catch (IllegalArgumentException e) {
             // 业务校验类错误(参数缺失/知识库不存在等),消息可安全透出
@@ -305,7 +316,7 @@ public class KnowledgeMcpEndpoint {
     /**
      * 工具定义:knowledge_search + knowledge_list
      */
-    private ArrayNode toolDefs() {
+    private ArrayNode toolDefs(McpCaller caller) {
         ObjectNode props = objectMapper.createObjectNode();
         props.putObject("query").put("type", "string")
             .put("description", "检索问题,尽量具体");
@@ -350,11 +361,17 @@ public class KnowledgeMcpEndpoint {
         chunkSchema.putArray("required").add("documentId");
 
         ArrayNode tools = objectMapper.createArrayNode();
-        tools.add(tool);
-        tools.add(listTool);
-        tools.add(chunkTool);
+        // 按授权域裁剪:客户端只看到自己有权的工具,减少误调与信息暴露
+        if (caller.allows(McpCaller.SCOPE_KNOWLEDGE)) {
+            tools.add(tool);
+            tools.add(listTool);
+            tools.add(chunkTool);
+        }
         // 08方案 / A5:外部域工具(SPI 注入,定义缺失或异常的 Provider 跳过不阻断)
         for (com.forgeagent.rag.mcp.McpExternalToolProvider provider : externalToolProviders) {
+            if (!caller.allows(provider.scope())) {
+                continue;
+            }
             try {
                 for (JsonNode def : provider.definitions(objectMapper)) {
                     tools.add((com.fasterxml.jackson.databind.node.ObjectNode) def);
@@ -365,6 +382,51 @@ public class KnowledgeMcpEndpoint {
             }
         }
         return tools;
+    }
+
+    /**
+     * 令牌解析:先问客户端注册表(SPI),全部返回 empty 时回落单 token 平台全量只读。
+     *
+     * <p>回落分支保证既有部署零行为变更:没配 agent_mcp_client 也没启用 SPI 时,
+     * 继续用 rag.knowledge.mcp-token。</p>
+     */
+    private McpCaller authenticate(String token) {
+        for (McpClientAuthenticator authenticator : clientAuthenticators) {
+            java.util.Optional<McpCaller> caller = authenticator.authenticate(token);
+            if (caller.isPresent()) {
+                return caller.get();
+            }
+            if (authenticator.managed(token)) {
+                // 归它管但没通过(停用/过期/轮转):必须拒绝,不能回落成「不校验」
+                return null;
+            }
+        }
+        return tokenOk(token) ? McpCaller.platformWide("legacy-token") : null;
+    }
+
+    /** 授权域闸门:未授权直接按参数错误返回,不透出工具是否存在 */
+    private ObjectNode requireScope(McpCaller caller, String scope,
+                                    java.util.function.Supplier<ObjectNode> action) {
+        if (!caller.allows(scope)) {
+            throw new IllegalArgumentException("当前客户端未授权 " + scope + " 域");
+        }
+        return action.get();
+    }
+
+    /**
+     * 分块浏览的越权闸门:documentId 是外部可猜的自增 ID,必须反查到所属知识库
+     * 再判工作空间可见性,否则等于绕过 knowledge_search 直接读原文。
+     */
+    private void requireDocumentReadable(long documentId, McpCaller caller) {
+        com.forgeagent.rag.domain.AgentKnowledgeDocument doc = documentMapper.selectById(documentId);
+        if (doc == null) {
+            throw new IllegalArgumentException("文档不存在");
+        }
+        AgentKnowledge kb = knowledgeMapper.selectById(doc.getKnowledgeId());
+        if (kb == null || !caller.canReadWorkspace(kb.getWorkspaceId())) {
+            // 与「不存在」同口径,避免泄露文档是否存在
+            throw new IllegalArgumentException("文档不存在");
+        }
     }
 
     /**
@@ -382,7 +444,7 @@ public class KnowledgeMcpEndpoint {
             expected.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8));
     }
 
-    private ObjectNode knowledgeSearchTool(JsonNode args) {
+    private ObjectNode knowledgeSearchTool(JsonNode args, McpCaller caller) {
         String query = args.path("query").asText("");
         if (StringUtils.isBlank(query)) {
             throw new IllegalArgumentException("query 不能为空");
@@ -407,7 +469,8 @@ public class KnowledgeMcpEndpoint {
         List<AgentKnowledge> targets = new ArrayList<>();
         if (hasKb) {
             AgentKnowledge kb = knowledgeMapper.selectById(args.get("knowledgeId").asLong());
-            if (kb == null || !"0".equals(kb.getStatus())) {
+            // 显式指定也必须过可见性,否则持有任意 token 就能读别家空间的知识库
+            if (kb == null || !"0".equals(kb.getStatus()) || !caller.canReadWorkspace(kb.getWorkspaceId())) {
                 throw new IllegalArgumentException("知识库不存在或已停用");
             }
             targets.add(kb);
@@ -415,7 +478,10 @@ public class KnowledgeMcpEndpoint {
             targets = knowledgeMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentKnowledge>()
                     .eq(AgentKnowledge::getStatus, "0")
-                    .eq(AgentKnowledge::getKbScope, "normal"));
+                    .eq(AgentKnowledge::getKbScope, "normal")
+                    .and(caller.workspaceId() != null, w -> w
+                        .isNull(AgentKnowledge::getWorkspaceId)
+                        .or().eq(AgentKnowledge::getWorkspaceId, caller.workspaceId())));
         }
 
         ObjectNode result = objectMapper.createObjectNode();
@@ -460,13 +526,16 @@ public class KnowledgeMcpEndpoint {
         return result;
     }
 
-    private ObjectNode knowledgeListTool() {
+    private ObjectNode knowledgeListTool(McpCaller caller) {
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode rows = result.putArray("rows");
         List<AgentKnowledge> kbs = knowledgeMapper.selectList(
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentKnowledge>()
                 .eq(AgentKnowledge::getStatus, "0")
-                .eq(AgentKnowledge::getKbScope, "normal"));
+                .eq(AgentKnowledge::getKbScope, "normal")
+                .and(caller.workspaceId() != null, w -> w
+                    .isNull(AgentKnowledge::getWorkspaceId)
+                    .or().eq(AgentKnowledge::getWorkspaceId, caller.workspaceId())));
         for (AgentKnowledge kb : kbs) {
             ObjectNode row = rows.addObject();
             row.put("knowledgeId", String.valueOf(kb.getId()));
@@ -481,11 +550,12 @@ public class KnowledgeMcpEndpoint {
     /**
      * R5-6 分块浏览:按文档分页列出分块(只读,带页码与序号)
      */
-    private ObjectNode knowledgeChunksTool(JsonNode args) {
+    private ObjectNode knowledgeChunksTool(JsonNode args, McpCaller caller) {
         if (!args.hasNonNull("documentId")) {
             throw new IllegalArgumentException("documentId 不能为空");
         }
         long documentId = args.get("documentId").asLong();
+        requireDocumentReadable(documentId, caller);
         int pageNum = Math.max(args.path("pageNum").asInt(1), 1);
         int pageSize = Math.min(Math.max(args.path("pageSize").asInt(20), 1), 50);
         var page = chunkMapper.selectPage(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(
@@ -517,10 +587,13 @@ public class KnowledgeMcpEndpoint {
     /**
      * 08方案 / A5:外部工具路由(SPI);无 Provider 支持时保持原「未知工具」语义
      */
-    private ObjectNode externalToolCall(String toolName, JsonNode args) {
+    private ObjectNode externalToolCall(String toolName, JsonNode args, McpCaller caller) {
         for (com.forgeagent.rag.mcp.McpExternalToolProvider provider : externalToolProviders) {
             if (provider.supportedTools().contains(toolName)) {
-                return provider.invoke(objectMapper, toolName, args);
+                if (!caller.allows(provider.scope())) {
+                    throw new IllegalArgumentException("当前客户端未授权 " + provider.scope() + " 域");
+                }
+                return provider.invoke(objectMapper, toolName, args, caller);
             }
         }
         return toolError("未知工具:" + toolName);

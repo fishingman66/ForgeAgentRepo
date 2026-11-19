@@ -111,6 +111,14 @@ public class CsModuleProperties {
     private String costCurrency = "CNY";
 
     /**
+     * D2:坐席人工结案后的评测采样比例(0=关闭,1=全量)。
+     *
+     * <p>只对「非 SYSTEM 触发、访客 ≥2 轮、无 badcase 记录」的会话生效;
+     * 采样出的用例进评测集时是待确认态,运营确认后才参与评测运行。</p>
+     */
+    private Double evalSampleRate = 0.1;
+
+    /**
      * 多 Agent 意图路由开关(P3):开启后新会话按首条消息意图选择专家 Agent。
      *
      * <p>只在会话首条消息生效——客服会话与 agent_session 一对一绑定，

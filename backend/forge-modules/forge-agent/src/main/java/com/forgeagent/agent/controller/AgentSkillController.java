@@ -4,7 +4,9 @@ import cn.dev33.satoken.annotation.SaCheckPermission;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import com.forgeagent.agent.domain.bo.AgentSkillBo;
+import com.forgeagent.agent.domain.vo.AgentSkillBindVo;
 import com.forgeagent.agent.domain.vo.AgentSkillVo;
+import com.forgeagent.agent.domain.vo.SkillInstallTargetVo;
 import com.forgeagent.agent.service.IAgentSkillService;
 import com.forgeagent.common.core.domain.PageResult;
 import com.forgeagent.common.core.domain.R;
@@ -113,5 +115,25 @@ public class AgentSkillController extends BaseController {
     public R<Void> uninstall(@NotNull(message = "技能ID不能为空") @PathVariable Long skillId,
                              @NotNull(message = "AgentID不能为空") @PathVariable Long agentId) {
         return toAjax(skillService.uninstallFromAgent(skillId, agentId));
+    }
+
+    /**
+     * 技能视角的安装目标清单(全部已发布应用 + 安装态),供管理页安装/卸载
+     */
+    @SaCheckPermission("agent:skill:install")
+    @GetMapping("/{skillId}/install-targets")
+    public R<List<SkillInstallTargetVo>> installTargets(
+        @NotNull(message = "技能ID不能为空") @PathVariable Long skillId) {
+        return R.ok(skillService.listInstallTargets(skillId));
+    }
+
+    /**
+     * 应用视角的已装技能清单(含已停用),供 Agent 侧抽屉查看与卸载
+     */
+    @SaCheckPermission("agent:skill:list")
+    @GetMapping("/installed/{agentId}")
+    public R<List<AgentSkillBindVo>> installedByAgent(
+        @NotNull(message = "AgentID不能为空") @PathVariable Long agentId) {
+        return R.ok(skillService.listInstalledSkills(agentId));
     }
 }

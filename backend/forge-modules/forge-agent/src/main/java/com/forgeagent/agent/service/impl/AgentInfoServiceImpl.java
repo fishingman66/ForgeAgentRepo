@@ -220,6 +220,8 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
         AgentInfo update = new AgentInfo();
         update.setId(agentId);
         versionService.applySnapshot(update, snapshot);
+        // P1-B:技能绑定按快照覆盖式恢复(含 pin 回旧版本),否则回滚只回一半
+        versionService.restoreSkillBinding(agentId, snapshot);
         if (update.getName() != null && !update.getName().equals(exists.getName())) {
             checkNameUnique(exists.getWorkspaceId(), update.getName(), agentId);
         }
@@ -227,10 +229,10 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
         update.setVersion(nextVersion);
         agentMapper.updateById(update);
         agentConfigCache.evictAgent(agentId);
-        // 回滚本身也留下一条不可变快照,历史链路不断
+        // 回滚本身也留下一条不可变快照,历史链路不断;此时不能再 pin 当前版本(会抵消刚恢复的旧 pin)
         AgentInfo rolled = agentMapper.selectById(agentId);
         rolled.setVersion(nextVersion);
-        versionService.createSnapshot(rolled, "回滚自 v" + versionNo, "rollback");
+        versionService.createSnapshot(rolled, "回滚自 v" + versionNo, "rollback", false);
         auditLogHelper.record(exists.getWorkspaceId(), "agent.rollback", "agent", String.valueOf(agentId),
             "回滚 Agent[" + exists.getName() + "] 到 v" + versionNo,
             java.util.Map.of("version", exists.getVersion() == null ? 0 : exists.getVersion()),

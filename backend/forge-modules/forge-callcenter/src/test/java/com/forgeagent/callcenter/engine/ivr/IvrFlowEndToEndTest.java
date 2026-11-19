@@ -116,7 +116,15 @@ class IvrFlowEndToEndTest {
         // 2) answer 收音注入终稿(1600 字节达脚本阈值)
         rig.stream().injectCallerAudio(new byte[1700]);
         // 3) intention → refund → agent 命中 FAQ 播报 → transfer
-        driver.join(3000);
+        // 固定 join 超时在全量跑时可能早于 driver 走到 agent 节点;这里分两步等:
+        // 先等播报(给出 tts 快照便于定位),再等线程终止。超时放宽到 20s——
+        // 该用例曾在整仓串跑时偶发超时,单独/分模块跑稳定 0.8s,属负载敏感的既有 flaky。
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(20))
+            .pollInterval(java.time.Duration.ofMillis(50))
+            .until(() -> rig.tts().synthesizedTexts().stream()
+                .anyMatch(t -> t.contains("七天无理由退货")));
+        org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(20))
+            .until(() -> driver.getState() == Thread.State.TERMINATED);
         if (driverError.get() != null) {
             throw new AssertionError("driver 线程异常", driverError.get());
         }

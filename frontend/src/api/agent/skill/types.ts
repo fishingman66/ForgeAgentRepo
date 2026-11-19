@@ -49,3 +49,26 @@ export interface SkillQuery extends PageQuery {
   keyword?: string;
   status?: string;
 }
+/** 技能安装目标(技能视角:全部已发布应用 + 安装态) */
+export interface SkillInstallTargetVO {
+  agentId: string;
+  agentName: string;
+  /** 1已发布 */
+  agentStatus: string;
+  /** 应用归属空间(NULL=平台共享) */
+  workspaceId?: number | string;
+  installed: boolean;
+  installTime?: string;
+}
+
+/** 应用已装技能(应用视角,含已停用,便于运营卸载) */
+export interface AgentSkillBindVO {
+  skillId: string;
+  name: string;
+  description?: string;
+  version?: number;
+  /** 0正常 1停用 */
+  status: string;
+  workspaceId?: number | string;
+  installTime?: string;
+}

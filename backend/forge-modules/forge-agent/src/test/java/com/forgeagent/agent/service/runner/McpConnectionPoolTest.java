@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -104,7 +105,8 @@ class McpConnectionPoolTest {
 
         assertNotNull(pool.acquire(fp), "首次 acquire 校验通过,应命中");
         assertNull(pool.acquire(fp), "校验失败必须驱逐并返回 null");
-        verify(dead, times(1)).close();
+        // close 在 subscribeOn 的线程池里执行,全量跑时负载高会晚于断言到达
+        verify(dead, timeout(2000).times(1)).close();
         assertNull(pool.acquire(fp), "驱逐后再次 acquire 返回 null");
     }
 }

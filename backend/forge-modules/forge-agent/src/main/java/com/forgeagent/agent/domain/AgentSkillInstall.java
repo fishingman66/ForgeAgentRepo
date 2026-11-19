@@ -44,6 +44,11 @@ public class AgentSkillInstall extends BaseEntity {
     private Long workspaceId;
 
     /**
+     * 钉住的技能版本(NULL=跟随最新)。发布时固定为当前版本,回滚时恢复快照里的值
+     */
+    private Integer pinnedVersion;
+
+    /**
      * 删除标志
      */
     @TableLogic

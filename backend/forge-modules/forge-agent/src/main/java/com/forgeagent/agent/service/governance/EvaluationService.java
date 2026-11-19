@@ -89,7 +89,8 @@ public class EvaluationService {
 
     public List<Map<String, Object>> listCases(Long datasetId) {
         return jdbc.queryForList("""
-                SELECT id,dataset_id,question,expected_keywords,reference_answer,expected_refusal,create_time
+                SELECT id,dataset_id,question,expected_keywords,reference_answer,expected_refusal,
+                       source,source_ref_id,review_status,create_time
                 FROM agent_eval_case WHERE dataset_id=? ORDER BY id
                 """, datasetId);
     }
@@ -126,23 +127,27 @@ public class EvaluationService {
 
     /** 同步执行一次评测(样本上限 50,避免长请求) */
     public Map<String, Object> run(Long datasetId, Long agentId, boolean judgeEnabled) {
+        // D2:待确认的回流样本(review_status='0')不参与评测,否则会稀释基线
         List<Map<String, Object>> cases = jdbc.queryForList("""
                 SELECT id,question,expected_keywords,reference_answer,expected_refusal FROM agent_eval_case
-                WHERE dataset_id=? ORDER BY id LIMIT ?
+                WHERE dataset_id=? AND (review_status IS NULL OR review_status='1')
+                ORDER BY id LIMIT ?
                 """, datasetId, MAX_CASES);
         if (cases.isEmpty()) {
-            throw new ServiceException("评测集没有可用样本");
+            throw new ServiceException("评测集没有已确认的可用样本");
         }
-        List<Long> workspace = jdbc.queryForList(
-            "SELECT workspace_id FROM agent_info WHERE id=?", Long.class, agentId);
-        Long workspaceId = workspace.isEmpty() ? null : workspace.getFirst();
+        List<Map<String, Object>> agentRows = jdbc.queryForList(
+            "SELECT workspace_id,config_hash FROM agent_info WHERE id=?", agentId);
+        Long workspaceId = agentRows.isEmpty() ? null : longOf(agentRows.getFirst().get("workspace_id"));
+        // 记录评测时刻的配置指纹,发布门禁据此判断「评测是否覆盖当前配置」
+        String configHash = agentRows.isEmpty() ? null : text(agentRows.getFirst().get("config_hash"));
         Long userId = currentUserId();
         jdbc.update("""
                 INSERT INTO agent_eval_run
-                  (dataset_id,agent_id,workspace_id,status,total_cases,judge_enabled,create_by,create_time)
-                VALUES (?,?,?,'running',?,?,?,NOW())
+                  (dataset_id,agent_id,workspace_id,status,total_cases,judge_enabled,config_hash,create_by,create_time)
+                VALUES (?,?,?,'running',?,?,?,?,NOW())
                 """, datasetId, agentId, workspaceId, cases.size(),
-            judgeEnabled ? "1" : "0", userId);
+            judgeEnabled ? "1" : "0", configHash, userId);
         Long runId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         List<Double> scores = new ArrayList<>();

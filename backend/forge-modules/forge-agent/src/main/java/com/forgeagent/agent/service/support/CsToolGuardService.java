@@ -34,8 +34,8 @@ import reactor.core.publisher.Mono;
  * <li>C3 幂等与额度:action_key 模板按入参展开,(conversation_id, action_key) 唯一占位,
  *     重复命中直接回放上次结果摘要;daily_limit 走 Redis 原子计数日窗口,超限拦截。
  *     Redis 不可用降级放行(与渠道限流同口径,不阻断主链路)。</li>
- * <li>C5 调用审计:WRITE/HIGH_RISK 全量留痕 + 失败的 READ 留痕(防日志量失控),
- *     参数过 {@link CsPiiMasker} 脱敏。</li>
+ * <li>C5 调用审计:WRITE/HIGH_RISK 全量留痕 + 失败的 READ 留痕(state 为 ERROR/DENIED/INTERRUPTED
+ *     或执行抛异常;防日志量失控),结果码与耗时进 detail 及结构化列,参数过 {@link CsPiiMasker} 脱敏。</li>
  * </ul>
  *
  * <p>写入的两张表(agent_cs_action_log / agent_cs_audit_log)为客服域所有,
@@ -114,7 +114,7 @@ public class CsToolGuardService {
 
             // C2:未配置身份绑定的渠道,写操作 fail-closed(归属校验下推业务系统,平台兜底线)
             if (write && !ctx.identityBindingEnabled()) {
-                audit("GUARD_DENY", risk, param, "identity_binding 未配置,写操作被拦截");
+                audit("GUARD_DENY", risk, param, "identity_binding 未配置,写操作被拦截", "DENIED", null);
                 return Mono.just(ToolResultBlock.error(
                     "该操作需要先完成访客身份核验，当前渠道未开启身份绑定，已转人工处理。"));
             }
@@ -128,20 +128,30 @@ public class CsToolGuardService {
 
             if (def.getDailyLimit() != null && def.getDailyLimit() > 0
                 && !withinDailyLimit(def.getName(), def.getDailyLimit())) {
-                audit("QUOTA_BLOCK", risk, param, "动作级日限次 " + def.getDailyLimit() + " 已用尽");
+                audit("QUOTA_BLOCK", risk, param, "动作级日限次 " + def.getDailyLimit() + " 已用尽", "QUOTA_BLOCKED", null);
                 markLog(logId, "BLOCKED", "日限次已用尽");
                 return Mono.just(ToolResultBlock.error(
                     "该操作今日执行次数已达上限，已为你登记，请稍后再试或转人工处理。"));
             }
 
+            final long startMs = System.currentTimeMillis();
             return delegate.callAsync(param)
-                .doOnNext(block -> finish(logId, true, block))
-                .doOnError(e -> finish(logId, false, null))
-                .doFinally(signal -> {
-                    // C5:WRITE/HIGH_RISK 全量审计;READ 只在异常时留痕(防日志量失控)
-                    if (write) {
-                        audit("TOOL_CALL", risk, param, null);
+                .doOnNext(block -> {
+                    String state = block.getState() == null ? "UNKNOWN" : block.getState().name();
+                    boolean failed = "ERROR".equals(state) || "DENIED".equals(state)
+                        || "INTERRUPTED".equals(state);
+                    // 非失败一律完成动作日志(内核默认 RUNNING 亦按成功处理,与既有 finish 口径一致)
+                    finish(logId, !failed, block);
+                    // C5:WRITE/HIGH_RISK 全量留痕;READ 只在失败态留痕(防日志量失控)
+                    if (write || failed) {
+                        audit("TOOL_CALL", risk, param, null, state,
+                            (int) (System.currentTimeMillis() - startMs));
                     }
+                })
+                .doOnError(e -> {
+                    finish(logId, false, null);
+                    audit("TOOL_CALL", risk, param, e.getClass().getSimpleName() + ": " + e.getMessage(),
+                        "ERROR", (int) (System.currentTimeMillis() - startMs));
                 })
                 .onErrorResume(e -> Mono.just(ToolResultBlock.error(
                     "工具 [" + getName() + "] 执行失败: " + e.getMessage())));
@@ -268,8 +278,9 @@ public class CsToolGuardService {
             return full.isEmpty() ? null : full.toString();
         }
 
-        /** C5:调用审计,参数过 PII 脱敏;静默失败不阻断工具链。 */
-        private void audit(String eventType, String risk, ToolCallParam param, String extra) {
+        /** C5:调用审计,参数过 PII 脱敏;结果码/耗时同时进 detail 与结构化列;静默失败不阻断工具链。 */
+        private void audit(String eventType, String risk, ToolCallParam param, String extra,
+                           String resultCode, Integer durationMs) {
             try {
                 String params;
                 try {
@@ -278,16 +289,18 @@ public class CsToolGuardService {
                     params = "{}";
                 }
                 String detail = "tool=" + def.getName() + " risk=" + risk
+                    + " result=" + resultCode
+                    + (durationMs == null ? "" : " ms=" + durationMs)
                     + " params=" + CsPiiMasker.mask(params)
                     + (extra == null ? "" : " extra=" + extra);
                 if (detail.length() > 900) {
                     detail = detail.substring(0, 900);
                 }
                 jdbc.update("INSERT INTO agent_cs_audit_log "
-                        + "(channel_code,event_type,actor_type,actor_id,detail,workspace_id,create_time) "
-                        + "VALUES (?,?,?,?,?,?,NOW())",
+                        + "(channel_code,event_type,actor_type,actor_id,detail,workspace_id,result_code,duration_ms,create_time) "
+                        + "VALUES (?,?,?,?,?,?,?,?,NOW())",
                     ctx.channelCode(), eventType, "VISITOR", String.valueOf(ctx.visitorId()),
-                    detail, ctx.workspaceId());
+                    detail, ctx.workspaceId(), resultCode, durationMs);
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 审计写入失败 tool={}: {}", def.getName(), e.getMessage());
             }

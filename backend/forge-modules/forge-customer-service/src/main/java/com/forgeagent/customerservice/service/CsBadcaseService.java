@@ -46,6 +46,8 @@ public class CsBadcaseService {
     private final CsBadcaseMapper badcaseMapper;
     private final CsSeatSuggestionMapper suggestionMapper;
     private final CsKnowledgeAnswerMapper answerMapper;
+    /** D2:评测回流(直写平台评测集) */
+    private final CsEvalFeedbackService evalFeedbackService;
 
     /** 通用记录入口;同来源同推荐已存在则跳过,避免刷屏。 */
     public void record(Long workspaceId, String source, Long conversationId, Long ticketId,
@@ -136,13 +138,25 @@ public class CsBadcaseService {
         return answer;
     }
 
-    /** 出口二:标记为评测用例(导出交给平台评测集)。 */
+    /**
+     * 出口二:标记为评测用例。
+     *
+     * <p>D2 起直接写平台评测集 {@code agent_eval_case}(待确认态),
+     * 不再依赖「导出 JSON → 运营手工导入」的搬运;幂等由唯一键兜住。</p>
+     */
     public CsBadcase adoptEval(Long id, Long workspaceId, String operator) {
         CsBadcase badcase = require(id, workspaceId);
         if (badcase.getQuestion() == null || badcase.getQuestion().isBlank()) {
             throw new ServiceException("该 badcase 没有问题文本，无法作为评测用例");
         }
+        Long caseId = evalFeedbackService.pushBadcase(badcase);
         finish(badcase, "ADOPTED_EVAL", operator);
+        if (caseId != null) {
+            badcaseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<CsBadcase>()
+                .eq(CsBadcase::getId, id)
+                .set(CsBadcase::getExported, "1"));
+        }
+        log.info("[CSP][D2] badcase {} 已推送评测集, caseId={}", id, caseId);
         return badcaseMapper.selectById(id);
     }
 
@@ -158,8 +172,10 @@ public class CsBadcaseService {
     }
 
     /**
-     * 导出已标记为评测用例的样本(JSON 数组),导出后置 exported=1。
-     * 平台侧评测集已有导入能力,这里只产出标准结构,不直连平台库。
+     * 兼容出口:D2 之前「已标记但未推送」的历史 badcase 在这里补推一次。
+     *
+     * <p>新数据在 {@link #adoptEval} 时已直写评测集,所以正常情况下这里返回空列表。
+     * 返回值仍保留原结构(含 caseId)供旧调用方使用,不再产出「待人工导入的 JSON」。</p>
      */
     public List<Map<String, Object>> exportEval(Long workspaceId, int limit) {
         List<CsBadcase> rows = badcaseMapper.selectList(new LambdaQueryWrapper<CsBadcase>()
@@ -170,8 +186,16 @@ public class CsBadcaseService {
             .last("limit " + Math.max(1, Math.min(500, limit))));
         List<Map<String, Object>> payload = new ArrayList<>();
         for (CsBadcase row : rows) {
+            Long caseId;
+            try {
+                caseId = evalFeedbackService.pushBadcase(row);
+            } catch (Exception e) {
+                log.warn("[CSP][D2] badcase {} 补推评测集失败: {}", row.getId(), e.getMessage());
+                continue;
+            }
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("caseId", row.getId());
+            item.put("caseId", caseId);
+            item.put("badcaseId", row.getId());
             item.put("source", row.getSource());
             item.put("question", row.getQuestion());
             item.put("expectedAnswer", row.getAnswer());

@@ -66,6 +66,8 @@ public class CsOperationController extends BaseController {
     private final com.forgeagent.customerservice.service.CsBadcaseService badcaseService;
     /** P3:多 Agent 意图路由。 */
     private final com.forgeagent.customerservice.service.CsAgentRouteService agentRouteService;
+    /** D2:评测回流用例(直写平台评测集 + 人工确认)。 */
+    private final com.forgeagent.customerservice.service.CsEvalFeedbackService evalFeedbackService;
 
     @GetMapping("/csat")
     public R<List<CsCsat>> csatList() {
@@ -305,6 +307,38 @@ public class CsOperationController extends BaseController {
         CsSeat seat = seatMapper.selectOne(new LambdaQueryWrapper<CsSeat>()
             .eq(CsSeat::getUserId, LoginHelper.getUserId()).last("limit 1"));
         return seat == null ? -1L : seat.getWorkspaceId();
+    }
+
+    // ---------------------------------------------------------------- D2 评测回流
+
+    /** 回流用例列表:默认只看待确认(reviewStatus=0),传空串看全部 */
+    @GetMapping("/eval/cases")
+    public R<List<Map<String, Object>>> evalCases(@RequestParam(required = false) String reviewStatus,
+                                                 @RequestParam(defaultValue = "50") int limit) {
+        return R.ok(evalFeedbackService.listCases(currentWorkspaceId(),
+            reviewStatus == null ? "0" : reviewStatus, limit));
+    }
+
+    /** 待确认用例数(运营页角标) */
+    @GetMapping("/eval/pending-count")
+    public R<Integer> evalPendingCount() {
+        return R.ok(evalFeedbackService.pendingCount(currentWorkspaceId()));
+    }
+
+    /** 确认或驳回一条回流用例;只有已确认的用例会参与评测运行 */
+    @PostMapping("/eval/cases/{id}/review")
+    public R<Void> reviewEvalCase(@PathVariable Long id,
+                                  @RequestBody(required = false) Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("approve");
+        boolean approve = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
+        evalFeedbackService.review(id, currentWorkspaceId(), approve);
+        return R.ok();
+    }
+
+    /** 采样口径说明(比例 / 最少访客轮次 / 评测集名) */
+    @GetMapping("/eval/sample-info")
+    public R<Map<String, Object>> evalSampleInfo() {
+        return R.ok(evalFeedbackService.sampleInfo());
     }
 
     private static Date parseDate(String value) {

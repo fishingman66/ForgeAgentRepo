@@ -66,7 +66,7 @@ DSH 与 ForgeAgent 的场景差异是本方案取舍的总依据：
 
 **A4 MCP 连接池**（复杂度：低-中，纯性能修复）
 - 现状：`ToolAssembler` 每请求构建 Toolkit，MCP 每请求重连（初始化上限 30s）。
-- 改动：`McpClientWrapper` 按 `serverId` 缓存复用（Caffeine + 空闲过期 + 健康探活），失败重建；workflow 路 `buildForWorkflow` 共用同一池。
+- 改动：`McpClientWrapper` 按指纹 `serverType|url|timeout|排序 headers` 缓存复用（Caffeine + 空闲过期 + 健康探活），失败重建；`buildForWorkflow` 仅装配平台工具、不带 MCP，无连接池复用。
 - 验收：同一 run 多次工具调用只建一次连接（计数断言）；断连自愈；须确认 wrapper 线程安全后再缓存，否则退化为会话级缓存。
 
 **B3 记忆关键词通道**（复杂度：低-中，中文召回痛点，与 RAG 域踩坑同源）
@@ -84,32 +84,39 @@ DSH 与 ForgeAgent 的场景差异是本方案取舍的总依据：
 
 > **实施状态（2026-11-15）**：A1/A2/A3 已交付（用户拍板启动，触发条件视为成立）；A5 未启动（等产品决策）。
 > - ✅ A3 已交付：表征测试 9 条先行锁定装配行为 → `ToolProvider` SPI（`type()`/`provide()` 返回列表）+ `HttpToolProvider`/`SandboxToolProvider`/`SqlToolProvider`；`ToolAssembler` 退化为按 toolType 路由；MCP 装配保留在 ToolAssembler（输入是 McpDef 且连接已由池组件承担，硬拆反而散）。新增 `ApprovalExempt` 标记接口保真「schema 只读工具免审批门」语义。表征测试复跑全绿，零行为变化。
-> - ✅ A1 已交付：`agent_skill` / `agent_skill_install` 两表 DDL（菜单先删后插幂等，临时库真机两连跑通过）+ 实体/Bo/Vo/Mapper/Service/Controller 全套（`/agent/skill` 7 端点，权限码 `agent:skill:*`，菜单 1761400000000030161~66）。
+> - ✅ A1 已交付：`agent_skill` / `agent_skill_install` 两表 DDL（菜单先删后插幂等，临时库真机两连跑通过）+ 实体/Bo/Vo/Mapper/Service/Controller 全套（`/agent/skill` **10 端点**（含 install/uninstall、install-targets、installed/{agentId}），权限码 `agent:skill:*`，菜单 1761400000000030181~186）。
 > - ✅ A2 已交付：`load_skill` 内置工具（免审批门，白名单快照兜底 + 实时状态优先）+ system prompt 一行摘要目录（N 技能 ≈ N×40 token）；技能引用的工具/MCP 并入授权边界（安装即授权，路由统一裁剪）；`RunnerContext` 加 `skills` 字段全链路透传（6 处 build 调用）。
-> - 验收：forge-agent 全量 surefire **128 tests / 0 failures / 0 errors**；`LoadSkillToolTest` 4 条 + 表征 9 条 + MCP 池 9 条 + 持久化 5 条。
+> - 验收：forge-agent 全量 surefire **169 tests / 0 failures / 0 errors**（2026-11-19 实测）；`LoadSkillToolTest` 4 条 + `AgentSkillServiceImplTest` 10 条 + 表征 9 条 + MCP 池 9 条 + 持久化 5 条。
+> - ✅ 前端技能管理页（`frontend/src/views/agent/skill/index.vue` + `api/agent/skill/`）已交付：列表 / 新增 / 编辑（保存后版本 +1）/ 启停 / 删除 / **安装管理**（一个弹窗列出全部已发布应用与安装态，行内切换安装 / 卸载，支持按名称搜索）；`pnpm typecheck` 通过。
+> - ✅ 应用侧技能抽屉（`views/agent/agent/components/SkillDrawer.vue`，Agent 列表操作列「技能」）：查看已装技能（**含已停用**，便于运营卸载）/ 添加 / 卸载，安装态变更即时生效于下一轮对话。
+> - ✅ 关联表改**物理删除**：`agent_skill_install` 的 `del_flag` 非 0 记录仍占 `uk_skill_agent(skill_id, agent_id)`，原逻辑删除会让「卸载后再安装」直接 Duplicate entry——`AgentSkillInstallMapper.physicalUnbind` / `physicalUnbindBySkillIds` 统一物理解绑，安装前顺带清理历史残留；技能删除的级联解绑同步改物理删除。
 
 **A1+A2 Skill 数据模型与懒加载**（复杂度：中）
 - 设计（条件满足后按此实施）：
   - 新表 `agent_skill`：`name / description(一行摘要) / instructions(MEDIUMTEXT, md 手册) / tool_ids / mcp_ids / knowledge_ids / prompt_fragment / version / status / workspace_id`；`agent_skill_install` 技能到 Agent 的绑定（显式授权语义）。
-  - `ToolAssembler` 装配时技能只把「一行摘要目录」追加进 system prompt（`[可用技能] name — description`），注册内置工具 `load_skill(name)`（套 `ApprovalGateTool`）按需加载全文；N 技能固定 ≈ N×40 token。
-  - `config_hash`/发布门禁把技能绑定纳入版本快照，防止线上技能变更绕过发布流程。
+  - `ToolAssembler` 装配时技能只把「一行摘要目录」追加进 system prompt（`[可用技能] name — description`），注册内置工具 `load_skill(name)`（免审批门，实现 `ApprovalExempt`）按需加载全文；N 技能固定 ≈ N×40 token。
+  - > **已落地（2026-11-19，P1-B）**：技能绑定纳入 `config_hash` 与发布快照。技能是跨 Agent 共享资源，回滚改写 `agent_skill` 本体必然污染其他 Agent，因此改为「钉版本」：①内容变更归档 `agent_skill_version`（含 `content_hash`）；②`agent_skill_install.pinned_version` 钉住该 Agent 实际使用的版本；③快照增 `skillRefs[] = {id,name,version,contentHash}` 参与 SHA-256；④发布把 pin 固定为当前版本，回滚按快照覆盖式重建绑定并恢复 pin（老快照无 `skillRefs` 时**跳过而非清空**）；⑤发布门禁增「已安装但已停用技能」基础检查（不受指标豁免覆盖）。装配侧 `listInstalledByAgent` 按 pin 解析内容，目录摘要与 `load_skill` 手册口径一致。`diff` 把 `skillRefs` 渲染成「名称 vN」便于人工核对。
 - **触发条件（满足其一即启动，先补表征测试再动刀）**：
   1. 任一线上 Agent 工具 + MCP 工具绑定总数 > 20~30，出现上下文膨胀实测证据；
   2. 客服域明确出现「多个 Agent 共享同一套操作手册」需求（FAQ 流程手册、坐席辅助规程是最可能的首个消费者）。
 
 **A3 工具装配 SPI 化**（复杂度：中，随 A1/A2 一起做）
-- `ToolProvider` SPI：`String type()` / `List<AgentTool> provide(AgentToolDef def, BuildContext ctx)`；http/sandbox/sql/mcp 四类各抽一个 Provider，`ToolAssembler` 退化为按 `toolType` 路由到注册表。
+- `ToolProvider` SPI：`String type()` / `List<AgentTool> provide(ToolAssembler.ToolDef def, ToolAssembler.BuildContext ctx)`；http/sandbox/sql 三类各抽一个 Provider（MCP 装配保留在 ToolAssembler），`ToolAssembler` 退化为按 `toolType` 路由到注册表。
 - 启动时机与 A1/A2 绑定：Skill 装配需要新增第五类（skill 引用解析），届时一起 SPI 化，避免两次动 `ToolAssembler`。先行步骤：补 8 条表征测试锁住现有装配行为（含 MCP wrapper、审批门装饰顺序）。
 
-**A5 对外 MCP Server 泛化**（复杂度：中，产品方向决策）
-- `KnowledgeMcpEndpoint` 手写实现扩展为通用平台 MCP 端点：按 token 映射工作空间，暴露 `knowledge_search` + 白名单平台工具，使 DSH/Claude Code 等外部 Agent 可直连平台知识库。
-- **触发条件**：出现对外开放/集成的产品需求（把 ForgeAgent 当企业 MCP 服务器提供）。技术储备已足（手写 Streamable HTTP 零 spring-ai-mcp-server 依赖，绕开 victools 冲突）。
+**A5 对外 MCP Server 泛化**（已交付；令牌粒度鉴权于 2026-11-19 补齐）
+- `KnowledgeMcpEndpoint` 手写实现扩展为通用平台 MCP 端点，暴露 `knowledge_search` / `knowledge_list` / `knowledge_chunks` + SPI 注入的外部工具（当前 `skill_list` / `skill_get`），使 DSH/Claude Code 等外部 Agent 可直连平台。
+- **令牌 -> 工作空间 + 授权域（已落地）**：新表 `agent_mcp_client`（只存令牌 SHA-256 与 12 位前缀，明文仅创建/轮转时返回一次；`workspace_id` NULL=平台全量，`scopes` 空=全部授权域）。rag 侧定义 `McpClientAuthenticator` SPI，agent 侧 `DbMcpClientAuthenticator` 实现（token_hash 唯一索引 + Caffeine 30 秒缓存，停用/过期/轮转最多 30 秒生效），与 `McpExternalToolProvider` 同向，避免 rag 反向依赖 agent。
+- **鉴权语义**：先查客户端表；**归客户端表管辖但校验失败（停用/过期/轮转）直接 401，绝不回落**——回落成「不校验」等于停用失效（`McpClientAuthenticator.managed` 区分这两种 empty）。只有非平台格式的令牌才回落到 `rag.knowledge.mcp-token`（平台全量只读，既有部署零行为变更）。
+- **可见性**：`McpCaller.canReadWorkspace` 统一口径「平台共享 + 本空间」。三个 knowledge 工具与 skill 工具都按此过滤；**顺带堵了三处既有越权**：显式 `knowledgeId` 原来只校验 status 不校验空间、`knowledge_chunks` 按可猜的 documentId 直读原文、`skill_get` 可按名读别家空间技能。越权一律按「不存在」返回，不泄露资源存在性。
+- **授权域**：`scopes` 裁 `tools/list` 与 `tools/call`（未授权工具直接不可见；越域调用返回「当前客户端未授权 xx 域」）。
+- 管理面：`/agent/mcpclient` 7 端点（list/detail/add/edit/status/rotate/delete，权限码 `agent:mcpclient:*`，菜单 1761400000000030191~196）+ 前端「MCP客户端」页（令牌一次性展示 + 复制 + 轮转）。
 
 ### 4.3 等需求：有消费者再做（当前不做）
 
 > **实施状态（2026-11-16）**：A5 已交付（用户拍板启动）。`McpExternalToolProvider` SPI（forge-rag 定义，forge-agent 实现 `SkillMcpExternalToolProvider`，对外暴露 `skill_list`/`skill_get`，server 名更新为 forgeagent-platform）；端点 18 tests + Provider 4 tests 全绿，forge-rag 199 / forge-agent 147 / 0 失败（agent 132 为批次 A 前口径）。
 > **端到端验证（同日）**：本地库执行 `agent_skill.sql`；创建 2 个客服域技能（退换货处理 / 物流查询话术）并安装到「洪哥的智能体」；起服务走真实对话（Agnes 模型），验证链路全通——技能目录注入 system prompt（`promptHead=[可用技能]`）、`load_skill` 注册、**模型按手册步骤回复**（确认订单号→校验退货资格三要素→引导创建售后工单）。已恢复 Agent 停用原状。
-> **踩坑**：`/auth/login` 必须 AES+RSA 加密（复用 temp/A1Login.java）；打包时运行中的进程锁 jar 需先停服务。
+> **踩坑**：`/auth/login` 必须 AES+RSA 加密（复用 scripts/e2e/A1Login.java）；打包时运行中的进程锁 jar 需先停服务。
 > **⚠️ 菜单号撞号（已修复）**：Docker 基线 02-seed 里 30161~30166 已被「长期记忆」菜单占用、30171~30176 被数据源管理占用——`agent_skill.sql` 首版 DELETE 段误删了本地库的记忆菜单（已恢复），技能菜单迁移至**空闲号段 30181~30186**；Docker 基线 01-schema 已补 agent_skill/agent_skill_install 两表（无 auto_increment）+ agent_memory 的 FULLTEXT ngram 索引折进建表定义，02-seed 追加技能菜单段（先删后插幂等），临时库 01+02 真机验证：记忆菜单 4 + 技能菜单 6 + 技能表 2 + FULLTEXT 2 列并存。**教训：新菜单号段必须先 grep 02-seed 查占用，不能默认 30161 起空闲**。
 
 | 项 | 内容 | 等待的消费者 |

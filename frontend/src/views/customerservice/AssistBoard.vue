@@ -16,21 +16,25 @@ import {
   assistMetrics,
   assistQuota,
   clearSemanticCache,
+  evalPendingCount,
   exportEvalCases,
   ignoreDeadLetter,
   ignoreImprovement,
   listAssistBadcases,
   listDeadLetters,
+  listEvalCases,
   listImprovements,
   listSemanticCache,
   rebuildAssistCost,
   rebuildAssistMetrics,
   recycleZeroAdopt,
-  replayDeadLetter
+  replayDeadLetter,
+  reviewEvalCase
 } from '@/api/customerservice';
 import type {
   CsAssistOverview,
   CsBadcaseRow,
+  CsEvalCaseRow,
   CsCostOverview,
   CsDeadLetterRow,
   CsQuotaView,
@@ -43,6 +47,11 @@ const badcases = ref<CsSeatSuggestion[]>([]);
 const improvements = ref<CsBadcaseRow[]>([]);
 const cacheRows = ref<CsSemanticCacheRow[]>([]);
 const cost = ref<CsCostOverview | null>(null);
+/** D2:回流用例抽屉 */
+const evalDrawer = ref(false);
+const evalLoading = ref(false);
+const evalCases = ref<CsEvalCaseRow[]>([]);
+const pendingEval = ref(0);
 const quota = ref<CsQuotaView | null>(null);
 const deadLetters = ref<CsDeadLetterRow[]>([]);
 const cacheChannel = ref('');
@@ -74,6 +83,8 @@ const load = async () => {
     quota.value = quotaRes.data ?? null;
     const deadRes = await listDeadLetters('PENDING', 30);
     deadLetters.value = deadRes.data ?? [];
+    const pendingRes = await evalPendingCount();
+    pendingEval.value = pendingRes.data ?? 0;
   } catch {
     ElMessage.error('辅助指标加载失败');
   } finally {
@@ -155,7 +166,7 @@ const adoptKb = async (row: CsBadcaseRow) => {
 const adoptEval = async (row: CsBadcaseRow) => {
   try {
     await adoptImprovementEval(row.id);
-    ElMessage.success('已标记为评测用例');
+    ElMessage.success('已推送评测集,待运营确认后参与评测');
     await load();
   } catch {
     ElMessage.error('操作失败');
@@ -172,13 +183,42 @@ const dropImprovement = async (row: CsBadcaseRow) => {
   }
 };
 
+/** D2:打开回流用例抽屉并拉取待确认列表 */
+const openEvalDrawer = async () => {
+  evalDrawer.value = true;
+  await loadEvalCases();
+};
+
+const loadEvalCases = async () => {
+  evalLoading.value = true;
+  try {
+    const res = await listEvalCases('0', 100);
+    evalCases.value = res.data ?? [];
+  } catch {
+    ElMessage.error('回流用例加载失败');
+  } finally {
+    evalLoading.value = false;
+  }
+};
+
+const reviewCase = async (row: CsEvalCaseRow, approve: boolean) => {
+  try {
+    await reviewEvalCase(row.id, approve);
+    ElMessage.success(approve ? '已通过,将参与下次评测' : '已驳回');
+    await loadEvalCases();
+    const pendingRes = await evalPendingCount();
+    pendingEval.value = pendingRes.data ?? 0;
+  } catch {
+    ElMessage.error('操作失败');
+  }
+};
+
 const exportEval = async () => {
   try {
     const res = await exportEvalCases(200);
     const payload = res.data ?? [];
-    ElMessage.success(`已导出 ${payload.length} 条（可从控制台复制）`);
-    // 不落文件：评测集导入在平台侧，这里只把标准结构吐出来
-    console.info('[eval-export]', JSON.stringify(payload));
+    // D2 起 badcase 采纳时已直写评测集，这里只补推 D2 之前遗留的「已标记未推送」样本
+    ElMessage.success(payload.length ? `已补推 ${payload.length} 条历史样本` : '没有待补推的历史样本');
     await load();
   } catch {
     ElMessage.error('导出失败');
@@ -339,7 +379,10 @@ onMounted(load);
         <div class="cs-header">
           <span>改进单（待处理 badcase）</span>
           <div class="cs-actions">
-            <el-button size="small" @click="exportEval">导出评测样本</el-button>
+            <el-button size="small" type="primary" plain @click="openEvalDrawer">
+              回流用例{{ pendingEval ? `（${pendingEval}）` : '' }}
+            </el-button>
+            <el-button size="small" @click="exportEval">补推历史样本</el-button>
             <el-button size="small" @click="load">刷新</el-button>
           </div>
         </div>
@@ -381,6 +424,33 @@ onMounted(load);
       </el-table>
       <el-empty v-if="!deadLetters.length" description="没有待补跑的失败" :image-size="70" />
     </el-card>
+
+    <!-- D2:回流用例确认（badcase 与坐席优质会话沉淀，确认后才参与评测） -->
+    <el-drawer v-model="evalDrawer" title="回流评测用例（待确认）" size="760px" :append-to-body="true">
+      <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+        <template #title>
+          来源两路:badcase 标记评测、坐席人工结案后按比例抽样。只有「通过」的用例会进入评测集参与运行,
+          驳回的不再出现。
+        </template>
+      </el-alert>
+      <el-table v-loading="evalLoading" :data="evalCases" size="small" border empty-text="没有待确认的用例">
+        <el-table-column label="来源" width="110">
+          <template #default="scope">
+            <el-tag size="small" :type="scope.row.source === 'cs_badcase' ? 'warning' : 'success'" effect="plain">
+              {{ scope.row.source === 'cs_badcase' ? 'badcase' : '坐席抽样' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="question" label="问题" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="reference_answer" label="参考答案" min-width="220" show-overflow-tooltip />
+        <el-table-column label="操作" width="130" align="center">
+          <template #default="scope">
+            <el-button link type="success" size="small" @click="reviewCase(scope.row as CsEvalCaseRow, true)">通过</el-button>
+            <el-button link type="info" size="small" @click="reviewCase(scope.row as CsEvalCaseRow, false)">驳回</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-drawer>
   </div>
 </template>
 

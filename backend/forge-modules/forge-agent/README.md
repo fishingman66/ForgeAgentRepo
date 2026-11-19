@@ -1,6 +1,6 @@
 # forge-agent · Agent 平台业务与运行内核
 
-平台主体模块：工作空间、模型与供应商、工具与数据源、技能包、编排画布、对话运行、市场、触发器、审计计量、治理与评测。275 个主类、28 个 Controller、**132 个单元测试**（20 类）。
+平台主体模块：工作空间、模型与供应商、工具与数据源、技能包、编排画布、对话运行、市场、触发器、审计计量、治理与评测。280 个主类（`src/main/java` 下 .java 计数）、29 个 Controller、**206 个单元测试**（32 类）。
 
 依赖方向：`agent-core ← forge-agent`，并依赖 `forge-rag`（检索）、`forge-memory`（记忆注入）、`forge-kg`（经 memory/rag 间接）、`forge-common-*`。`forge-customer-service` 通过本模块的 `api.customerservice` 契约包**单向依赖**本模块，反向禁止。
 
@@ -66,11 +66,11 @@ com.forgeagent.agent
 
 ## 配置
 
-`agent.runtime.*`（ReAct 超时与迭代上限、语义路由、工作流节点超时、`workflow-http-guard-enabled` http 节点 SSRF 防护）、`agent.chat.*`（对话链路超时、预算与上下文参数，含 `context-window-tokens` / `history-*` / `summary-*` / `working-memory-*`）、`agent.resource-sharing.enabled`（资源域双模式总开关）、`agent.chat.mcp-pool-enabled`（MCP 连接池开关）与`agent.chat.working-memory-persist-*`（L1 高频条目沉淀长期记忆：开关 / 取回阈值 / 截断长度）、`spring.task.scheduling.pool.size=4`（隔离定时任务故障域）。
+`agent.runtime.*`（ReAct 超时与迭代上限、语义路由、工作流节点超时、`workflow-http-guard-enabled` http 节点 SSRF 防护）、`agent.chat.*`（对话链路超时、预算与上下文参数，含 `context-window-tokens` / `history-*` / `summary-*` / `working-memory-*`）、`agent.resource-sharing.enabled`（资源域双模式总开关）、`agent.chat.mcp-pool-enabled`（MCP 连接池开关）/ `mcp-pool-idle-seconds`(300) / `mcp-pool-max-size`(32)、`agent.chat.working-memory-persist-*`（L1 高频条目沉淀长期记忆：开关 / 取回阈值 / 截断长度）、`spring.task.scheduling.pool.size=4`（隔离定时任务故障域）。
 
 ## 测试
 
-**132 用例 / 20 类**，全部 `@Tag("dev")`：
+**206 用例 / 32 类**，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
@@ -86,9 +86,12 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 | MCP 空间归属 16 | `AgentMcpServerServiceImplTest`(11) / `AgentInfoServiceMcpBindingTest`(3) / `ChatContextAssemblerMcpVisibilityTest`(2) |
 | 工作流执行体 8 | `AgentWorkflowGraphCharacterizationTest`（走 `trialRun` 公共入口 + `dryRun`，不依赖私有方法，拆分前后可复用） |
 | 问数标识校验 4 | `SqlQueryServiceIdentifierTest` |
+| 客服批次 A/B/C 支撑 24 | `ChatRetrievalSupportCallerTest`(3，A2 检索复用) / `ChatSendVoSignalTest`(1，A1 终态零命中) / `CsGovernanceFacadeImplTest`(8，C5 审计同口径) / `CsToolGuardServiceTest`(12，C2 工具护栏 + C5 审计) |
+| 发布门禁评估 14 | `ReleaseGateServiceEvaluateTest`(5，含已安装但停用技能阻断) / `AgentVersionServiceTest`(8，skillRefs 进快照 / hash 随技能内容变 / 回滚恢复 pin) / `EvaluationServiceCaseFilterTest`(1，D2 待确认样本不进评测) |
 | 08 方案装配表征 9 | `ToolAssemblerCharacterizationTest`（SPI 化前后零行为变化的锁） |
 | 08 方案 MCP 池 9 | `McpConnectionPoolTest`(6) / `ToolAssemblerMcpPoolTest`(3，池内连接不进 closables 等铁律) |
-| 08 方案技能 8 | `LoadSkillToolTest`(4) / `SkillMcpExternalToolProviderTest`(4) |
+| 08 方案 MCP 客户端鉴权 16 | `AgentMcpClientServiceImplTest`(8，令牌生成/哈希/前缀/授权域/过期时间) / `DbMcpClientAuthenticatorTest`(8，准入四态/不落库判定/空间可见性) |
+| 08 方案技能 28 | `LoadSkillToolTest`(4) / `SkillMcpExternalToolProviderTest`(4) / `AgentSkillServiceImplTest`(12，安装目标/已装清单/物理解绑/按 pin 取内容) / `AgentSkillVersionServiceTest`(8，内容摘要/归档/按 pin 覆盖) |
 | L1 沉淀 5 | `RunWorkingMemoryPersistTest` |
 
 验收以 surefire 报告的 `tests/failures/errors` 为准，不认 EXIT=0。

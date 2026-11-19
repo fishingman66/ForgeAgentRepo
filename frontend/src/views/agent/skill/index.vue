@@ -67,7 +67,7 @@
         <el-table-column label="创建时间" prop="createTime" width="170" align="center" />
         <el-table-column label="操作" width="220" align="center" fixed="right">
           <template #default="scope">
-            <el-button v-hasPermi="['agent:skill:install']" size="small" text type="success" icon="Download" @click="openInstall(scope.row as SkillVO)">安装到应用</el-button>
+            <el-button v-hasPermi="['agent:skill:install']" size="small" text type="success" icon="Download" @click="openInstall(scope.row as SkillVO)">安装管理</el-button>
             <el-button v-hasPermi="['agent:skill:edit']" size="small" text type="primary" icon="Edit" @click="handleEdit(scope.row as SkillVO)">编辑</el-button>
             <el-button v-hasPermi="['agent:skill:remove']" size="small" text type="danger" icon="Delete" @click="handleDelete(scope.row as SkillVO)">删除</el-button>
           </template>
@@ -124,33 +124,56 @@
       </template>
     </el-dialog>
 
-    <!-- 安装到应用 -->
-    <el-dialog v-model="installDialog.visible" title="安装技能到应用" width="520px" destroy-on-close>
+    <!-- 安装管理:一次列出全部已发布应用,直接在行内切换安装/卸载 -->
+    <el-dialog v-model="installDialog.visible" :title="'安装管理 · ' + (installSkillRow?.name ?? '')" width="720px" destroy-on-close>
       <el-alert v-if="installSkillRow" type="info" :closable="false" style="margin-bottom: 12px">
         <template #title>
-          技能「{{ installSkillRow.name }}」安装后,目标应用可获得该技能的手册与引用工具;安装幂等,重复安装无副作用。
+          安装后目标应用可获得该技能的手册与引用工具;卸载后目录与 load_skill 立即失效。操作即时生效,无需重启应用。
         </template>
       </el-alert>
-      <el-form label-width="90px">
-        <el-form-item label="选择应用">
-          <el-select v-model="installDialog.agentId" filterable placeholder="按名称搜索应用" style="width: 100%">
-            <el-option v-for="a in agentOptions" :key="a.id" :label="a.name" :value="a.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
+      <div class="install-toolbar">
+        <el-input v-model="installKeyword" placeholder="搜索应用名称" clearable style="width: 220px" />
+        <span class="install-tip">已安装 {{ installedCount }} / 共 {{ installTargets.length }} 个已发布应用</span>
+      </div>
+      <el-table :data="filteredTargets" size="small" border max-height="380" v-loading="installLoading" empty-text="暂无已发布应用">
+        <el-table-column label="应用" prop="agentName" min-width="160" show-overflow-tooltip />
+        <el-table-column label="归属" width="100" align="center">
+          <template #default="scope">
+            <el-tag size="small" :type="scope.row.workspaceId ? 'warning' : 'success'" effect="plain">
+              {{ scope.row.workspaceId ? '空间私有' : '平台共享' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="安装时间" width="170" align="center">
+          <template #default="scope">
+            <span v-if="scope.row.installTime">{{ scope.row.installTime }}</span>
+            <span v-else style="color: var(--el-text-color-secondary)">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="110" align="center">
+          <template #default="scope">
+            <el-button
+              size="small"
+              text
+              :type="scope.row.installed ? 'danger' : 'success'"
+              :loading="installBusy === scope.row.agentId"
+              @click="toggleInstall(scope.row as SkillInstallTargetVO)"
+            >
+              {{ scope.row.installed ? '卸载' : '安装' }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
       <template #footer>
-        <el-button @click="installDialog.visible = false">取消</el-button>
-        <el-button type="primary" :loading="installDialog.saving" :disabled="!installDialog.agentId" @click="submitInstall">安装</el-button>
+        <el-button @click="installDialog.visible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts" name="AgentSkill">
-import { addSkill, changeSkillStatus, delSkill, installSkill, listSkill, updateSkill } from '@/api/agent/skill';
-import type { SkillForm, SkillQuery, SkillVO } from '@/api/agent/skill/types';
-import { listPublishedAgent } from '@/api/agent/agent';
-import type { AgentVO } from '@/api/agent/agent/types';
+import { addSkill, changeSkillStatus, delSkill, installSkill, listInstallTargets, listSkill, uninstallSkill, updateSkill } from '@/api/agent/skill';
+import type { SkillForm, SkillInstallTargetVO, SkillQuery, SkillVO } from '@/api/agent/skill/types';
 import ResourceScopeFields from '@/views/agent/components/ResourceScopeFields.vue';
 import { checkPermi } from '@/utils/permission';
 
@@ -160,7 +183,6 @@ const loading = ref(false);
 const skillList = ref<SkillVO[]>([]);
 const total = ref(0);
 const hasEditPerm = checkPermi(['agent:skill:edit']);
-const agentOptions = ref<AgentVO[]>([]);
 
 const queryParam = ref<SkillQuery>({ pageNum: 1, pageSize: 10, keyword: '', status: '' });
 
@@ -174,8 +196,20 @@ const initForm: SkillForm = {
 };
 const form = ref<SkillForm>({ ...initForm });
 
-const installDialog = ref({ visible: false, saving: false, agentId: undefined as number | string | undefined });
+const installDialog = ref({ visible: false });
 const installSkillRow = ref<SkillVO | null>(null);
+const installTargets = ref<SkillInstallTargetVO[]>([]);
+const installKeyword = ref('');
+const installLoading = ref(false);
+const installBusy = ref<string>('');
+
+/** 已安装计数与搜索过滤都基于同一份 targets,避免两次请求口径不一致 */
+const installedCount = computed(() => installTargets.value.filter((t) => t.installed).length);
+const filteredTargets = computed(() => {
+  const kw = installKeyword.value.trim().toLowerCase();
+  if (!kw) return installTargets.value;
+  return installTargets.value.filter((t) => (t.agentName || '').toLowerCase().includes(kw));
+});
 
 const rules = {
   name: [{ required: true, message: '请输入技能名称', trigger: 'blur' }, { min: 2, max: 50, message: '长度须在 2-50 字符', trigger: 'blur' }],
@@ -247,27 +281,46 @@ const submitForm = () => {
 
 const openInstall = async (row: SkillVO) => {
   installSkillRow.value = row;
-  installDialog.value.agentId = undefined;
+  installKeyword.value = '';
   installDialog.value.visible = true;
-  if (agentOptions.value.length === 0) {
-    try {
-      const res = await listPublishedAgent();
-      agentOptions.value = res.data || [];
-    } catch {
-      agentOptions.value = [];
-    }
+  await loadInstallTargets();
+};
+
+const loadInstallTargets = async () => {
+  const row = installSkillRow.value;
+  if (!row) return;
+  installLoading.value = true;
+  try {
+    const res = await listInstallTargets(row.id);
+    installTargets.value = res.data || [];
+  } catch {
+    installTargets.value = [];
+  } finally {
+    installLoading.value = false;
   }
 };
 
-const submitInstall = async () => {
-  if (!installSkillRow.value || !installDialog.value.agentId) return;
-  installDialog.value.saving = true;
+const toggleInstall = async (target: SkillInstallTargetVO) => {
+  const row = installSkillRow.value;
+  if (!row) return;
   try {
-    await installSkill(installSkillRow.value.id, installDialog.value.agentId);
-    proxy?.$modal.msgSuccess('安装成功');
-    installDialog.value.visible = false;
+    if (target.installed) {
+      await proxy?.$modal.confirm(
+        `确认从应用「${target.agentName}」卸载技能「${row.name}」吗?该应用的技能目录与 load_skill 将立即失效。`
+      );
+      installBusy.value = target.agentId;
+      await uninstallSkill(row.id, target.agentId);
+      proxy?.$modal.msgSuccess('已卸载');
+    } else {
+      installBusy.value = target.agentId;
+      await installSkill(row.id, target.agentId);
+      proxy?.$modal.msgSuccess('已安装');
+    }
+    await loadInstallTargets();
+  } catch (e) {
+    // 用户取消或失败
   } finally {
-    installDialog.value.saving = false;
+    installBusy.value = '';
   }
 };
 
@@ -305,6 +358,16 @@ onMounted(() => {
 
 <style scoped>
 .table-heading .heading-tip {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+.install-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.install-tip {
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }

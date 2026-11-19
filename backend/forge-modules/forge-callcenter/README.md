@@ -75,6 +75,10 @@ GET  /agent/customerservice/calls/{id}     详情：主记录 + 事件轨迹 + �
 GET  /agent/customerservice/calls/{id}/recording   短期签名 URL
 GET  /agent/customerservice/calls/stats    当日通话指标
 GET  /agent/customerservice/calls/call-seats       坐席就绪态
+GET  /agent/customerservice/calls/{id}/profile     通话画像（C8）
+GET  /agent/customerservice/calls/callbacks        呼损回拨列表（C8）
+POST /agent/customerservice/calls/callbacks/{id}/status  回拨状态更新（C8）
+（另 `/agent/customerservice/cc-ops/**` 坐席语音运营端点，见 CsVoiceOpsController）
 ```
 
 ## 配置
@@ -87,7 +91,7 @@ GET  /agent/customerservice/calls/call-seats       坐席就绪态
 
 ## 测试
 
-16 类 188 用例，全部 `@Tag("dev")`：
+35 类 196 用例，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test \
@@ -108,11 +112,11 @@ mvn -Pdev test \
 | `FsMediaStreamTest`（7） | 上下行音频编码、缓冲补发、clearAudio 打断 |
 | `CallStateMachineTest` / `CallFingerprintsTest` / `LocalFsRecordingStorageTest` / `CallBusinessBinderTest` | 8 态跃迁、指纹、录音、挂机结案 |
 
-端到端脚本：`temp/v1_verify.py`（25/25，回调契约与状态机）、`temp/v2_verify.py`（29/29，业务打通：建会话→建单→ACD→挂机结案→CSAT→质检→指标→擦除级联）。回调发送端为 `temp/mock_callback_sender.py`，11 个 fixture 在 `src/test/resources/mock/aicc/`。
+端到端脚本：`scripts/acceptance/v1_verify.py`（25/25，回调契约与状态机）、`scripts/acceptance/v2_verify.py`（29/29，业务打通：建会话→建单→ACD→挂机结案→CSAT→质检→指标→擦除级联）。回调发送端为 `scripts/e2e/mock_callback_sender.py`，11 个 fixture 在 `src/test/resources/mock/aicc/`。
 
 ## 扩展点
 
-- **FreeSWITCH 真实链路**（已交付 P1~P3）：四层 SPI 真实实现已填——`FsGateway`（事件源）、`FsChannelControl`（控制面）、`FsMediaStream`（媒体面）、`LiveChannelRegistry`（会话入口）。**未做**：真实 ASR/TTS 引擎（DashScope，需 API key）与 IVR 自动驱动（`IvrSessionDriver.drive` 无生产触发点），不能用 Mock 假装完成。
+- **FreeSWITCH 真实链路**（已交付 P1~P3）：四层 SPI 真实实现已填——`FsGateway`（事件源）、`FsChannelControl`（控制面）、`FsMediaStream`（媒体面）、`LiveChannelRegistry`（会话入口）。**IVR 生产装配已交付**：`FsIvrSessionCoordinator` 在 provider=FS 且 `ivr-autodrive=true` 时接通即向线程池提交 `IvrSessionDriver.drive(...)`，按 ivr-route-code 加载流程、轮询 DTMF 收号；`IvrSessionDriver.offerDtmf` 供按键注入，**不再是无触发点的空实现**（2026-11-18 收尾，详见 docs/09 §13.4）。**仍未做**：真实 ASR/TTS 引擎（DashScope，需 API key）。
 - **接入真实 AICC**：只换 `AiccGateway` 的 `verify` / `parse` / `fetchRecording` 三个方法，业务层零改动（V0-real，待 AICC 服务）。
 - **外呼**：`NumberProvider` / `TrunkProvider` 已留接口，当前 noop；无 SIP 中继资质与号码资源前不写真实 PSTN 呼出上线代码。
 - **新增事件类型**：供应商映射表加一行 + `CallStateMachine` 加目标态 + `CallEventDispatcher.applyEvent` 加一个分支，其余阶段零改动。

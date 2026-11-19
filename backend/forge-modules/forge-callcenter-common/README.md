@@ -7,9 +7,9 @@
 | 类 | 职责 |
 | --- | --- |
 | `CsEventEnvelope` | 统一事件信封 `{type, sequence, conversationId, ticketId, payload, traceId, ts}`，SSE / WebSocket 共用；`withSequence` 补齐单调序号 |
-| `CsEventTypes` | 事件名唯一来源：文本 13 个（含 `cs_seat_suggest`）、语音 9 个 `CALL_*`，另有 `TEXT_EVENTS` / `VOICE_EVENTS` / `ALL_EVENTS` 三个集合 |
+| `CsEventTypes` | 事件名唯一来源：文本 13 个（含 `cs_seat_suggest`）、语音 10 个 `CALL_*`（含 `CALL_SENTIMENT`），另有 `TEXT_EVENTS` / `VOICE_EVENTS` / `ALL_EVENTS` 三个集合 |
 | `CsRealtimeTransport` | 通道抽象 `open / push / close`，实现留在 `forge-customer-service`（`SseRealtimeTransport`） |
-| `CsChannelSignature` | 渠道回调验签：`HMAC-SHA256(timestamp + "\n" + nonce + "\n" + body)`，Base64URL 无填充；与 Python 调试端（`temp/mock_callback_sender.py`）逐字节对齐 |
+| `CsChannelSignature` | 渠道回调验签：`HMAC-SHA256(timestamp + "\n" + nonce + "\n" + body)`，Base64URL 无填充；与 Python 调试端（`scripts/e2e/mock_callback_sender.py`）逐字节对齐 |
 | `CsPiiMasker` | 手机号 / 身份证 / 银行卡 / 邮箱脱敏，落库与推送前统一调用 |
 | `CsChannelType` | 渠道类型常量（widget / h5 / wechat_mp / wecom / open_api / voice_inbound） |
 | `CsScene` | 会话场景常量（文本客服 / 语音呼入） |
@@ -24,11 +24,11 @@
 
 ## 测试
 
-3 类 13 用例，全部 `@Tag("dev")`：
+4 类 19 用例，全部 `@Tag("dev")`：
 
 ```bash
 mvn -Pdev test \
-  "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
+  "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest,LexiconSentimentAnalyzerTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am
 ```

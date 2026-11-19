@@ -34,6 +34,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SkillMcpExternalToolProviderTest {
 
+    /** 平台全量视角(空授权域 = 全部),即旧单 token 语义 */
+    private static final com.forgeagent.rag.mcp.McpCaller CALLER =
+        com.forgeagent.rag.mcp.McpCaller.platformWide("test");
+
     private final ObjectMapper om = new ObjectMapper();
 
     @Mock
@@ -75,7 +79,7 @@ class SkillMcpExternalToolProviderTest {
         when(skillMapper.selectList(any())).thenReturn(List.of(
             skill("退换货处理", "引导完成退换货申请"), skill("物流查询", "查询物流轨迹")));
 
-        JsonNode result = provider.invoke(om, "skill_list", om.createObjectNode());
+        JsonNode result = provider.invoke(om, "skill_list", om.createObjectNode(), CALLER);
         JsonNode rows = result.path("rows");
         assertEquals(2, rows.size());
         assertEquals("退换货处理", rows.get(0).path("name").asText());
@@ -89,7 +93,7 @@ class SkillMcpExternalToolProviderTest {
         when(skillMapper.selectOne(any())).thenReturn(skill("退换货处理", "摘要"));
 
         JsonNode args = om.readTree("{\"name\":\"退换货处理\"}");
-        JsonNode result = provider.invoke(om, "skill_get", args);
+        JsonNode result = provider.invoke(om, "skill_get", args, CALLER);
         JsonNode row = result.path("rows").get(0);
         assertTrue(row.path("instructions").asText().contains("创建工单"), "get 返回手册全文");
         assertTrue(row.path("promptFragment").asText().contains("安抚"), "提示词片段随手册下发");
@@ -101,11 +105,11 @@ class SkillMcpExternalToolProviderTest {
         when(skillMapper.selectOne(any())).thenReturn(null);
 
         JsonNode blankArgs = om.createObjectNode();
-        assertThrows(IllegalArgumentException.class, () -> provider.invoke(om, "skill_get", blankArgs),
+        assertThrows(IllegalArgumentException.class, () -> provider.invoke(om, "skill_get", blankArgs, CALLER),
             "缺 name 参数必须抛业务校验异常");
         JsonNode unknownArgs = om.createObjectNode().put("name", "不存在的技能");
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-            () -> provider.invoke(om, "skill_get", unknownArgs),
+            () -> provider.invoke(om, "skill_get", unknownArgs, CALLER),
             "未知/停用技能必须抛业务校验异常(端点转为 isError 透出消息)");
         assertTrue(ex.getMessage().contains("不存在或已停用"));
     }

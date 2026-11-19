@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -76,5 +77,28 @@ class ReleaseGateServiceEvaluateTest {
         ReleaseGateService.GateResult previewed = service.preview(agent());
         assertEquals(evaluated.checks(), previewed.checks());
         assertEquals(evaluated.reason(), previewed.reason());
+    }
+
+    @Test
+    void skillBindingReadyIsReportedEvenWithoutSamples() {
+        stubEmptySamples();
+        ReleaseGateService.GateResult result = service.evaluate(agent());
+
+        assertEquals(Boolean.TRUE, result.checks().get("skillBindingReady"));
+        assertEquals(java.util.List.of(), result.checks().get("disabledSkills"));
+    }
+
+    @Test
+    void disabledInstalledSkillBlocksRelease() {
+        stubEmptySamples();
+        // 更具体的 stub 放在后面,优先于 anyString 的全局空返回
+        when(jdbc.queryForList(contains("JOIN agent_skill s"), any(Object[].class)))
+            .thenReturn(List.of(java.util.Map.of("name", "退换货处理")));
+
+        ReleaseGateService.GateResult result = service.evaluate(agent());
+
+        assertFalse(result.passed());
+        assertTrue(result.reason().contains("已安装技能已停用"));
+        assertEquals(List.of("退换货处理"), result.checks().get("disabledSkills"));
     }
 }

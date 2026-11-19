@@ -61,9 +61,10 @@
           </template>
         </el-table-column>
         <el-table-column label="创建时间" prop="createTime" width="170" align="center" />
-        <el-table-column label="操作" width="470" align="center" fixed="right">
+        <el-table-column label="操作" width="530" align="center" fixed="right">
           <template #default="scope">
             <el-button v-hasPermi="['agent:agent:list']" size="small" text type="info" icon="Files" @click="openVersions(scope.row as AgentVO)">版本</el-button>
+            <el-button v-hasPermi="['agent:skill:list']" size="small" text type="info" icon="skill" @click="openSkills(scope.row as AgentVO)">技能</el-button>
             <el-button v-hasPermi="['agent:agent:list']" size="small" text type="info" icon="DataAnalysis" @click="openEval(scope.row as AgentVO)">评测</el-button>
             <el-button v-if="scope.row.status !== '1'" v-hasPermi="['agent:agent:edit']" size="small" text type="success" icon="Promotion" @click="handlePublish(scope.row as AgentVO)">发布</el-button>
             <el-button v-if="scope.row.status === '1'" v-hasPermi="['agent:agent:edit']" size="small" text type="warning" icon="SwitchButton" @click="handleOffline(scope.row as AgentVO)">停用</el-button>
@@ -224,6 +225,7 @@
 
     <!-- P1:版本/门禁、效果评测、Prompt 模板中心 -->
     <VersionDrawer v-model="versionVisible" :agent-id="versionAgent.id" :agent-name="versionAgent.name" @rolled-back="getList" />
+    <SkillDrawer v-model="skillVisible" :agent-id="skillAgent.id" :agent-name="skillAgent.name" />
     <EvalDrawer v-model="evalVisible" :agent-id="evalAgentId" :workspace-id="queryParam.workspaceId" />
     <PromptCenterDrawer v-model="promptVisible" :workspace-id="queryParam.workspaceId" @changed="loadPromptTemplates" />
     <EndpointDrawer v-model="endpointVisible" :agent-id="endpointAgentId" />
@@ -247,6 +249,7 @@ import type { KnowledgeVO } from '@/api/agent/knowledge/types';
 import type { AgentDraftForm } from '@/api/agent/session/types';
 import DebugDrawer from './components/DebugDrawer.vue';
 import VersionDrawer from './components/VersionDrawer.vue';
+import SkillDrawer from './components/SkillDrawer.vue';
 import EvalDrawer from './components/EvalDrawer.vue';
 import PromptCenterDrawer from './components/PromptCenterDrawer.vue';
 import EndpointDrawer from './components/EndpointDrawer.vue';
@@ -317,6 +320,15 @@ const loadPromptTemplates = async () => {
 const openVersions = (row: AgentVO) => {
   versionAgent.value = { id: row.id, name: row.name };
   versionVisible.value = true;
+};
+
+/* ---------- A1:技能装配(应用视角已装技能 / 卸载) ---------- */
+const skillVisible = ref(false);
+const skillAgent = ref<{ id: number | string; name: string }>({ id: '', name: '' });
+
+const openSkills = (row: AgentVO) => {
+  skillAgent.value = { id: row.id, name: row.name };
+  skillVisible.value = true;
 };
 
 const openEval = (row: AgentVO) => {

@@ -1,4 +1,4 @@
-import type { SkillForm, SkillQuery, SkillVO } from '@/api/agent/skill/types';
+import type { AgentSkillBindVO, SkillForm, SkillInstallTargetVO, SkillQuery, SkillVO } from '@/api/agent/skill/types';
 import type { PageResult } from '@/api/types';
 import type { AxiosPromise } from '@/utils/api-types';
 import request from '@/utils/request';
@@ -68,5 +68,21 @@ export const uninstallSkill = (skillId: string | number, agentId: string | numbe
   return request({
     url: `/agent/skill/${skillId}/uninstall/${agentId}`,
     method: 'post'
+  });
+};
+
+/** 技能视角的安装目标清单(全部已发布应用 + 安装态) */
+export const listInstallTargets = (skillId: string | number): AxiosPromise<SkillInstallTargetVO[]> => {
+  return request({
+    url: `/agent/skill/${skillId}/install-targets`,
+    method: 'get'
+  });
+};
+
+/** 应用视角的已装技能清单(含已停用) */
+export const listAgentSkills = (agentId: string | number): AxiosPromise<AgentSkillBindVO[]> => {
+  return request({
+    url: `/agent/skill/installed/${agentId}`,
+    method: 'get'
   });
 };

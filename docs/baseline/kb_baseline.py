@@ -30,7 +30,7 @@ MYSQL = r"D:\Programs\MySQL9.7\bin\mysql.exe"
 SQL_ARGS = [MYSQL, "-uroot", "-pHong1234", "-D", "forge-vue",
             "--default-character-set=utf8mb4", "-N", "-B", "-e"]
 JAVA = r"D:\Programs\OpenJDK25\bin\java.exe"
-A1LOGIN = BASE / "temp" / "A1Login.java"
+A1LOGIN = BASE.parent / "scripts" / "e2e" / "A1Login.java"
 CLIENT_ID = "e5cd7e4891bf95d1d19206ce24a7b32e"
 PORT = 18093
 BASE_URL = f"http://127.0.0.1:{PORT}"
@@ -359,7 +359,7 @@ def render_markdown(r):
     lines.append("# 知识库检索 R0 基线（%s）" % r["generatedAt"])
     lines.append("")
     lines.append("> 用途：后续批次（R2 剩余 / R3 评测改造）改动前先与本文档对比，判断是变好还是变差。")
-    lines.append("> 复现：`python temp/kb_baseline.py`（自动建库、灌语料、跑用例、写回本文件）。")
+    lines.append("> 复现：`python docs/baseline/kb_baseline.py`（自动建库、灌语料、跑用例、写回本文件）。")
     lines.append("")
     lines.append("## 1. 环境与口径")
     lines.append("")
