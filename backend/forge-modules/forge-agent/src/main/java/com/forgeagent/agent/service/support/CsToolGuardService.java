@@ -10,11 +10,14 @@ import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.AgentTool;
 import io.agentscope.core.tool.ToolCallParam;
 import org.redisson.api.RAtomicLong;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentCsActionLog;
+import com.forgeagent.agent.domain.AgentCsAuditLog;
+import com.forgeagent.agent.mapper.AgentCsActionLogMapper;
+import com.forgeagent.agent.mapper.AgentCsAuditLogMapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
@@ -52,7 +55,8 @@ public class CsToolGuardService {
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{(\\w+)}");
     private static final int SUMMARY_MAX = 300;
 
-    private final JdbcTemplate jdbc;
+    private final AgentCsActionLogMapper actionLogMapper;
+    private final AgentCsAuditLogMapper auditLogMapper;
 
     /** 构造工具装饰器:仅对平台注册工具(名字能对上实体)生效,MCP/内置工具原样透传。 */
     public UnaryOperator<AgentTool> decorator(CsChatFacade.GuardContext ctx,
@@ -62,7 +66,7 @@ public class CsToolGuardService {
         }
         return tool -> {
             com.forgeagent.agent.domain.AgentTool def = toolsByName.get(tool.getName());
-            return def == null ? tool : new CsToolGuard(tool, def, ctx, jdbc);
+            return def == null ? tool : new CsToolGuard(tool, def, ctx, actionLogMapper, auditLogMapper);
         };
     }
 
@@ -90,7 +94,8 @@ public class CsToolGuardService {
      * 客服护栏装饰器:包装在审批门之外的最后一道。
      */
     record CsToolGuard(AgentTool delegate, com.forgeagent.agent.domain.AgentTool def,
-                       CsChatFacade.GuardContext ctx, JdbcTemplate jdbc) implements AgentTool {
+                       CsChatFacade.GuardContext ctx, AgentCsActionLogMapper actionLogMapper,
+                       AgentCsAuditLogMapper auditLogMapper) implements AgentTool {
 
         @Override
         public String getName() {
@@ -176,39 +181,44 @@ public class CsToolGuardService {
                 return Reservation.NONE;
             }
             String actionKey = resolveActionKey(template, param.getInput(), def.getName());
-            List<Map<String, Object>> rows;
+            AgentCsActionLog existing;
             try {
-                rows = jdbc.queryForList(
-                    "SELECT id,status,result_summary FROM agent_cs_action_log "
-                        + "WHERE conversation_id=? AND action_key=? LIMIT 1",
-                    ctx.conversationId(), actionKey);
+                existing = actionLogMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentCsActionLog>()
+                        .eq(AgentCsActionLog::getConversationId, ctx.conversationId())
+                        .eq(AgentCsActionLog::getActionKey, actionKey)
+                        .last("LIMIT 1"));
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 幂等查询失败(降级放行) conversation={} key={}: {}",
                     ctx.conversationId(), actionKey, e.getMessage());
                 return Reservation.NONE;
             }
-            if (!rows.isEmpty()) {
-                Map<String, Object> row = rows.get(0);
-                String status = row.get("status") == null ? "" : String.valueOf(row.get("status"));
+            if (existing != null) {
+                String status = existing.getStatus() == null ? "" : existing.getStatus();
                 if ("FAILED".equals(status)) {
-                    jdbc.update("UPDATE agent_cs_action_log SET status='RUNNING',create_time=NOW() "
-                        + "WHERE id=?", row.get("id"));
-                    return new Reservation(((Number) row.get("id")).longValue(), false);
+                    actionLogMapper.update(null, new LambdaUpdateWrapper<AgentCsActionLog>()
+                        .eq(AgentCsActionLog::getId, existing.getId())
+                        .set(AgentCsActionLog::getStatus, "RUNNING")
+                        .set(AgentCsActionLog::getCreateTime, new java.util.Date()));
+                    return new Reservation(existing.getId(), false);
                 }
                 log.info("[CsToolGuard] 幂等命中 conversation={} tool={} key={} prevStatus={}",
                     ctx.conversationId(), def.getName(), actionKey, status);
                 return new Reservation(null, true);
             }
             try {
-                jdbc.update("INSERT INTO agent_cs_action_log "
-                        + "(conversation_id,visitor_id,workspace_id,channel_code,tool_name,action_key,"
-                        + "risk_level,status,result_summary,create_time) VALUES (?,?,?,?,?,?,?,'RUNNING',NULL,NOW())",
-                    ctx.conversationId(), ctx.visitorId(), ctx.workspaceId(), ctx.channelCode(),
-                    def.getName(), actionKey, risk);
-                Long id = jdbc.queryForObject(
-                    "SELECT id FROM agent_cs_action_log WHERE conversation_id=? AND action_key=? LIMIT 1",
-                    Long.class, ctx.conversationId(), actionKey);
-                return new Reservation(id, false);
+                AgentCsActionLog insert = new AgentCsActionLog();
+                insert.setConversationId(ctx.conversationId());
+                insert.setVisitorId(ctx.visitorId());
+                insert.setWorkspaceId(ctx.workspaceId());
+                insert.setChannelCode(ctx.channelCode());
+                insert.setToolName(def.getName());
+                insert.setActionKey(actionKey);
+                insert.setRiskLevel(risk);
+                insert.setStatus("RUNNING");
+                insert.setCreateTime(new java.util.Date());
+                actionLogMapper.insert(insert);
+                return new Reservation(insert.getId(), false);
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 幂等占位失败(降级放行) conversation={} key={}: {}",
                     ctx.conversationId(), actionKey, e.getMessage());
@@ -242,8 +252,10 @@ public class CsToolGuardService {
                 if (summary != null && summary.length() > SUMMARY_MAX) {
                     summary = summary.substring(0, SUMMARY_MAX);
                 }
-                jdbc.update("UPDATE agent_cs_action_log SET status=?,result_summary=? WHERE id=?",
-                    success ? "DONE" : "FAILED", summary, logId);
+                actionLogMapper.update(null, new LambdaUpdateWrapper<AgentCsActionLog>()
+                    .eq(AgentCsActionLog::getId, logId)
+                    .set(AgentCsActionLog::getStatus, success ? "DONE" : "FAILED")
+                    .set(AgentCsActionLog::getResultSummary, summary));
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 动作日志收尾失败 logId={}: {}", logId, e.getMessage());
             }
@@ -254,8 +266,10 @@ public class CsToolGuardService {
                 return;
             }
             try {
-                jdbc.update("UPDATE agent_cs_action_log SET status=?,result_summary=? WHERE id=?",
-                    status, summary, logId);
+                actionLogMapper.update(null, new LambdaUpdateWrapper<AgentCsActionLog>()
+                    .eq(AgentCsActionLog::getId, logId)
+                    .set(AgentCsActionLog::getStatus, status)
+                    .set(AgentCsActionLog::getResultSummary, summary));
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 动作日志标记失败 logId={}: {}", logId, e.getMessage());
             }
@@ -296,11 +310,17 @@ public class CsToolGuardService {
                 if (detail.length() > 900) {
                     detail = detail.substring(0, 900);
                 }
-                jdbc.update("INSERT INTO agent_cs_audit_log "
-                        + "(channel_code,event_type,actor_type,actor_id,detail,workspace_id,result_code,duration_ms,create_time) "
-                        + "VALUES (?,?,?,?,?,?,?,?,NOW())",
-                    ctx.channelCode(), eventType, "VISITOR", String.valueOf(ctx.visitorId()),
-                    detail, ctx.workspaceId(), resultCode, durationMs);
+                AgentCsAuditLog log = new AgentCsAuditLog();
+                log.setChannelCode(ctx.channelCode());
+                log.setEventType(eventType);
+                log.setActorType("VISITOR");
+                log.setActorId(String.valueOf(ctx.visitorId()));
+                log.setDetail(detail);
+                log.setWorkspaceId(ctx.workspaceId());
+                log.setResultCode(resultCode);
+                log.setDurationMs(durationMs);
+                log.setCreateTime(new java.util.Date());
+                auditLogMapper.insert(log);
             } catch (Exception e) {
                 log.warn("[CsToolGuard] 审计写入失败 tool={}: {}", def.getName(), e.getMessage());
             }

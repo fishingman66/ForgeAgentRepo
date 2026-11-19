@@ -3,27 +3,27 @@
     <div v-loading="loading" class="run-trace">
       <template v-if="detail?.run">
         <div class="run-summary">
-          <div class="run-kv"><span>运行 ID</span><b class="mono">{{ detail.run.run_id }}</b></div>
+          <div class="run-kv"><span>运行 ID</span><b class="mono">{{ detail.run.runId }}</b></div>
           <div class="run-kv"><span>状态</span><b :class="statusClass">{{ detail.run.status }}</b></div>
-          <div class="run-kv"><span>类型 / 模型</span><b>{{ detail.run.run_type }} · {{ detail.run.model_name || '—' }}</b></div>
-          <div class="run-kv"><span>总耗时</span><b>{{ fmtMs(detail.run.latency_ms) }}</b></div>
-          <div class="run-kv"><span>首 Token</span><b>{{ fmtMs(detail.run.first_token_latency_ms) }}</b></div>
-          <div class="run-kv"><span>Token</span><b>{{ detail.run.total_tokens ?? 0 }}（入 {{ detail.run.prompt_tokens ?? 0 }} / 出 {{ detail.run.completion_tokens ?? 0 }}）</b></div>
-          <div v-if="detail.run.error_message" class="run-kv"><span>错误</span><b class="err">{{ detail.run.error_message }}</b></div>
+          <div class="run-kv"><span>类型 / 模型</span><b>{{ detail.run.runType }} · {{ detail.run.modelName || '—' }}</b></div>
+          <div class="run-kv"><span>总耗时</span><b>{{ fmtMs(detail.run.latencyMs) }}</b></div>
+          <div class="run-kv"><span>首 Token</span><b>{{ fmtMs(detail.run.firstTokenLatencyMs) }}</b></div>
+          <div class="run-kv"><span>Token</span><b>{{ detail.run.totalTokens ?? 0 }}（入 {{ detail.run.promptTokens ?? 0 }} / 出 {{ detail.run.completionTokens ?? 0 }}）</b></div>
+          <div v-if="detail.run.errorMessage" class="run-kv"><span>错误</span><b class="err">{{ detail.run.errorMessage }}</b></div>
         </div>
 
         <div class="run-steps-title">执行步骤（{{ detail.steps.length }}）</div>
         <el-timeline v-if="detail.steps.length">
           <el-timeline-item
-            v-for="s in detail.steps" :key="s.step_no"
-            :timestamp="`#${s.step_no} · ${fmtMs(s.latency_ms)}`" placement="top"
-            :color="stepColor(s.step_type)"
+            v-for="s in detail.steps" :key="s.stepNo"
+            :timestamp="`#${s.stepNo} · ${fmtMs(s.latencyMs)}`" placement="top"
+            :color="stepColor(s.stepType)"
           >
             <div class="step-card">
               <div class="step-head">
-                <el-tag size="small" effect="plain">{{ s.step_type }}</el-tag>
-                <span class="step-name">{{ s.step_name }}</span>
-                <span v-if="s.token_usage" class="step-tokens">{{ s.token_usage }} tok</span>
+                <el-tag size="small" effect="plain">{{ s.stepType }}</el-tag>
+                <span class="step-name">{{ s.stepName }}</span>
+                <span v-if="s.tokenUsage" class="step-tokens">{{ s.tokenUsage }} tok</span>
               </div>
               <pre v-if="s.payload" class="step-payload">{{ pretty(s.payload) }}</pre>
             </div>

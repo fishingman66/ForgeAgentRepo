@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -46,20 +47,19 @@ public class CsVisitorController extends BaseController {
     private final com.forgeagent.customerservice.service.CsAttachmentService attachmentService;
 
     @PostMapping("/sessions")
-    public R<Map<String, Object>> createSession(@PathVariable String channelCode,
-                                                @RequestBody(required = false) Map<String, Object> body,
+    public R<com.forgeagent.customerservice.domain.vo.CsSendResultVo> createSession(@PathVariable String channelCode,
+                                                @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsVisitorCreateSessionBo bo,
                                                 HttpServletRequest request) {
         CsChannel channel = guard.require(channelCode);
         guard.checkRateLimit(channel, clientIp(request));
         guard.checkOrigin(channel, request.getHeader("Origin"));
-        Map<String, Object> payload = body == null ? Map.of() : body;
         return R.ok(visitorService.createSession(channel,
-            String.valueOf(payload.getOrDefault("externalUserId", ""))));
+            bo == null || bo.getExternalUserId() == null ? "" : bo.getExternalUserId()));
     }
 
     @PostMapping("/sessions/{cid}/messages")
-    public R<Map<String, Object>> send(@PathVariable String channelCode, @PathVariable Long cid,
-                                       @RequestBody Map<String, Object> body,
+    public R<com.forgeagent.customerservice.domain.vo.CsSendResultVo> send(@PathVariable String channelCode, @PathVariable Long cid,
+                                       @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsVisitorSendBo bo,
                                        HttpServletRequest request) {
         CsChannel channel = guard.require(channelCode);
         guard.checkRateLimit(channel, clientIp(request));
@@ -67,7 +67,7 @@ public class CsVisitorController extends BaseController {
         guard.checkOrigin(channel, request.getHeader("Origin"));
         Long visitorId = visitorId(channelCode, request);
         return R.ok(visitorService.send(channel, cid, visitorId,
-            str(body.get("clientMsgId")), str(body.get("content")), longIds(body.get("attachmentIds"))));
+            bo.getClientMsgId(), bo.getContent(), bo.getAttachmentIds() == null ? java.util.List.of() : bo.getAttachmentIds()));
     }
 
     /**
@@ -108,40 +108,41 @@ public class CsVisitorController extends BaseController {
     }
 
     @PostMapping("/sessions/{cid}/handoff")
-    public R<Map<String, Object>> handoff(@PathVariable String channelCode, @PathVariable Long cid,
-                                          @RequestBody(required = false) Map<String, Object> body,
+    public R<com.forgeagent.customerservice.domain.vo.CsHandoffViewVo> handoff(@PathVariable String channelCode, @PathVariable Long cid,
+                                          @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsHandoffBo bo,
                                           HttpServletRequest request) {
         CsChannel channel = guard.require(channelCode);
         Long visitorId = visitorId(channelCode, request);
-        Map<String, Object> payload = body == null ? Map.of() : body;
-        return R.ok(visitorService.handoff(channel, cid, visitorId, str(payload.get("reason"))));
+        return R.ok(visitorService.handoff(channel, cid, visitorId, bo == null ? null : bo.getReason()));
     }
 
     /** 事件重放:基于 RunEventBuffer 的单调序号,前端带 after 游标断线续传。 */
     @GetMapping("/sessions/{cid}/events")
-    public R<List<Map<String, Object>>> events(@PathVariable String channelCode, @PathVariable Long cid,
+    public R<List<com.forgeagent.customerservice.domain.vo.CsEventItemVo>> events(@PathVariable String channelCode, @PathVariable Long cid,
                                                @RequestParam(defaultValue = "0") long after,
                                                HttpServletRequest request) {
         Long visitorId = visitorId(channelCode, request);
         visitorService.requireConversation(guard.require(channelCode), cid, visitorId);
         List<RunEventBuffer.RunEvent> raw = runEventBuffer.replay(SseRealtimeTransport.runKey(cid), after);
-        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        List<com.forgeagent.customerservice.domain.vo.CsEventItemVo> result = new java.util.ArrayList<>();
         for (RunEventBuffer.RunEvent e : raw) {
-            Map<String, Object> one = new LinkedHashMap<>();
-            one.put("id", e.sequence());
-            one.put("event", e.name());
-            one.put("data", e.data());
+            com.forgeagent.customerservice.domain.vo.CsEventItemVo one = new com.forgeagent.customerservice.domain.vo.CsEventItemVo();
+            one.setId(e.sequence());
+            one.setEvent(e.name());
+            one.setData(e.data());
             result.add(one);
         }
         return R.ok(result);
     }
 
     @PostMapping("/tickets/{ticketId}/confirm")
-    public R<Map<String, Object>> confirm(@PathVariable String channelCode, @PathVariable Long ticketId,
+    public R<com.forgeagent.customerservice.domain.vo.CsConfirmVo> confirm(@PathVariable String channelCode, @PathVariable Long ticketId,
                                           HttpServletRequest request) {
         Long visitorId = visitorId(channelCode, request);
-        return R.ok(Map.of("status", ticketService.transition(ticketId, "RESOLVED", "CONFIRM",
-            "VISITOR", visitorId, null).getStatus()));
+        com.forgeagent.customerservice.domain.vo.CsConfirmVo data = new com.forgeagent.customerservice.domain.vo.CsConfirmVo();
+        data.setStatus(ticketService.transition(ticketId, "RESOLVED", "CONFIRM",
+            "VISITOR", visitorId, null).getStatus());
+        return R.ok(data);
     }
 
     @DeleteMapping("/sessions/{cid}")
@@ -153,25 +154,19 @@ public class CsVisitorController extends BaseController {
 
     /** C2:访客提交会话满意度(1-5 分)。 */
     @PostMapping("/sessions/{cid}/csat")
-    public R<Object> submitCsat(@PathVariable String channelCode, @PathVariable Long cid,
-                                @RequestBody Map<String, Object> body,
+    public R<Void> submitCsat(@PathVariable String channelCode, @PathVariable Long cid,
+                                @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsCsatSubmitBo bo,
                                 HttpServletRequest request) {
         Long visitorId = visitorId(channelCode, request);
-        Integer score;
-        try {
-            score = body.get("score") == null ? null : Integer.valueOf(String.valueOf(body.get("score")));
-        } catch (NumberFormatException e) {
-            throw new com.forgeagent.common.core.exception.ServiceException("评分须为 1 到 5 分");
-        }
-        return R.ok(csatService.submit(channelCode, cid, visitorId, score,
-            str(body.get("comment")), str(body.get("tags"))));
+        csatService.submit(channelCode, cid, visitorId, bo.getScore(), bo.getComment(), bo.getTags());
+        return R.ok();
     }
 
     /** C4:逐字流式发送消息(SSE),带 id: 帧并写入 RunEventBuffer 供断线续传。 */
     @PostMapping(value = "/sessions/{cid}/messages/stream",
         produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
     public void stream(@PathVariable String channelCode, @PathVariable Long cid,
-                       @RequestBody Map<String, Object> body,
+                       @RequestBody com.forgeagent.customerservice.domain.bo.CsVisitorSendBo bo,
                        jakarta.servlet.http.HttpServletRequest request,
                        jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
         CsChannel channel = guard.require(channelCode);
@@ -204,7 +199,7 @@ public class CsVisitorController extends BaseController {
             }
         };
         streamService.stream(channel, cid, visitorId,
-            str(body.get("clientMsgId")), str(body.get("content")), emitter);
+            bo.getClientMsgId(), bo.getContent(), emitter);
         writer.write("event: done\ndata: {}\n\n");
         writer.flush();
     }

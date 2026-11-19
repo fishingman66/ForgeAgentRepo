@@ -93,7 +93,7 @@ public class CsVisitorService {
     private final CsKgExpandMetricService kgExpandMetricService;
 
     /** 建立或复用活跃会话;返回 conversationId / visitorToken / reused。 */
-    public Map<String, Object> createSession(CsChannel channel, String externalUserId) {
+    public com.forgeagent.customerservice.domain.vo.CsSendResultVo createSession(CsChannel channel, String externalUserId) {
         if (externalUserId == null || externalUserId.isBlank() || externalUserId.length() > 128) {
             throw new ServiceException("访客标识无效");
         }
@@ -141,19 +141,21 @@ public class CsVisitorService {
         conv.setStatus("ACTIVE");
         conv.setLastVisitorAt(new Date());
         conv.setCreateTime(new Date());
+        // D1:会话创建时判定一次灰度版本并锁进会话,同会话后续轮次沿用(ADR-03)
+        conv.setPinnedVersion(chatFacade.decidePinnedVersion(channel.getAgentId(), visitor.getId()));
         conversationMapper.insert(conv);
         transport.open(new CsRealtimeTransport.CsPeer(conv.getId(), visitor.getId(), channel.getChannelCode()));
         return sessionView(conv, visitor, false);
     }
 
     /** 无附件的兼容入口(渠道回调等不涉及附件的链路走这条)。 */
-    public Map<String, Object> send(CsChannel channel, Long conversationId, Long visitorId,
+    public com.forgeagent.customerservice.domain.vo.CsSendResultVo send(CsChannel channel, Long conversationId, Long visitorId,
                                     String clientMsgId, String content) {
         return send(channel, conversationId, visitorId, clientMsgId, content, List.of());
     }
 
     /** 发消息:幂等受理 → PII 脱敏 → 知识检索 → 机器人回答 / 多语种兜底转人工。 */
-    public Map<String, Object> send(CsChannel channel, Long conversationId, Long visitorId,
+    public com.forgeagent.customerservice.domain.vo.CsSendResultVo send(CsChannel channel, Long conversationId, Long visitorId,
                                     String clientMsgId, String content, List<Long> attachmentIds) {
         boolean hasAttachment = attachmentIds != null && !attachmentIds.isEmpty();
         if ((content == null || content.isBlank()) && !hasAttachment) {
@@ -175,12 +177,12 @@ public class CsVisitorService {
             .eq(CsMessageReceipt::getSessionId, dedupKey)
             .eq(CsMessageReceipt::getClientMsgId, clientMsgId).last("limit 1"));
         if (old != null) {
-            Map<String, Object> reused = new LinkedHashMap<>();
-            reused.put("acceptance", "ACCEPTED");
-            reused.put("reused", true);
-            reused.put("clientMsgId", clientMsgId);
-            reused.put("messageId", old.getMessageId());
-            reused.put("content", old.getReplyContent() == null ? "" : old.getReplyContent());
+            com.forgeagent.customerservice.domain.vo.CsSendResultVo reused = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+            // reused.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+            reused.setReused(true);
+            reused.setClientMsgId(clientMsgId);
+            reused.setMessageId(old.getMessageId());
+            reused.setContent(old.getReplyContent() == null ? "" : old.getReplyContent());
             return reused;
         }
 
@@ -327,18 +329,18 @@ public class CsVisitorService {
             conv.getId(), conv.getTicketId(), channel.getWorkspaceId(), channel.getAgentId(),
             channel.getChannelCode(), content, parseIds(channel.getKnowledgeIds())));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", messageId);
-        result.put("content", reply);
-        result.put("fallback", fallback);
-        result.put("faqHit", faqHit);
-        result.put("cached", cachedHit);
-        result.put("handoff", conv.getTicketId() != null);
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(messageId);
+        result.setContent(reply);
+        result.setFallback(fallback);
+        result.setFaqHit(faqHit);
+        result.setCached(cachedHit);
+        result.setHandoff(conv.getTicketId() != null);
         return result;
     }
 
@@ -346,7 +348,7 @@ public class CsVisitorService {
      * 规则触发的转人工(P0 差距 4.1 / B2 规则引擎):建单 + 回转接文案 + 推终态事件 + 发布 A1 推荐事件。
      * 与正常路径共用幂等回执与事件格式,前端不需要区分两条分支;reason 记录命中规则便于归因。
      */
-    private Map<String, Object> keywordHandoff(CsChannel channel, CsConversation conv,
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo keywordHandoff(CsChannel channel, CsConversation conv,
                                                long dedupKey, String clientMsgId, String content,
                                                String handoffBy, String reason) {
         CsTicket ticket = ticketService.requestHandoff(conv, reason);
@@ -361,19 +363,19 @@ public class CsVisitorService {
             conv.getId(), ticket.getId(), channel.getWorkspaceId(), channel.getAgentId(),
             channel.getChannelCode(), content, parseIds(channel.getKnowledgeIds())));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", null);
-        result.put("content", reply);
-        result.put("fallback", false);
-        result.put("faqHit", false);
-        result.put("handoff", true);
-        result.put("handoffBy", handoffBy);
-        result.put("ticketId", ticket.getId());
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setHandoff(true);
+        result.setHandoffBy(handoffBy);
+        result.setTicketId(ticket.getId());
         return result;
     }
 
@@ -381,7 +383,7 @@ public class CsVisitorService {
     private CsChatFacade.GuardContext guardContext(CsChannel channel, CsConversation conv, Long visitorId) {
         String binding = channel.getIdentityBinding();
         return new CsChatFacade.GuardContext(conv.getId(), visitorId, channel.getWorkspaceId(),
-            channel.getChannelCode(), binding != null && !binding.isBlank());
+            channel.getChannelCode(), binding != null && !binding.isBlank(), conv.getPinnedVersion());
     }
 
     /** 转人工关键词:渠道配置优先,空则平台默认(判定口径见 CsHandoffKeywords)。 */
@@ -415,7 +417,7 @@ public class CsVisitorService {
      *
      * <p>不发布 A1 推荐事件——没有文字内容可推荐。</p>
      */
-    private Map<String, Object> attachmentOnlyReply(CsChannel channel, CsConversation conv,
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo attachmentOnlyReply(CsChannel channel, CsConversation conv,
                                                     long dedupKey, String clientMsgId, int count) {
         CsTicket ticket = ticketService.requestHandoff(conv, "attachment_only");
         String reply = "已收到你上传的 " + count + " 个文件，正在为你转接人工客服处理。";
@@ -426,21 +428,21 @@ public class CsVisitorService {
             Map.of("content", reply, "clientMsgId", clientMsgId, "fallback", false,
                 "faqHit", false, "handoff", true, "attachmentOnly", true)));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", null);
-        result.put("content", reply);
-        result.put("fallback", false);
-        result.put("faqHit", false);
-        result.put("cached", false);
-        result.put("handoff", true);
-        result.put("handoffBy", "attachment");
-        result.put("attachmentCount", count);
-        result.put("ticketId", ticket.getId());
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setCached(false);
+        result.setHandoff(true);
+        result.setHandoffBy("attachment");
+        result.setAttachments(new java.util.ArrayList<>(java.util.Collections.nCopies(count, null))); // attachmentCount → attachments.size()
+        result.setTicketId(ticket.getId());
         return result;
     }
 
@@ -449,7 +451,7 @@ public class CsVisitorService {
      *
      * <p>不在这里预生成回复、也不走检索——配额的意义就是省钱,任何模型侧动作都违背目的。</p>
      */
-    private Map<String, Object> quotaBlocked(CsChannel channel, CsConversation conv,
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo quotaBlocked(CsChannel channel, CsConversation conv,
                                              long dedupKey, String clientMsgId) {
         CsTicket ticket = ticketService.requestHandoff(conv, "quota_exceeded");
         String reply = "今日咨询量较大，已为你转接人工客服，请稍候。";
@@ -462,21 +464,21 @@ public class CsVisitorService {
         complianceService.record("QUOTA_BLOCK", "SYSTEM", null, channel.getWorkspaceId(),
             channel.getChannelCode(), "daily token quota exceeded");
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", null);
-        result.put("content", reply);
-        result.put("fallback", false);
-        result.put("faqHit", false);
-        result.put("cached", false);
-        result.put("handoff", true);
-        result.put("handoffBy", "quota");
-        result.put("quotaBlocked", true);
-        result.put("ticketId", ticket.getId());
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setCached(false);
+        result.setHandoff(true);
+        result.setHandoffBy("quota");
+        result.setQuotaBlocked(true);
+        result.setTicketId(ticket.getId());
         return result;
     }
 
@@ -486,7 +488,7 @@ public class CsVisitorService {
      * <p>收齐后直接建单——退款/开票这类诉求本来就要人工核实,继续让模型对话没有意义;
      * 分析结果同时随回执返回,坐席能看到客户填的结构化信息。</p>
      */
-    private Map<String, Object> slotReply(CsChannel channel, CsConversation conv, long dedupKey,
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo slotReply(CsChannel channel, CsConversation conv, long dedupKey,
                                           String clientMsgId, String content,
                                           CsSlotFillingService.SlotOutcome outcome) {
         String reply = outcome.prompt();
@@ -503,22 +505,22 @@ public class CsVisitorService {
             conv.getId(), conv.getTicketId(), channel.getWorkspaceId(), channel.getAgentId(),
             channel.getChannelCode(), content, parseIds(channel.getKnowledgeIds())));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", null);
-        result.put("content", reply);
-        result.put("fallback", false);
-        result.put("faqHit", false);
-        result.put("cached", false);
-        result.put("slotFilling", true);
-        result.put("slotForm", outcome.formName());
-        result.put("slotDone", outcome.done());
-        result.put("slotCollected", outcome.collected());
-        result.put("handoff", conv.getTicketId() != null);
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setCached(false);
+        result.setSlotFilling(true);
+        result.setSlotForm(outcome.formName());
+        result.setSlotDone(outcome.done());
+        result.setSlotCollected(outcome.collected());
+        result.setHandoff(conv.getTicketId() != null);
         return result;
     }
 
@@ -528,7 +530,7 @@ public class CsVisitorService {
      * <p>不发布 A1 推荐事件——违规原文不该成为推荐输入;审计记词条便于复盘是
      * 客户攻击还是词库误杀。</p>
      */
-    private Map<String, Object> sensitiveBlock(CsChannel channel, CsConversation conv,
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo sensitiveBlock(CsChannel channel, CsConversation conv,
                                                long dedupKey, String clientMsgId,
                                                String content, List<String> words) {
         CsTicket ticket = ticketService.requestHandoff(conv, "sensitive_word");
@@ -546,25 +548,25 @@ public class CsVisitorService {
         badcaseService.record(channel.getWorkspaceId(), "SENSITIVE_HIT", conv.getId(),
             null, null, content, "words=" + words);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("acceptance", "ACCEPTED");
-        result.put("reused", false);
-        result.put("conversationId", conv.getId());
-        result.put("sessionId", conv.getAgentSessionId());
-        result.put("clientMsgId", clientMsgId);
-        result.put("messageId", null);
-        result.put("content", reply);
-        result.put("fallback", false);
-        result.put("faqHit", false);
-        result.put("handoff", true);
-        result.put("handoffBy", "sensitive");
-        result.put("ticketId", ticket.getId());
-        result.put("blocked", true);
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        // result.put("acceptance", "ACCEPTED");  // Vo 化裁剪:常量 ACCEPTED
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setHandoff(true);
+        result.setHandoffBy("sensitive");
+        result.setTicketId(ticket.getId());
+        result.setBlocked(true);
         return result;
     }
 
     /** 主动转人工。 */
-    public Map<String, Object> handoff(CsChannel channel, Long conversationId, Long visitorId, String reason) {
+    public com.forgeagent.customerservice.domain.vo.CsHandoffViewVo handoff(CsChannel channel, Long conversationId, Long visitorId, String reason) {
         CsConversation conv = requireConversation(channel, conversationId, visitorId);
         return ticketService.handoffView(conv, reason == null ? "visitor_request" : reason);
     }
@@ -608,13 +610,13 @@ public class CsVisitorService {
         receiptMapper.insert(receipt);
     }
 
-    private Map<String, Object> sessionView(CsConversation conv, CsVisitor visitor, boolean reused) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("conversationId", conv.getId());
-        data.put("sessionId", conv.getAgentSessionId());
-        data.put("status", conv.getStatus());
-        data.put("reused", reused);
-        data.put("visitorToken", guard.issueVisitorToken(conv.getChannelCode(), visitor.getId()));
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo sessionView(CsConversation conv, CsVisitor visitor, boolean reused) {
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo data = new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        data.setConversationId(conv.getId());
+        data.setSessionId(conv.getAgentSessionId());
+        data.setStatus(conv.getStatus());
+        data.setReused(reused);
+        data.setVisitorToken(guard.issueVisitorToken(conv.getChannelCode(), visitor.getId()));
         return data;
     }
 

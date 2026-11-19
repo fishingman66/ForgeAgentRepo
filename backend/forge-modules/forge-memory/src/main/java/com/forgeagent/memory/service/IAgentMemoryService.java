@@ -110,7 +110,7 @@ public interface IAgentMemoryService {
      * 手动触发一次记忆治理(消息归档 + TTL + 配额),返回各步处理量。
      * 治理未启用(memory.governance.enabled=false)时直接报错。
      */
-    java.util.Map<String, Long> runGovernance();
+    com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo runGovernance();
 
     /**
      * 用户级遗忘(L5):级联删除该用户在指定 Agent 下的

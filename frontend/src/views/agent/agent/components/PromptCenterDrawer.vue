@@ -37,11 +37,11 @@
           <template v-if="form.id">
             <div class="section-title">版本({{ versions.length }})</div>
             <el-table :data="versions" size="small" border max-height="200">
-              <el-table-column prop="version_no" label="版本" width="70">
-                <template #default="{ row }">v{{ row.version_no }}</template>
+              <el-table-column prop="versionNo" label="版本" width="70">
+                <template #default="{ row }">v{{ row.versionNo }}</template>
               </el-table-column>
-              <el-table-column prop="content_hash" label="摘要" width="110">
-                <template #default="{ row }">{{ (row.content_hash || '').slice(0, 8) }}</template>
+              <el-table-column prop="contentHash" label="摘要" width="110">
+                <template #default="{ row }">{{ (row.contentHash || '').slice(0, 8) }}</template>
               </el-table-column>
               <el-table-column prop="remark" label="说明" show-overflow-tooltip />
               <el-table-column label="操作" width="170">
@@ -101,7 +101,7 @@ const select = async (row: PromptTemplate) => {
   const d = res.data ?? row;
   form.value = {
     id: d.id, name: d.name, description: d.description ?? '', category: d.category ?? 'system',
-    content: d.content ?? '', variableSchema: d.variable_schema ?? ''
+    content: d.content ?? '', variableSchema: d.variableSchema ?? ''
   };
   creating.value = false;
   previewText.value = '';
@@ -149,7 +149,7 @@ const publish = async () => {
 const makeStable = async (raw: any) => {
   const row = raw as PromptVersion;
   await setPromptStable(form.value.id, row.id);
-  ElMessage.success(`v${row.version_no} 已设为稳定版`);
+  ElMessage.success(`v${row.versionNo} 已设为稳定版`);
   await load();
 };
 
@@ -157,14 +157,14 @@ const preview = async (raw: any) => {
   const row = raw as PromptVersion;
   const version = await getPromptVersion(row.id);
   const res = await previewPrompt(row.id, variablesText.value || '{}');
-  const contract = parseVariableContract(version.data?.variable_schema || '');
+  const contract = parseVariableContract(version.data?.variableSchema || '');
   const contractText = contract.length
     ? contract.map((v) => `${v.name}(${v.type}${v.required ? ',必填' : ''})`).join(' / ')
     : '(无)';
   previewText.value = [
-    `模板版本: v${row.version_no}`,
+    `模板版本: v${row.versionNo}`,
     `变量契约: ${contractText}`,
-    `原始契约: ${version.data?.variable_schema || '(无)'}`,
+    `原始契约: ${version.data?.variableSchema || '(无)'}`,
     `内容摘要: ${res.data?.contentHash ?? ''}`,
     `装配层: ${(res.data?.layers ?? []).join(' / ')}`,
     '',

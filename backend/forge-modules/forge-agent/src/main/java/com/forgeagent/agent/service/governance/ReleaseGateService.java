@@ -7,7 +7,15 @@ import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.ReleaseGateExecution;
+import com.forgeagent.agent.domain.ReleaseGateWaiver;
+import com.forgeagent.agent.mapper.AgentEvalBaselineMapper;
+import com.forgeagent.agent.mapper.AgentEvalRunMapper;
+import com.forgeagent.agent.mapper.AgentRunMapper;
+import com.forgeagent.agent.mapper.AgentSkillMapper;
+import com.forgeagent.agent.mapper.ReleaseGateExecutionMapper;
+import com.forgeagent.agent.mapper.ReleaseGatePolicyMapper;
+import com.forgeagent.agent.mapper.ReleaseGateWaiverMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -36,10 +44,25 @@ public class ReleaseGateService {
                              String reason, Map<String, Object> checks) {
     }
 
-    private final JdbcTemplate jdbc;
+    private final ReleaseGateExecutionMapper executionMapper;
+    private final ReleaseGateWaiverMapper waiverMapper;
+    private final ReleaseGatePolicyMapper policyMapper;
+    private final AgentEvalRunMapper evalRunMapper;
+    private final AgentEvalBaselineMapper baselineMapper;
+    private final AgentRunMapper agentRunMapper;
+    private final AgentSkillMapper skillMapper;
 
-    public ReleaseGateService(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public ReleaseGateService(ReleaseGateExecutionMapper executionMapper, ReleaseGateWaiverMapper waiverMapper,
+                              ReleaseGatePolicyMapper policyMapper, AgentEvalRunMapper evalRunMapper,
+                              AgentEvalBaselineMapper baselineMapper, AgentRunMapper agentRunMapper,
+                              AgentSkillMapper skillMapper) {
+        this.executionMapper = executionMapper;
+        this.waiverMapper = waiverMapper;
+        this.policyMapper = policyMapper;
+        this.evalRunMapper = evalRunMapper;
+        this.baselineMapper = baselineMapper;
+        this.agentRunMapper = agentRunMapper;
+        this.skillMapper = skillMapper;
     }
 
     /** 发布前预检(只写 preview 记录,不阻断) */
@@ -177,21 +200,21 @@ public class ReleaseGateService {
             } catch (Exception e) {
                 checksJson = "{}";
             }
-            jdbc.update("""
-                    INSERT INTO release_gate_execution
-                      (agent_id,target_version,status,checks_json,reason,waived,requested_by,create_time)
-                    VALUES (?,?,?,?,?,?,?,NOW())
-                    """, agent.getId(), agent.getVersion(), status, checksJson,
-                reason, waived ? "1" : "0", currentUserId());
+            ReleaseGateExecution execution = new ReleaseGateExecution();
+            execution.setAgentId(agent.getId());
+            execution.setTargetVersion(agent.getVersion());
+            execution.setStatus(status);
+            execution.setChecksJson(checksJson);
+            execution.setReason(reason);
+            execution.setWaived(waived ? "1" : "0");
+            execution.setRequestedBy(currentUserId());
+            executionMapper.insert(execution);
         }
         return new GateResult(passed, waived, sampleAvailable, reason, checks);
     }
 
-    public List<Map<String, Object>> listExecutions(Long agentId) {
-        return jdbc.queryForList("""
-                SELECT id,agent_id,target_version,status,reason,waived,checks_json,create_time
-                FROM release_gate_execution WHERE agent_id=? ORDER BY id DESC LIMIT 50
-                """, agentId);
+    public List<com.forgeagent.agent.domain.vo.ReleaseGateExecutionVo> listExecutions(Long agentId) {
+        return executionMapper.listByAgent(agentId);
     }
 
     // ------------------------------------------------------------------
@@ -202,84 +225,66 @@ public class ReleaseGateService {
         if (StringUtils.isBlank(reason)) {
             throw new ServiceException("豁免申请必须填写理由");
         }
-        jdbc.update("""
-                INSERT INTO release_gate_waiver (agent_id,reason,status,requested_by,create_time)
-                VALUES (?,?,'pending',?,NOW())
-                """, agentId, reason, currentUserId());
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        ReleaseGateWaiver waiver = new ReleaseGateWaiver();
+        waiver.setAgentId(agentId);
+        waiver.setReason(reason);
+        waiver.setStatus("pending");
+        waiver.setRequestedBy(currentUserId());
+        waiverMapper.insert(waiver);
+        return waiver.getId();
     }
 
     public void approveWaiver(Long waiverId, boolean approve) {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-            "SELECT * FROM release_gate_waiver WHERE id=?", waiverId);
-        if (rows.isEmpty()) {
+        ReleaseGateWaiver waiver = waiverMapper.selectById(waiverId);
+        if (waiver == null) {
             throw new ServiceException("豁免申请不存在");
         }
-        Map<String, Object> row = rows.getFirst();
-        if (!"pending".equals(text(row.get("status")))) {
+        if (!"pending".equals(waiver.getStatus())) {
             throw new ServiceException("该申请已处理");
         }
-        Long requester = longNum(row.get("requested_by"), 0) == 0 ? null
-            : longNum(row.get("requested_by"), 0);
+        Long requester = waiver.getRequestedBy();
         Long approver = currentUserId();
         if (approve && requester != null && approver != null && requester.equals(approver)) {
             throw new ServiceException("豁免审批人不得与申请人为同一人");
         }
-        jdbc.update("""
-                UPDATE release_gate_waiver SET status=?,approved_by=?,expires_at=?
-                WHERE id=?
-                """, approve ? "approved" : "rejected", approver,
-            approve ? java.time.LocalDateTime.now().plusHours(24) : null, waiverId);
+        ReleaseGateWaiver update = new ReleaseGateWaiver();
+        update.setId(waiverId);
+        update.setStatus(approve ? "approved" : "rejected");
+        update.setApprovedBy(approver);
+        if (approve) {
+            update.setExpiresAt(java.util.Date.from(
+                java.time.LocalDateTime.now().plusHours(24)
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant()));
+        }
+        waiverMapper.updateById(update);
     }
 
-    public List<Map<String, Object>> listWaivers(Long agentId) {
-        return jdbc.queryForList("""
-                SELECT id,agent_id,reason,status,requested_by,approved_by,expires_at,create_time
-                FROM release_gate_waiver WHERE agent_id=? ORDER BY id DESC LIMIT 30
-                """, agentId);
+    public List<com.forgeagent.agent.domain.vo.ReleaseGateWaiverVo> listWaivers(Long agentId) {
+        return waiverMapper.listByAgent(agentId);
     }
 
     private Map<String, Object> loadPolicy(Long workspaceId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT * FROM release_gate_policy
-                WHERE resource_type='agent' AND enabled='1'
-                  AND (workspace_id=? OR workspace_id IS NULL)
-                ORDER BY workspace_id IS NULL ASC LIMIT 1
-                """, workspaceId);
+        List<Map<String, Object>> rows = policyMapper.selectApplicable(workspaceId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
     }
 
     private Map<String, Object> latestEval(Long agentId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT avg_score,tool_success_rate,refusal_rate,p95_latency_ms,config_hash
-                FROM agent_eval_run WHERE agent_id=? AND status='success' ORDER BY id DESC LIMIT 1
-                """, agentId);
+        List<Map<String, Object>> rows = evalRunMapper.latestSuccess(agentId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
     }
 
     private Map<String, Object> runtimeMetrics(Long agentId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT COUNT(*) AS total,
-                  SUM(CASE WHEN status IN ('failed','cancelled') THEN 1 ELSE 0 END) AS failed
-                FROM agent_run WHERE agent_id=? AND create_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-                """, agentId);
+        List<Map<String, Object>> rows = agentRunMapper.recent7dMetrics(agentId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
     }
 
     private Map<String, Object> latestBaseline(Long agentId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT metrics_json FROM agent_eval_baseline
-                WHERE agent_id=? AND active='1' ORDER BY id DESC LIMIT 1
-                """, agentId);
+        List<Map<String, Object>> rows = baselineMapper.latestMetrics(agentId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
     }
 
     private boolean hasApprovedWaiver(Long agentId) {
-        Integer count = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM release_gate_waiver
-                WHERE agent_id=? AND status='approved' AND expires_at > NOW()
-                """, Integer.class, agentId);
-        return count != null && count > 0;
+        return waiverMapper.countApprovedActive(agentId) > 0;
     }
 
     /**
@@ -290,12 +295,7 @@ public class ReleaseGateService {
         if (agentId == null) {
             return List.of();
         }
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT s.name FROM agent_skill_install i
-                JOIN agent_skill s ON s.id = i.skill_id
-                WHERE i.agent_id=? AND i.del_flag=0 AND s.del_flag=0 AND s.status <> '0'
-                ORDER BY s.id
-                """, agentId);
+        List<Map<String, Object>> rows = skillMapper.disabledSkillNames(agentId);
         List<String> names = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             names.add(text(row.get("name")));

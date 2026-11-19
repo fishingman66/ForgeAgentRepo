@@ -43,19 +43,18 @@ public class CsChannelDispatchService {
         if ("per_message".equalsIgnoreCase(channel.getSessionMode())) {
             endActiveConversations(channel.getChannelCode(), inbound.externalUserId());
         }
-        Map<String, Object> session = visitorService.createSession(channel, inbound.externalUserId());
-        Object cidRaw = session.get("conversationId");
-        if (cidRaw == null) {
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo session = visitorService.createSession(channel, inbound.externalUserId());
+        if (session == null || session.getConversationId() == null) {
             throw new ServiceException("会话创建失败");
         }
-        Long conversationId = ((Number) cidRaw).longValue();
+        Long conversationId = session.getConversationId();
         CsConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null || conv.getVisitorId() == null) {
             throw new ServiceException("会话归属解析失败");
         }
-        Map<String, Object> result = visitorService.send(channel, conversationId,
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = visitorService.send(channel, conversationId,
             conv.getVisitorId(), inbound.msgId(), inbound.content());
-        return String.valueOf(result.getOrDefault("content", ""));
+        return result == null || result.getContent() == null ? "" : result.getContent();
     }
 
     private void endActiveConversations(String channelCode, String externalUserId) {

@@ -95,14 +95,14 @@ public class CsAssistController extends BaseController {
      * 前端必须先经坐席确认再调用本端点——服务端不提供「自动执行」入口。
      */
     @PostMapping("/suggestions/{id}/actions/{code}")
-    public R<java.util.Map<String, Object>> executeAction(@PathVariable Long id,
+    public R<com.forgeagent.customerservice.domain.vo.CsActionExecuteVo> executeAction(@PathVariable Long id,
                                                           @PathVariable String code) {
         return R.ok(actionService.execute(id, code, currentWorkspaceId(), LoginHelper.getUserId()));
     }
 
     /** 会话事件实时流(游标轮询重放):与访客侧同一缓冲通道,after 传上次最大序号,断线续传。 */
     @GetMapping("/conversations/{cid}/events")
-    public R<List<java.util.Map<String, Object>>> events(@PathVariable Long cid,
+    public R<List<com.forgeagent.customerservice.domain.vo.CsEventItemVo>> events(@PathVariable Long cid,
                                                          @RequestParam(defaultValue = "0") long after) {
         CsConversation conv = conversationMapper.selectById(cid);
         if (conv == null || !conv.getWorkspaceId().equals(currentWorkspaceId())) {
@@ -110,12 +110,12 @@ public class CsAssistController extends BaseController {
         }
         List<RunEventBuffer.RunEvent> raw =
             runEventBuffer.replay(SseRealtimeTransport.runKey(cid), after);
-        List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+        List<com.forgeagent.customerservice.domain.vo.CsEventItemVo> result = new java.util.ArrayList<>();
         for (RunEventBuffer.RunEvent e : raw) {
-            java.util.Map<String, Object> one = new LinkedHashMap<>();
-            one.put("id", e.sequence());
-            one.put("event", e.name());
-            one.put("data", e.data());
+            com.forgeagent.customerservice.domain.vo.CsEventItemVo one = new com.forgeagent.customerservice.domain.vo.CsEventItemVo();
+            one.setId(e.sequence());
+            one.setEvent(e.name());
+            one.setData(e.data());
             result.add(one);
         }
         return R.ok(result);
@@ -130,14 +130,15 @@ public class CsAssistController extends BaseController {
 
     /** 辅助看板:最近 N 天日指标 + 汇总(采纳率按推荐条数算)。 */
     @GetMapping("/assist/metrics")
-    public R<java.util.Map<String, Object>> metrics(@RequestParam(defaultValue = "7") int days) {
+    public R<com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo> metrics(@RequestParam(defaultValue = "7") int days) {
         return R.ok(metricService.overview(currentWorkspaceId(), days));
     }
 
     /** 手动重算今日指标(看板刷新按钮)。 */
     @PostMapping("/assist/metrics/rebuild")
-    public R<Object> rebuildMetrics() {
-        return R.ok(metricService.rebuild(currentWorkspaceId(), new java.util.Date()));
+    public R<Void> rebuildMetrics() {
+        metricService.rebuild(currentWorkspaceId(), new java.util.Date());
+        return R.ok();
     }
 
     /**
@@ -145,7 +146,7 @@ public class CsAssistController extends BaseController {
      * hours=0 表示不限时间窗(补跑/验证用),默认 24 小时。
      */
     @PostMapping("/assist/recycle")
-    public R<java.util.Map<String, Object>> recycle(@RequestParam(defaultValue = "24") int hours,
+    public R<com.forgeagent.customerservice.domain.vo.CsRecycleResultVo> recycle(@RequestParam(defaultValue = "24") int hours,
                                                     @RequestParam(defaultValue = "50") int limit) {
         return R.ok(metricService.recycle(currentWorkspaceId(), hours, limit));
     }
@@ -158,7 +159,7 @@ public class CsAssistController extends BaseController {
 
     /** 交接摘要(P0):坐席接单前先看这份结构化摘要。 */
     @GetMapping("/summaries")
-    public R<java.util.Map<String, Object>> summary(@RequestParam Long ticketId) {
+    public R<com.forgeagent.customerservice.domain.vo.CsSummaryVo> summary(@RequestParam Long ticketId) {
         return R.ok(summaryService.latest(currentWorkspaceId(), ticketId));
     }
 
@@ -235,26 +236,27 @@ public class CsAssistController extends BaseController {
 
     /** 会话级成本:token 总量 / 每会话 token / 每次解决 token;未配单价时 amountAvailable=false。 */
     @GetMapping("/assist/cost")
-    public R<java.util.Map<String, Object>> cost(@RequestParam(defaultValue = "7") int days) {
+    public R<com.forgeagent.customerservice.domain.vo.CsCostOverviewVo> cost(@RequestParam(defaultValue = "7") int days) {
         return R.ok(costService.overview(currentWorkspaceId(), days));
     }
 
     @PostMapping("/assist/cost/rebuild")
-    public R<Object> rebuildCost() {
-        return R.ok(costService.rebuild(currentWorkspaceId(), new java.util.Date()));
+    public R<Void> rebuildCost() {
+        costService.rebuild(currentWorkspaceId(), new java.util.Date());
+        return R.ok();
     }
 
     /** 配额现状:开关、上限、当日已用与处置方式。 */
     @GetMapping("/assist/quota")
-    public R<java.util.Map<String, Object>> quota() {
+    public R<com.forgeagent.customerservice.domain.vo.CsQuotaVo> quota() {
         Long workspaceId = currentWorkspaceId();
         com.forgeagent.customerservice.service.CsQuotaService.Decision decision = quotaService.check(workspaceId);
-        java.util.Map<String, Object> data = new java.util.LinkedHashMap<>();
-        data.put("enabled", quotaService.enabled());
-        data.put("action", quotaService.action());
-        data.put("level", decision.level().name());
-        data.put("used", decision.used());
-        data.put("limit", decision.limit());
+        com.forgeagent.customerservice.domain.vo.CsQuotaVo data = new com.forgeagent.customerservice.domain.vo.CsQuotaVo();
+        data.setEnabled(quotaService.enabled());
+        data.setAction(quotaService.action());
+        data.setLevel(decision.level().name());
+        data.setUsed(decision.used());
+        data.setLimit(decision.limit());
         return R.ok(data);
     }
 
@@ -262,7 +264,7 @@ public class CsAssistController extends BaseController {
 
     /** 会话附件列表(不含缩略图):坐席看客户发了什么。 */
     @GetMapping("/conversations/{cid}/attachments")
-    public R<List<java.util.Map<String, Object>>> attachments(@PathVariable Long cid) {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsAttachmentItemVo>> attachments(@PathVariable Long cid) {
         return R.ok(attachmentService.list(currentWorkspaceId(), cid));
     }
 
@@ -275,15 +277,15 @@ public class CsAssistController extends BaseController {
 
     /** 死信列表:默认看 PENDING。 */
     @GetMapping("/dead-letters")
-    public R<List<com.forgeagent.customerservice.domain.CsDeadLetter>> deadLetters(
+    public R<List<com.forgeagent.customerservice.domain.vo.CsDeadLetterVo>> deadLetters(
         @RequestParam(required = false) String status, @RequestParam(defaultValue = "50") int limit) {
-        return R.ok(deadLetterService.list(currentWorkspaceId(), status, limit));
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(deadLetterService.list(currentWorkspaceId(), status, limit), com.forgeagent.customerservice.domain.vo.CsDeadLetterVo.class));
     }
 
     /** 重投:目前摘要类可自动重投,附件类只能标记不可重投。 */
     @PostMapping("/dead-letters/{id}/replay")
-    public R<com.forgeagent.customerservice.domain.CsDeadLetter> replayDeadLetter(@PathVariable Long id) {
-        return R.ok(deadLetterService.replay(id, currentWorkspaceId()));
+    public R<com.forgeagent.customerservice.domain.vo.CsDeadLetterVo> replayDeadLetter(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(deadLetterService.replay(id, currentWorkspaceId()), com.forgeagent.customerservice.domain.vo.CsDeadLetterVo.class));
     }
 
     @PostMapping("/dead-letters/{id}/ignore")

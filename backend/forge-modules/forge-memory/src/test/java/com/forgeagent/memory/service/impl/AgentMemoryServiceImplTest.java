@@ -343,8 +343,11 @@ class AgentMemoryServiceImplTest {
         assertTrue(ex.getMessage().contains("治理未启用"));
 
         when(governanceProperties.isEnabled()).thenReturn(true);
-        when(governanceService.runOnce()).thenReturn(java.util.Map.of("ttlArchived", 2L));
-        assertEquals(2L, service.runGovernance().get("ttlArchived"));
+        com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo govResult =
+            new com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo();
+        govResult.setTtlArchived(2L);
+        when(governanceService.runOnce()).thenReturn(govResult);
+        assertEquals(2L, service.runGovernance().getTtlArchived());
     }
 
     // ---------------- 08方案 / B3:三路融合 ----------------

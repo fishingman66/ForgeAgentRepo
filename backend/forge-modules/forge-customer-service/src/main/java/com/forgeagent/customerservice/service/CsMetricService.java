@@ -44,16 +44,16 @@ public class CsMetricService {
     private final CsMetricDailyMapper metricMapper;
     private final CsModuleProperties properties;
 
-    public List<CsMetricDaily> list(Long workspaceId, Date from, Date to) {
-        return metricMapper.selectList(new LambdaQueryWrapper<CsMetricDaily>()
+    public List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo> list(Long workspaceId, Date from, Date to) {
+        return toVoList(metricMapper.selectList(new LambdaQueryWrapper<CsMetricDaily>()
             .eq(CsMetricDaily::getWorkspaceId, workspaceId)
             .ge(from != null, CsMetricDaily::getStatDate, from)
             .le(to != null, CsMetricDaily::getStatDate, to)
-            .orderByDesc(CsMetricDaily::getStatDate));
+            .orderByDesc(CsMetricDaily::getStatDate)));
     }
 
     /** 重建指定日期的全渠道 + 分渠道指标,重复执行覆盖同一行。 */
-    public List<CsMetricDaily> rebuild(Long workspaceId, Date statDate) {
+    public List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo> rebuild(Long workspaceId, Date statDate) {
         Date[] range = dayRange(statDate);
         Date start = range[0];
         Date end = range[1];
@@ -90,7 +90,12 @@ public class CsMetricService {
         for (CsMetricDaily row : rows) {
             upsertRow(row, start);
         }
-        return rows;
+        return toVoList(rows);
+    }
+
+    /** 实体→Vo 转换入口(protected:测试可覆写,规避 MapstructUtils 静态依赖 Spring 容器)。 */
+    protected java.util.List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo> toVoList(java.util.List<CsMetricDaily> rows) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(rows, com.forgeagent.customerservice.domain.vo.CsMetricDailyVo.class);
     }
 
     private CsMetricDaily buildRow(Long workspaceId, Date statDate, String channelCode,

@@ -7,7 +7,10 @@ import com.forgeagent.agent.service.support.AgentSkillVersionService;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentVersion;
+import com.forgeagent.agent.mapper.AgentSkillInstallMapper;
+import com.forgeagent.agent.mapper.AgentVersionMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -31,11 +34,14 @@ public class AgentVersionService {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final JdbcTemplate jdbc;
+    private final AgentVersionMapper versionMapper;
+    private final AgentSkillInstallMapper skillInstallMapper;
     private final AgentSkillVersionService skillVersionService;
 
-    public AgentVersionService(JdbcTemplate jdbc, AgentSkillVersionService skillVersionService) {
-        this.jdbc = jdbc;
+    public AgentVersionService(AgentVersionMapper versionMapper, AgentSkillInstallMapper skillInstallMapper,
+                               AgentSkillVersionService skillVersionService) {
+        this.versionMapper = versionMapper;
+        this.skillInstallMapper = skillInstallMapper;
         this.skillVersionService = skillVersionService;
     }
 
@@ -78,19 +84,7 @@ public class AgentVersionService {
         if (agentId == null) {
             return List.of();
         }
-        return jdbc.queryForList("""
-                SELECT i.skill_id                       AS id,
-                       COALESCE(i.pinned_version, s.version, 1) AS version,
-                       s.name                           AS name,
-                       v.content_hash                   AS contentHash
-                FROM agent_skill_install i
-                JOIN agent_skill s ON s.id = i.skill_id AND s.del_flag = 0
-                LEFT JOIN agent_skill_version v
-                       ON v.skill_id = i.skill_id
-                      AND v.version_no = COALESCE(i.pinned_version, s.version, 1)
-                WHERE i.agent_id = ? AND i.del_flag = 0
-                ORDER BY i.skill_id
-                """, agentId);
+        return skillInstallMapper.skillRefsOf(agentId);
     }
 
     /**
@@ -101,12 +95,7 @@ public class AgentVersionService {
         if (agentId == null) {
             return;
         }
-        int affected = jdbc.update("""
-                UPDATE agent_skill_install i
-                JOIN agent_skill s ON s.id = i.skill_id
-                SET i.pinned_version = COALESCE(s.version, 1)
-                WHERE i.agent_id = ? AND i.del_flag = 0
-                """, agentId);
+        int affected = skillInstallMapper.pinCurrentVersions(agentId);
         if (affected > 0) {
             log.debug("[AgentVersion] 应用 {} 的技能绑定已钉到当前版本, {} 条", agentId, affected);
         }
@@ -139,8 +128,7 @@ public class AgentVersionService {
             }
         }
 
-        List<Map<String, Object>> current = jdbc.queryForList(
-            "SELECT id,skill_id FROM agent_skill_install WHERE agent_id=? AND del_flag=0", agentId);
+        List<Map<String, Object>> current = skillInstallMapper.currentBindings(agentId);
         Map<Long, Long> currentRows = new LinkedHashMap<>();
         for (Map<String, Object> row : current) {
             currentRows.put(longVal(row.get("skill_id")), longVal(row.get("id")));
@@ -149,7 +137,7 @@ public class AgentVersionService {
         // 1. 快照里没有的绑定:物理删除(逻辑删除会占住 uk_skill_agent)
         for (Map.Entry<Long, Long> entry : currentRows.entrySet()) {
             if (!target.containsKey(entry.getKey())) {
-                jdbc.update("DELETE FROM agent_skill_install WHERE id=?", entry.getValue());
+                skillInstallMapper.deleteById(entry.getValue());
             }
         }
         // 2. 快照里的绑定:存在的改 pin,缺失的补插(workspace_id 由技能行带出)
@@ -157,14 +145,12 @@ public class AgentVersionService {
             Long skillId = entry.getKey();
             Integer version = entry.getValue();
             if (currentRows.containsKey(skillId)) {
-                jdbc.update("UPDATE agent_skill_install SET pinned_version=? WHERE agent_id=? AND skill_id=?",
-                    version, agentId, skillId);
+                skillInstallMapper.update(null, Wrappers.<com.forgeagent.agent.domain.AgentSkillInstall>lambdaUpdate()
+                    .eq(com.forgeagent.agent.domain.AgentSkillInstall::getAgentId, agentId)
+                    .eq(com.forgeagent.agent.domain.AgentSkillInstall::getSkillId, skillId)
+                    .set(com.forgeagent.agent.domain.AgentSkillInstall::getPinnedVersion, version));
             } else {
-                jdbc.update("""
-                        INSERT INTO agent_skill_install (skill_id,agent_id,workspace_id,pinned_version,create_time)
-                        SELECT s.id, ?, s.workspace_id, ?, NOW() FROM agent_skill s
-                        WHERE s.id=? AND s.del_flag=0
-                        """, agentId, version, skillId);
+                skillInstallMapper.insertPinned(agentId, version, skillId);
             }
         }
         log.info("[AgentVersion] 应用 {} 技能绑定已按快照恢复: 目标 {} 条", agentId, target.size());
@@ -210,72 +196,87 @@ public class AgentVersionService {
      *                  否则会把刚回滚好的版本又钉回最新,等于回滚失效
      */
     public int createSnapshot(AgentInfo agent, String remark, String source, boolean pinSkills) {
-        Integer next = jdbc.queryForObject(
-            "SELECT COALESCE(MAX(version_no),0)+1 FROM agent_version WHERE agent_id=?",
-            Integer.class, agent.getId());
+        Integer next = versionMapper.nextVersionNo(agent.getId());
         int sequential = next == null ? 1 : next;
         // 与 agent_info.version 对齐,避免多次编辑后发布出现版本号回退
         int preferred = agent.getVersion() == null ? 1 : agent.getVersion();
         int versionNo = Math.max(sequential, preferred);
         // P1-B:先归档内容再钉版本,保证快照里的 contentHash 非空且与 pin 一致
-        List<Long> skillIds = jdbc.queryForList(
-            "SELECT skill_id FROM agent_skill_install WHERE agent_id=? AND del_flag=0",
-            Long.class, agent.getId());
+        List<Long> skillIds = skillInstallMapper.selectList(
+            Wrappers.<com.forgeagent.agent.domain.AgentSkillInstall>lambdaQuery()
+                .select(com.forgeagent.agent.domain.AgentSkillInstall::getSkillId)
+                .eq(com.forgeagent.agent.domain.AgentSkillInstall::getAgentId, agent.getId()))
+            .stream().map(com.forgeagent.agent.domain.AgentSkillInstall::getSkillId).toList();
         skillVersionService.archiveBySkillIds(skillIds);
         if (pinSkills) {
             pinCurrentVersions(agent.getId());
         }
         Map<String, Object> snapshot = buildSnapshot(agent);
-        jdbc.update("""
-                INSERT INTO agent_version
-                  (agent_id,workspace_id,version_no,snapshot_json,config_hash,remark,source,create_by)
-                VALUES (?,?,?,?,?,?,?,?)
-                """, agent.getId(), agent.getWorkspaceId(), versionNo,
-            toJson(snapshot), hashOf(snapshot), remark, source, currentUserId());
+        AgentVersion version = new AgentVersion();
+        version.setAgentId(agent.getId());
+        version.setWorkspaceId(agent.getWorkspaceId());
+        version.setVersionNo(versionNo);
+        version.setSnapshotJson(toJson(snapshot));
+        version.setConfigHash(hashOf(snapshot));
+        version.setRemark(remark);
+        version.setSource(source);
+        version.setCreateBy(currentUserId());
+        versionMapper.insert(version);
         return versionNo;
     }
 
-    public List<Map<String, Object>> listVersions(Long agentId) {
-        return jdbc.queryForList("""
-                SELECT id,agent_id,version_no,config_hash,remark,source,create_by,create_time
-                FROM agent_version WHERE agent_id=? ORDER BY version_no DESC
-                """, agentId);
+    public List<com.forgeagent.agent.domain.vo.AgentVersionVo> listVersions(Long agentId) {
+        return versionMapper.listVersions(agentId);
     }
 
     /** 版本明细(含解析后的配置快照) */
-    public Map<String, Object> versionDetail(Long agentId, int versionNo) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT * FROM agent_version WHERE agent_id=? AND version_no=?
-                """, agentId, versionNo);
-        if (rows.isEmpty()) {
+    public com.forgeagent.agent.domain.vo.AgentVersionVo versionDetail(Long agentId, int versionNo) {
+        AgentVersion version = versionMapper.selectOne(
+            Wrappers.<AgentVersion>lambdaQuery()
+                .eq(AgentVersion::getAgentId, agentId)
+                .eq(AgentVersion::getVersionNo, versionNo));
+        if (version == null) {
             throw new ServiceException("版本不存在: v" + versionNo);
         }
-        Map<String, Object> row = new LinkedHashMap<>(rows.getFirst());
-        row.put("snapshot", parse(String.valueOf(row.get("snapshot_json"))));
-        row.remove("snapshot_json");
-        return row;
+        com.forgeagent.agent.domain.vo.AgentVersionVo vo =
+            MAPPER.convertValue(version, com.forgeagent.agent.domain.vo.AgentVersionVo.class);
+        vo.setSnapshot(parse(version.getSnapshotJson()));
+        return vo;
     }
 
     /** 逐字段比较两版配置 */
-    public Map<String, Object> diff(Long agentId, int from, int to) {
+    public com.forgeagent.agent.domain.vo.VersionDiffVo diff(Long agentId, int from, int to) {
         Map<String, Object> left = snapshotOf(agentId, from);
         Map<String, Object> right = snapshotOf(agentId, to);
-        Map<String, Object> changes = new LinkedHashMap<>();
+        Map<String, com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange> changes = new LinkedHashMap<>();
         for (String key : left.keySet()) {
             Object before = left.get(key);
             Object after = right.get(key);
             if (!java.util.Objects.equals(stringify(key, before), stringify(key, after))) {
-                changes.put(key, Map.of("from", stringify(key, before), "to", stringify(key, after)));
+                com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange change =
+                    new com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange();
+                change.setFrom(stringify(key, before));
+                change.setTo(stringify(key, after));
+                changes.put(key, change);
             }
         }
         // 只存在于右侧的字段(老快照升级后新增的 key)也要报出来
         for (String key : right.keySet()) {
             if (!left.containsKey(key)) {
-                changes.put(key, Map.of("from", "", "to", stringify(key, right.get(key))));
+                com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange change =
+                    new com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange();
+                change.setFrom("");
+                change.setTo(stringify(key, right.get(key)));
+                changes.put(key, change);
             }
         }
-        return Map.of("from", from, "to", to, "changes", changes,
-            "changedFields", changes.size());
+        com.forgeagent.agent.domain.vo.VersionDiffVo result =
+            new com.forgeagent.agent.domain.vo.VersionDiffVo();
+        result.setFrom(from);
+        result.setTo(to);
+        result.setChanges(changes);
+        result.setChangedFields(changes.size());
+        return result;
     }
 
     /**
@@ -302,13 +303,44 @@ public class AgentVersionService {
     /** 读取某版原始快照,供回滚使用 */
     @SuppressWarnings("unchecked")
     public Map<String, Object> snapshotOf(Long agentId, int versionNo) {
-        List<String> rows = jdbc.queryForList(
-            "SELECT snapshot_json FROM agent_version WHERE agent_id=? AND version_no=?",
-            String.class, agentId, versionNo);
-        if (rows.isEmpty()) {
+        AgentVersion version = versionMapper.selectOne(
+            Wrappers.<AgentVersion>lambdaQuery()
+                .eq(AgentVersion::getAgentId, agentId)
+                .eq(AgentVersion::getVersionNo, versionNo));
+        if (version == null) {
             throw new ServiceException("版本不存在: v" + versionNo);
         }
-        return parse(rows.getFirst());
+        return parse(version.getSnapshotJson());
+    }
+
+    /**
+     * D1 灰度:按版本构造一份「快照配置视图」用于本轮装配,不修改入参、不落库。
+     *
+     * <p>必须先 deep-copy——{@code agentConfigCache.getAgentById} 返回的是 @Cacheable
+     * 共享引用,直接 applySnapshot 会把灰度配置写进全局缓存,污染现行版会话。
+     * 用 Jackson convertValue 而非 clone:字段多且含集合,手工拷贝必漏。</p>
+     */
+    public AgentInfo snapshotAgent(AgentInfo current, Integer versionNo) {
+        if (current == null || versionNo == null) {
+            return current;
+        }
+        Map<String, Object> snapshot;
+        try {
+            snapshot = snapshotOf(current.getId(), versionNo);
+        } catch (Exception e) {
+            log.warn("[AgentVersion] D1 灰度快照读取失败 agentId={} v={},降级现行版: {}",
+                current.getId(), versionNo, e.getMessage());
+            return current;
+        }
+        if (snapshot.isEmpty()) {
+            log.warn("[AgentVersion] D1 灰度快照为空 agentId={} v={},降级现行版", current.getId(), versionNo);
+            return current;
+        }
+        AgentInfo view = MAPPER.convertValue(current, AgentInfo.class);
+        applySnapshot(view, snapshot);
+        // 灰度视图保持版本字段可见,便于链路日志与归因
+        view.setPublishedVersion(versionNo);
+        return view;
     }
 
     /** 把快照值写回实体(不落库,由调用方统一 update) */

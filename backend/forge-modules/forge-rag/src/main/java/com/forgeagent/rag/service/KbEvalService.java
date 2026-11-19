@@ -3,10 +3,13 @@ package com.forgeagent.rag.service;
 import com.forgeagent.common.core.domain.PageResult;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
 import com.forgeagent.rag.domain.AgentKbEvalCase;
-import com.forgeagent.rag.domain.AgentKbEvalRun;
+import com.forgeagent.rag.domain.vo.AgentKbEvalCaseVo;
+import com.forgeagent.rag.domain.vo.AgentKbEvalRunVo;
+import com.forgeagent.rag.domain.vo.KbEvalCompareVo;
+import com.forgeagent.rag.domain.vo.KbEvalGateVo;
+import com.forgeagent.rag.domain.vo.KbEvalRunResultVo;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 知识库检索评测服务:维护评测问题集,批量运行检索并统计命中率与 MRR,
@@ -29,7 +32,7 @@ public interface KbEvalService {
     /**
      * 用例列表(按知识库)
      */
-    List<AgentKbEvalCase> listCases(Long knowledgeId);
+    List<AgentKbEvalCaseVo> listCases(Long knowledgeId);
 
     /**
      * 批量运行评测:逐用例执行检索并按期望文档/关键词判定命中,
@@ -37,19 +40,19 @@ public interface KbEvalService {
      *
      * @param knowledgeId 知识库ID
      * @param topK        召回条数(空取 5)
-     * @return run 汇总 + caseResults 明细(每用例:问题/是否命中/首个命中排名/相关度分)
+     * @return run 汇总 + metrics 五指标 + caseResults 明细(每用例:问题/是否命中/首个命中排名/相关度分)
      */
-    Map<String, Object> runEvaluation(Long knowledgeId, Integer topK);
+    KbEvalRunResultVo runEvaluation(Long knowledgeId, Integer topK);
 
     /**
      * 评测运行历史(按知识库,最新在前)
      */
-    List<AgentKbEvalRun> listRuns(Long knowledgeId, Integer limit);
+    List<AgentKbEvalRunVo> listRuns(Long knowledgeId, Integer limit);
 
     /**
      * 分页查询(与平台分页风格一致,供管理界面使用)
      */
-    PageResult<AgentKbEvalRun> pageRuns(Long knowledgeId, PageQuery pageQuery);
+    PageResult<AgentKbEvalRunVo> pageRuns(Long knowledgeId, PageQuery pageQuery);
 
     /**
      * 当前语料指纹(R3-4):排序后的 (documentId, activeGeneration) | embeddingModel:dim | chunkFingerprint
@@ -62,10 +65,10 @@ public interface KbEvalService {
      *
      * @return verdict + 两侧指标 + 交集规模
      */
-    Map<String, Object> compare(Long knowledgeId, Long baselineRunId, Long candidateRunId);
+    KbEvalCompareVo compare(Long knowledgeId, Long baselineRunId, Long candidateRunId);
 
     /**
      * 重建门禁(R3-4):取最近两次运行做判决;不足两次按"首次(无基线)"处理,永不拦截
      */
-    Map<String, Object> gateCheck(Long knowledgeId);
+    KbEvalGateVo gateCheck(Long knowledgeId);
 }

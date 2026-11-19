@@ -8,6 +8,7 @@ import com.forgeagent.kg.service.KgEdge;
 import com.forgeagent.kg.service.KgNode;
 import com.forgeagent.memory.domain.bo.AgentMemoryBo;
 import com.forgeagent.memory.domain.vo.AgentMemoryVo;
+import com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo;
 import com.forgeagent.memory.service.IAgentMemoryService;
 import com.forgeagent.common.core.domain.R;
 import com.forgeagent.common.log.annotation.Log;
@@ -27,7 +28,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Agent 长期记忆 Controller
@@ -143,7 +143,7 @@ public class AgentMemoryController extends BaseController {
     @SaCheckPermission("agent:memory:remove")
     @Log(title = "Agent长期记忆", businessType = BusinessType.UPDATE)
     @PostMapping("/governance/run")
-    public R<Map<String, Long>> runGovernance() {
+    public R<MemoryGovernanceResultVo> runGovernance() {
         return R.ok(memoryService.runGovernance());
     }
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.forgeagent.agent.domain.AgentApiKey;
 import com.forgeagent.agent.domain.AgentWorkflowEndpoint;
 import com.forgeagent.agent.domain.bo.AgentWorkflowEndpointBo;
+import com.forgeagent.agent.domain.vo.AgentWorkflowApiInvokeVo;
 import com.forgeagent.agent.domain.vo.AgentWorkflowEndpointVo;
 import com.forgeagent.agent.domain.vo.WorkflowTrialRunVo;
 import com.forgeagent.agent.mapper.AgentApiKeyMapper;
@@ -34,7 +35,6 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -244,8 +244,8 @@ public class AgentWorkflowEndpointServiceImpl implements IAgentWorkflowEndpointS
     }
 
     @Override
-    public Map<String, Object> invoke(String endpointCode, String authorizationHeader, String body,
-                                      String idempotencyHeader, String clientIp) {
+    public AgentWorkflowApiInvokeVo invoke(String endpointCode, String authorizationHeader, String body,
+                                           String idempotencyHeader, String clientIp) {
         long start = System.currentTimeMillis();
         // 1. IP 级预限流(体检 S1):鉴权之前先卡流量,失败尝试也计数,防密钥无限爆破
         enforceIpRateLimit(clientIp);
@@ -296,12 +296,12 @@ public class AgentWorkflowEndpointServiceImpl implements IAgentWorkflowEndpointS
             throw new ServiceException("工作流调用被中断");
         }
         long cost = System.currentTimeMillis() - start;
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("runId", vo.getRunId());
-        result.put("status", vo.getStatus());
-        result.put("output", extractEndOutput(vo));
-        result.put("message", vo.getMessage());
-        result.put("costMs", cost);
+        AgentWorkflowApiInvokeVo result = new AgentWorkflowApiInvokeVo();
+        result.setRunId(vo.getRunId());
+        result.setStatus(vo.getStatus());
+        result.setOutput(extractEndOutput(vo));
+        result.setMessage(vo.getMessage());
+        result.setCostMs(cost);
         if (apiKey != null) {
             auditLogHelper.record(endpoint.getWorkspaceId(), "workflow-api.invoke", "workflow_endpoint",
                 String.valueOf(endpoint.getId()),

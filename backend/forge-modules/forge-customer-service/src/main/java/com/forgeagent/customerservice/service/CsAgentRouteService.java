@@ -136,25 +136,19 @@ public class CsAgentRouteService {
         return route.getPriority() == null ? 0 : route.getPriority();
     }
 
-    public List<CsAgentRoute> list(Long workspaceId, String channelCode) {
+    public List<com.forgeagent.customerservice.domain.vo.CsAgentRouteVo> list(Long workspaceId, String channelCode) {
         LambdaQueryWrapper<CsAgentRoute> query = new LambdaQueryWrapper<CsAgentRoute>()
             .eq(CsAgentRoute::getWorkspaceId, workspaceId);
         if (channelCode != null && !channelCode.isBlank()) {
             query.and(w -> w.isNull(CsAgentRoute::getChannelCode)
                 .or().eq(CsAgentRoute::getChannelCode, channelCode));
         }
-        return routeMapper.selectList(query.orderByDesc(CsAgentRoute::getPriority));
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(routeMapper.selectList(query.orderByDesc(CsAgentRoute::getPriority)), com.forgeagent.customerservice.domain.vo.CsAgentRouteVo.class);
     }
 
     /** 新增/编辑:同空间同渠道同意图唯一,存在则更新。 */
-    public CsAgentRoute save(CsAgentRoute route, Long workspaceId) {
-        if (route == null || route.getIntentCode() == null || route.getIntentCode().isBlank()) {
-            throw new ServiceException("意图编码不能为空");
-        }
-        if (route.getAgentId() == null) {
-            throw new ServiceException("目标 Agent 不能为空");
-        }
-        route.setWorkspaceId(workspaceId);
+    public com.forgeagent.customerservice.domain.vo.CsAgentRouteVo save(com.forgeagent.customerservice.domain.bo.CsAgentRouteSaveBo bo, Long workspaceId) {
+        CsAgentRoute route = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsAgentRoute.class);
         route.setIntentCode(route.getIntentCode().trim().toUpperCase());
         route.setChannelCode(route.getChannelCode() == null || route.getChannelCode().isBlank()
             ? null : route.getChannelCode().trim());
@@ -172,13 +166,14 @@ public class CsAgentRouteService {
             existing.setUpdateTime(new Date());
             routeMapper.updateById(existing);
             invalidate();
-            return existing;
+            return com.forgeagent.common.core.utils.MapstructUtils.convert(existing, com.forgeagent.customerservice.domain.vo.CsAgentRouteVo.class);
         }
+        route.setWorkspaceId(workspaceId);
         route.setCreateTime(new Date());
         route.setUpdateTime(new Date());
         routeMapper.insert(route);
         invalidate();
-        return route;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(route, com.forgeagent.customerservice.domain.vo.CsAgentRouteVo.class);
     }
 
     public boolean remove(Long id, Long workspaceId) {

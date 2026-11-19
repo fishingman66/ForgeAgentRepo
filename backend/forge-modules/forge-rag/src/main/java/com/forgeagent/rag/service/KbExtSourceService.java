@@ -1,9 +1,9 @@
 package com.forgeagent.rag.service;
 
-import com.forgeagent.rag.domain.AgentKbExtSource;
+import com.forgeagent.rag.domain.vo.AgentKbExtSourceVo;
+import com.forgeagent.rag.domain.vo.KbExtSourceSyncVo;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * R5-4 外部源服务:来源登记 + 同步入库(条目级去重与增量)
@@ -17,10 +17,10 @@ public interface KbExtSourceService {
      */
     Long create(Long knowledgeId, String sourceType, String name, String configJson);
 
-    List<AgentKbExtSource> list(Long knowledgeId);
+    List<AgentKbExtSourceVo> list(Long knowledgeId);
 
     /**
      * 同步一次:拉取 → 逐条入库(已导入的跳过)→ 返回统计
      */
-    Map<String, Object> sync(Long sourceId);
+    KbExtSourceSyncVo sync(Long sourceId);
 }

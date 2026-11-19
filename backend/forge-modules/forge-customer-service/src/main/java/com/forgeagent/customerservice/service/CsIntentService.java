@@ -51,12 +51,12 @@ public class CsIntentService {
     }
 
     /** 管理页列表:平台级 + 本空间,启用停用都在(按优先级排)。 */
-    public List<CsIntent> list(Long workspaceId) {
-        return intentMapper.selectList(new LambdaQueryWrapper<CsIntent>()
+    public List<com.forgeagent.customerservice.domain.vo.CsIntentVo> list(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(intentMapper.selectList(new LambdaQueryWrapper<CsIntent>()
             .and(w -> w.isNull(CsIntent::getWorkspaceId)
                 .or().eq(CsIntent::getWorkspaceId, workspaceId))
             .orderByAsc(CsIntent::getPriority)
-            .orderByAsc(CsIntent::getId));
+            .orderByAsc(CsIntent::getId)), com.forgeagent.customerservice.domain.vo.CsIntentVo.class);
     }
 
     /** 打标用规则集:只看启用行,空间覆盖平台级。 */
@@ -210,16 +210,8 @@ public class CsIntentService {
     }
 
     /** 新增/编辑:平台级行只读;编码与名称必填,其余给默认值。 */
-    public CsIntent save(CsIntent intent, Long workspaceId) {
-        if (intent == null || intent.getIntentCode() == null || intent.getIntentCode().isBlank()) {
-            throw new ServiceException("意图编码不能为空");
-        }
-        if (intent.getIntentName() == null || intent.getIntentName().isBlank()) {
-            throw new ServiceException("意图名称不能为空");
-        }
-        if (intent.getKeywords() == null || intent.getKeywords().isBlank()) {
-            throw new ServiceException("关键词不能为空");
-        }
+    public com.forgeagent.customerservice.domain.vo.CsIntentVo save(com.forgeagent.customerservice.domain.bo.CsIntentSaveBo bo, Long workspaceId) {
+        CsIntent intent = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsIntent.class);
         intent.setIntentCode(intent.getIntentCode().trim());
         intent.setKeywords(intent.getKeywords().trim());
         intent.setRuleType(intent.getRuleType() == null || intent.getRuleType().isBlank()
@@ -238,7 +230,7 @@ public class CsIntentService {
             intent.setCreateTime(existing.getCreateTime());
             intentMapper.updateById(intent);
         }
-        return intent;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(intent, com.forgeagent.customerservice.domain.vo.CsIntentVo.class);
     }
 
     /** 删除:平台级行不可删;不存在按幂等成功处理。 */

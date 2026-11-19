@@ -74,10 +74,10 @@ public class CsComplianceService {
         auditMapper.insert(entry);
     }
 
-    public List<CsAuditLog> listAudit(Long workspaceId) {
-        return auditMapper.selectList(new LambdaQueryWrapper<CsAuditLog>()
+    public List<com.forgeagent.customerservice.domain.vo.CsAuditLogVo> listAudit(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(auditMapper.selectList(new LambdaQueryWrapper<CsAuditLog>()
             .eq(CsAuditLog::getWorkspaceId, workspaceId)
-            .orderByDesc(CsAuditLog::getId).last("limit 200"));
+            .orderByDesc(CsAuditLog::getId).last("limit 200")), com.forgeagent.customerservice.domain.vo.CsAuditLogVo.class);
     }
 
     /** 隐私擦除:级联清理该会话的全部客服域与消息数据,并留审计。 */

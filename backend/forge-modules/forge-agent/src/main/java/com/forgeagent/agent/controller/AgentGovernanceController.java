@@ -57,31 +57,26 @@ public class AgentGovernanceController extends BaseController {
     // ---------------------------------------------------------------- B1
 
     @GetMapping("/versions")
-    public R<Object> versions(@RequestParam Long agentId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentVersionVo>> versions(@RequestParam Long agentId) {
         return R.ok(versionService.listVersions(requireAgentWithMemberCheck(agentId).getId()));
     }
 
     @GetMapping("/version")
-    public R<Map<String, Object>> version(@RequestParam Long agentId, @RequestParam int versionNo) {
+    public R<com.forgeagent.agent.domain.vo.AgentVersionVo> version(@RequestParam Long agentId, @RequestParam int versionNo) {
         return R.ok(versionService.versionDetail(requireAgentWithMemberCheck(agentId).getId(), versionNo));
     }
 
     @GetMapping("/diff")
-    public R<Map<String, Object>> diff(@RequestParam Long agentId,
+    public R<com.forgeagent.agent.domain.vo.VersionDiffVo> diff(@RequestParam Long agentId,
                                        @RequestParam int from, @RequestParam int to) {
         return R.ok(versionService.diff(requireAgentWithMemberCheck(agentId).getId(), from, to));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/rollback")
-    public R<Void> rollback(@RequestBody Map<String, Object> body) {
-        Long agentId = longVal(body.get("agentId"));
-        Integer versionNo = intVal(body.get("versionNo"));
-        if (agentId == null || versionNo == null) {
-            throw new ServiceException("agentId 与 versionNo 不能为空");
-        }
-        requireAgentWithMemberCheck(agentId);
-        agentInfoService.rollbackVersion(agentId, versionNo);
+    public R<Void> rollback(@Validated @RequestBody com.forgeagent.agent.domain.bo.GovernanceRollbackBo bo) {
+        requireAgentWithMemberCheck(bo.getAgentId());
+        agentInfoService.rollbackVersion(bo.getAgentId(), bo.getVersionNo());
         return R.ok();
     }
 
@@ -93,25 +88,20 @@ public class AgentGovernanceController extends BaseController {
     }
 
     @GetMapping("/gate/executions")
-    public R<Object> gateExecutions(@RequestParam Long agentId) {
+    public R<List<com.forgeagent.agent.domain.vo.ReleaseGateExecutionVo>> gateExecutions(@RequestParam Long agentId) {
         return R.ok(gateService.listExecutions(requireAgentWithMemberCheck(agentId).getId()));
     }
 
     @GetMapping("/gate/waivers")
-    public R<Object> gateWaivers(@RequestParam Long agentId) {
+    public R<List<com.forgeagent.agent.domain.vo.ReleaseGateWaiverVo>> gateWaivers(@RequestParam Long agentId) {
         return R.ok(gateService.listWaivers(requireAgentWithMemberCheck(agentId).getId()));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/gate/waiver")
-    public R<Long> requestWaiver(@RequestBody Map<String, Object> body) {
-        Long agentId = longVal(body.get("agentId"));
-        if (agentId == null) {
-            throw new ServiceException("agentId 不能为空");
-        }
-        requireAgentWithDeveloperCheck(agentId);
-        String reason = text(body.get("reason"));
-        return R.ok(gateService.requestWaiver(agentId, reason));
+    public R<Long> requestWaiver(@Validated @RequestBody com.forgeagent.agent.domain.bo.GateWaiverRequestBo bo) {
+        requireAgentWithDeveloperCheck(bo.getAgentId());
+        return R.ok(gateService.requestWaiver(bo.getAgentId(), bo.getReason()));
     }
 
     @SaCheckPermission("agent:agent:edit")
@@ -124,112 +114,89 @@ public class AgentGovernanceController extends BaseController {
     // ---------------------------------------------------------------- B2
 
     @GetMapping("/prompts")
-    public R<Object> prompts(@RequestParam(required = false) Long workspaceId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentPromptTemplateVo>> prompts(@RequestParam(required = false) Long workspaceId) {
         return R.ok(promptService.listTemplates(resolveWorkspaceParam(workspaceId)));
     }
 
     @GetMapping("/prompt")
-    public R<Map<String, Object>> prompt(@RequestParam Long id) {
+    public R<com.forgeagent.agent.domain.vo.AgentPromptTemplateVo> prompt(@RequestParam Long id) {
         return R.ok(promptService.getTemplate(id));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/prompt")
-    public R<Long> savePrompt(@RequestBody Map<String, Object> body) {
-        return R.ok(promptService.saveTemplate(body));
+    public R<Long> savePrompt(@Validated @RequestBody com.forgeagent.agent.domain.bo.PromptTemplateSaveBo bo) {
+        return R.ok(promptService.saveTemplate(bo));
     }
 
     @GetMapping("/prompt/versions")
-    public R<Object> promptVersions(@RequestParam Long templateId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentPromptVersionVo>> promptVersions(@RequestParam Long templateId) {
         return R.ok(promptService.listVersions(templateId));
     }
 
     @GetMapping("/prompt/version")
-    public R<Map<String, Object>> promptVersion(@RequestParam Long versionId) {
+    public R<com.forgeagent.agent.domain.vo.AgentPromptVersionVo> promptVersion(@RequestParam Long versionId) {
         return R.ok(promptService.getVersion(versionId));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/prompt/version")
-    public R<Long> publishPromptVersion(@RequestBody Map<String, Object> body) {
-        Long templateId = longVal(body.get("templateId"));
-        if (templateId == null) {
-            throw new ServiceException("templateId 不能为空");
-        }
-        return R.ok(promptService.publishVersion(templateId, text(body.get("content")),
-            text(body.get("variableSchema")), text(body.get("remark")),
-            Boolean.parseBoolean(String.valueOf(body.getOrDefault("asStable", false)))));
+    public R<Long> publishPromptVersion(@Validated @RequestBody com.forgeagent.agent.domain.bo.PromptVersionPublishBo bo) {
+        return R.ok(promptService.publishVersion(bo.getTemplateId(), bo.getContent(),
+            bo.getVariableSchema(), bo.getRemark(),
+            Boolean.TRUE.equals(bo.getAsStable())));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/prompt/stable")
-    public R<Void> setStable(@RequestBody Map<String, Object> body) {
-        Long templateId = longVal(body.get("templateId"));
-        Long versionId = longVal(body.get("versionId"));
-        if (templateId == null || versionId == null) {
-            throw new ServiceException("templateId 与 versionId 不能为空");
-        }
-        promptService.setStable(templateId, versionId);
+    public R<Void> setStable(@Validated @RequestBody com.forgeagent.agent.domain.bo.PromptStableBo bo) {
+        promptService.setStable(bo.getTemplateId(), bo.getVersionId());
         return R.ok();
     }
 
     @PostMapping("/prompt/preview")
-    public R<Map<String, Object>> promptPreview(@RequestBody Map<String, Object> body) {
-        Long versionId = longVal(body.get("versionId"));
-        if (versionId == null) {
-            throw new ServiceException("versionId 不能为空");
-        }
-        return R.ok(promptService.preview(versionId, text(body.get("variables"))));
+    public R<com.forgeagent.agent.domain.vo.PromptPreviewVo> promptPreview(@Validated @RequestBody com.forgeagent.agent.domain.bo.PromptPreviewBo bo) {
+        return R.ok(promptService.preview(bo.getVersionId(), bo.getVariables()));
     }
 
     // ---------------------------------------------------------------- B3
 
     @GetMapping("/eval/datasets")
-    public R<Object> datasets(@RequestParam(required = false) Long workspaceId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentEvalDatasetVo>> datasets(@RequestParam(required = false) Long workspaceId) {
         return R.ok(evaluationService.listDatasets(resolveWorkspaceParam(workspaceId)));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/eval/dataset")
-    public R<Long> createDataset(@RequestBody Map<String, Object> body) {
-        return R.ok(evaluationService.createDataset(body));
+    public R<Long> createDataset(@Validated @RequestBody com.forgeagent.agent.domain.bo.EvalDatasetCreateBo bo) {
+        return R.ok(evaluationService.createDataset(bo));
     }
 
     @GetMapping("/eval/cases")
-    public R<Object> cases(@RequestParam Long datasetId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentEvalCaseVo>> cases(@RequestParam Long datasetId) {
         return R.ok(evaluationService.listCases(datasetId));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/eval/cases")
-    public R<Integer> addCases(@RequestBody Map<String, Object> body) {
-        Long datasetId = longVal(body.get("datasetId"));
-        if (datasetId == null) {
-            throw new ServiceException("datasetId 不能为空");
-        }
-        return R.ok(evaluationService.addCases(datasetId, body.get("cases")));
+    public R<Integer> addCases(@Validated @RequestBody com.forgeagent.agent.domain.bo.EvalCasesAddBo bo) {
+        return R.ok(evaluationService.addCases(bo));
     }
 
     @SaCheckPermission("agent:agent:edit")
     @PostMapping("/eval/run")
-    public R<Map<String, Object>> runEval(@RequestBody Map<String, Object> body) {
-        Long datasetId = longVal(body.get("datasetId"));
-        Long agentId = longVal(body.get("agentId"));
-        if (datasetId == null || agentId == null) {
-            throw new ServiceException("datasetId 与 agentId 不能为空");
-        }
-        requireAgentWithDeveloperCheck(agentId);
-        return R.ok(evaluationService.run(datasetId, agentId,
-            Boolean.parseBoolean(String.valueOf(body.getOrDefault("judgeEnabled", false)))));
+    public R<com.forgeagent.agent.domain.vo.EvalRunOutcomeVo> runEval(@Validated @RequestBody com.forgeagent.agent.domain.bo.EvalRunStartBo bo) {
+        requireAgentWithDeveloperCheck(bo.getAgentId());
+        return R.ok(evaluationService.run(bo));
     }
 
     @GetMapping("/eval/run")
-    public R<Map<String, Object>> evalRun(@RequestParam Long runId) {
+    public R<com.forgeagent.agent.domain.vo.EvalRunDetailVo> evalRun(@RequestParam Long runId) {
         return R.ok(evaluationService.runDetail(runId));
     }
 
     @GetMapping("/eval/runs")
-    public R<Object> evalRuns(@RequestParam Long agentId) {
+    public R<List<com.forgeagent.agent.domain.vo.AgentEvalRunVo>> evalRuns(@RequestParam Long agentId) {
         return R.ok(evaluationService.listRuns(requireAgentWithMemberCheck(agentId).getId()));
     }
 
@@ -283,29 +250,4 @@ public class AgentGovernanceController extends BaseController {
         return agent;
     }
 
-    private static Long longVal(Object value) {
-        if (value == null || String.valueOf(value).isBlank()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private static Integer intVal(Object value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return Integer.valueOf(String.valueOf(value));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private static String text(Object value) {
-        return value == null ? null : String.valueOf(value);
-    }
 }

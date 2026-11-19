@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS `agent_info` (
   `published_version` INT NULL COMMENT '当前生效的发布版本号',
   `version` INT NOT NULL DEFAULT 1 COMMENT '配置版本号(每次编辑递增)',
   `workflow_trigger_mode` CHAR(1) NOT NULL DEFAULT '0' COMMENT '工作流触发模式(0关 1每轮自动 2按意图路由)',
+  `rollout_percent` INT NOT NULL DEFAULT 100 COMMENT 'D1灰度放量百分比(0-100,命中走快照版锁发布配置,默认100=全量锁版,0=关闭全走现行版)',
   PRIMARY KEY (`id`),
   KEY `idx_workspace` (`workspace_id`),
   KEY `idx_model` (`model_id`)
@@ -1964,6 +1965,7 @@ CREATE TABLE IF NOT EXISTS `agent_cs_conversation` (
   `last_intent_code` VARCHAR(64) NULL COMMENT '最近一轮意图编码(规则命中,未命中为 NULL)',
   `sentiment_streak` INT NOT NULL DEFAULT 0 COMMENT '访客负面情绪连续轮数(得分不超阈值递增,超阈值清零)',
   `last_sentiment_score` DECIMAL(5,4) NULL COMMENT '最近一轮访客情绪分([-1,1],负面为负)',
+  `pinned_version` INT NULL COMMENT 'D1灰度会话锁定的配置版本(agent_version.version_no),NULL=现行版;会话创建时判定一次不再变',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csc_session` (`agent_session_id`),
   KEY `idx_csc_visitor` (`visitor_id`, `status`),

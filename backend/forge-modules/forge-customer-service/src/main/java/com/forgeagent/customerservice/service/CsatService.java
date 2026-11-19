@@ -79,14 +79,14 @@ public class CsatService {
         return csat;
     }
 
-    public List<CsCsat> list(Long workspaceId) {
-        return csatMapper.selectList(new LambdaQueryWrapper<CsCsat>()
+    public List<com.forgeagent.customerservice.domain.vo.CsCsatVo> list(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(csatMapper.selectList(new LambdaQueryWrapper<CsCsat>()
             .eq(CsCsat::getWorkspaceId, workspaceId)
-            .orderByDesc(CsCsat::getInvitedAt));
+            .orderByDesc(CsCsat::getInvitedAt)), com.forgeagent.customerservice.domain.vo.CsCsatVo.class);
     }
 
     /** 平均分与邀请回收率,供运营看板直读。 */
-    public Map<String, Object> stats(Long workspaceId, Date from, Date to) {
+    public com.forgeagent.customerservice.domain.vo.CsCsatStatsVo stats(Long workspaceId, Date from, Date to) {
         List<CsCsat> all = csatMapper.selectList(new LambdaQueryWrapper<CsCsat>()
             .eq(CsCsat::getWorkspaceId, workspaceId)
             .ge(from != null, CsCsat::getInvitedAt, from)
@@ -94,11 +94,11 @@ public class CsatService {
         long submitted = all.stream().filter(c -> c.getScore() != null).count();
         double avg = all.stream().filter(c -> c.getScore() != null)
             .mapToInt(CsCsat::getScore).average().orElse(0);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("invited", all.size());
-        data.put("submitted", submitted);
-        data.put("avgScore", Math.round(avg * 100) / 100.0);
-        data.put("responseRate", all.isEmpty() ? 0 : Math.round(submitted * 10000.0 / all.size()) / 100.0);
+        com.forgeagent.customerservice.domain.vo.CsCsatStatsVo data = new com.forgeagent.customerservice.domain.vo.CsCsatStatsVo();
+        data.setInvited(all.size());
+        data.setSubmitted((int) submitted);
+        data.setAvgScore((int) (Math.round(avg * 100)));
+        data.setResponseRate(all.isEmpty() ? 0 : Math.round(submitted * 10000.0 / all.size()) / 100.0);
         return data;
     }
 }

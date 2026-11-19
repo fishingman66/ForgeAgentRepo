@@ -2,12 +2,19 @@ package com.forgeagent.agent.service.governance;
 
 import com.forgeagent.agent.service.support.AgentSkillVersionService;
 import com.forgeagent.agentcore.domain.AgentInfo;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentSkillInstall;
+import com.forgeagent.agent.domain.AgentVersion;
+import com.forgeagent.agent.mapper.AgentSkillInstallMapper;
+import com.forgeagent.agent.mapper.AgentVersionMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,13 +43,22 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AgentVersionServiceTest {
 
-    @Mock
-    private JdbcTemplate jdbc;
+    @BeforeAll
+    static void warmUpLambdaCache() {
+        // 纯 Mockito 下 Wrappers.lambdaQuery()/lambdaUpdate() 构造即解析列名,需预热
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
+        TableInfoHelper.initTableInfo(assistant, com.forgeagent.agent.domain.AgentSkillInstall.class);
+        TableInfoHelper.initTableInfo(assistant, com.forgeagent.agent.domain.AgentVersion.class);
+    }
+
+
+    @Mock private AgentVersionMapper versionMapper;
+    @Mock private AgentSkillInstallMapper skillInstallMapper;
     @Mock
     private AgentSkillVersionService skillVersionService;
 
     private AgentVersionService service() {
-        return new AgentVersionService(jdbc, skillVersionService);
+        return new AgentVersionService(versionMapper, skillInstallMapper, skillVersionService);
     }
 
     private static AgentInfo agent() {
@@ -65,8 +82,7 @@ class AgentVersionServiceTest {
 
     @Test
     void snapshotCarriesSkillRefs() {
-        when(jdbc.queryForList(contains("FROM agent_skill_install i"), any(Object[].class)))
-            .thenReturn(refs("aaa"));
+        when(skillInstallMapper.skillRefsOf(any())).thenReturn(refs("aaa"));
 
         Map<String, Object> snapshot = service().buildSnapshot(agent());
 
@@ -81,8 +97,7 @@ class AgentVersionServiceTest {
     @Test
     void skillContentChangeChangesConfigHash() {
         AgentVersionService svc = service();
-        when(jdbc.queryForList(contains("FROM agent_skill_install i"), any(Object[].class)))
-            .thenReturn(refs("aaa"))
+        when(skillInstallMapper.skillRefsOf(any())).thenReturn(refs("aaa"))
             .thenReturn(refs("bbb"));
 
         String h1 = svc.hashOf(svc.buildSnapshot(agent()));
@@ -94,31 +109,27 @@ class AgentVersionServiceTest {
 
     @Test
     void createSnapshotPinsCurrentVersionsAndArchivesContent() {
-        when(jdbc.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(3);
-        when(jdbc.queryForList(contains("SELECT skill_id FROM agent_skill_install"), eq(Long.class),
-            any(Object[].class))).thenReturn(List.of(10L));
-        when(jdbc.queryForList(contains("FROM agent_skill_install i"), any(Object[].class)))
-            .thenReturn(refs("aaa"));
+        when(versionMapper.nextVersionNo(any())).thenReturn(3);
+        when(skillInstallMapper.selectList(any())).thenReturn(List.of(skillInstall(10L)));
+        when(skillInstallMapper.skillRefsOf(any())).thenReturn(refs("aaa"));
 
         int versionNo = service().createSnapshot(agent(), "发布", "publish");
 
         assertEquals(3, versionNo);
         verify(skillVersionService).archiveBySkillIds(List.of(10L));
         // 发布语义:pin 当前版本
-        verify(jdbc).update(contains("SET i.pinned_version"), any(Object[].class));
+        verify(skillInstallMapper).pinCurrentVersions(any());
     }
 
     @Test
     void rollbackSnapshotDoesNotRepin() {
-        when(jdbc.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(4);
-        when(jdbc.queryForList(contains("SELECT skill_id FROM agent_skill_install"), eq(Long.class),
-            any(Object[].class))).thenReturn(List.of(10L));
-        when(jdbc.queryForList(contains("FROM agent_skill_install i"), any(Object[].class)))
-            .thenReturn(refs("aaa"));
+        when(versionMapper.nextVersionNo(any())).thenReturn(4);
+        when(skillInstallMapper.selectList(any())).thenReturn(List.of(skillInstall(10L)));
+        when(skillInstallMapper.skillRefsOf(any())).thenReturn(refs("aaa"));
 
         service().createSnapshot(agent(), "回滚自 v1", "rollback", false);
 
-        verify(jdbc, never()).update(contains("SET i.pinned_version"), any(Object[].class));
+        verify(skillInstallMapper, never()).pinCurrentVersions(any());
     }
 
     @Test
@@ -128,8 +139,8 @@ class AgentVersionServiceTest {
 
         service().restoreSkillBinding(7L, snapshot);
 
-        verify(jdbc, never()).update(contains("DELETE FROM agent_skill_install"), any(Object[].class));
-        verify(jdbc, never()).update(contains("INSERT INTO agent_skill_install"), any(Object[].class));
+        verify(skillInstallMapper, never()).deleteById(any());
+        verify(skillInstallMapper, never()).insertPinned(any(), any(), any());
     }
 
     @Test
@@ -137,19 +148,16 @@ class AgentVersionServiceTest {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("skillRefs", refs("aaa")); // 目标只有 skill 10,版本 2
 
-        when(jdbc.queryForList(contains("SELECT id,skill_id FROM agent_skill_install"), any(Object[].class)))
-            .thenReturn(List.of(
+        when(skillInstallMapper.currentBindings(any())).thenReturn(List.of(
                 row(100L, 10L),
                 row(101L, 11L)   // 快照里没有,应被物理删除
             ));
 
         service().restoreSkillBinding(7L, snapshot);
 
-        verify(jdbc).update(contains("DELETE FROM agent_skill_install"), eq(101L));
-        verify(jdbc).update(contains("UPDATE agent_skill_install SET pinned_version"),
-            eq(2), eq(7L), eq(10L));
-        verify(jdbc, never()).update(contains("INSERT INTO agent_skill_install"),
-            any(Object[].class));
+        verify(skillInstallMapper).deleteById(101L);
+        verify(skillInstallMapper).update(isNull(), any());
+        verify(skillInstallMapper, never()).insertPinned(any(), any(), any());
     }
 
     @Test
@@ -157,28 +165,70 @@ class AgentVersionServiceTest {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("skillRefs", refs("aaa"));
 
-        when(jdbc.queryForList(contains("SELECT id,skill_id FROM agent_skill_install"), any(Object[].class)))
-            .thenReturn(List.of()); // 当前没有绑定
+        when(skillInstallMapper.currentBindings(any())).thenReturn(List.of()); // 当前没有绑定
 
         service().restoreSkillBinding(7L, snapshot);
 
-        verify(jdbc).update(contains("INSERT INTO agent_skill_install"), eq(7L), eq(2), eq(10L));
+        verify(skillInstallMapper).insertPinned(7L, 2, 10L);
+    }
+
+    @Test
+    void diffRendersSkillRefsAsReadableList() {
+        String before = "{\"skillRefs\":[{\"id\":10,\"version\":1,\"name\":\"退换货处理\"}]}";
+        String after = "{\"skillRefs\":[{\"id\":10,\"version\":2,\"name\":\"退换货处理\"}]}";
+        when(versionMapper.selectOne(any())).thenReturn(versionWithSnapshot(before), versionWithSnapshot(after));
+
+        com.forgeagent.agent.domain.vo.VersionDiffVo result = service().diff(7L, 1, 2);
+        com.forgeagent.agent.domain.vo.VersionDiffVo.FieldChange change = result.getChanges().get("skillRefs");
+
+        assertEquals("退换货处理 v1", change.getFrom());
+        assertEquals("退换货处理 v2", change.getTo());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void diffRendersSkillRefsAsReadableList() {
-        String before = "{\"skillRefs\":[{\"id\":10,\"version\":1,\"name\":\"退换货处理\"}]}";
-        String after = "{\"skillRefs\":[{\"id\":10,\"version\":2,\"name\":\"退换货处理\"}]}";
-        when(jdbc.queryForList(contains("SELECT snapshot_json"), eq(String.class), any(Object[].class)))
-            .thenReturn(List.of(before), List.of(after));
+    void d1SnapshotAgentDeepCopiesWithoutPollutingCacheObject() {
+        // D1 核心:snapshotAgent 必须返回新对象,不能把灰度配置写进 @Cacheable 共享引用
+        AgentInfo cached = agent();
+        String snap = "{\"systemPrompt\":\"灰度版提示词\",\"modelId\":999,\"name\":\"灰度助手\"}";
+        when(versionMapper.selectOne(any())).thenReturn(versionWithSnapshot(snap));
 
-        Map<String, Object> result = service().diff(7L, 1, 2);
-        Map<String, Object> changes = (Map<String, Object>) result.get("changes");
-        Map<String, Object> change = (Map<String, Object>) changes.get("skillRefs");
+        AgentInfo view = service().snapshotAgent(cached, 2);
 
-        assertEquals("退换货处理 v1", change.get("from"));
-        assertEquals("退换货处理 v2", change.get("to"));
+        assertEquals("灰度版提示词", view.getSystemPrompt());
+        assertEquals(999L, view.getModelId());
+        assertEquals(2, view.getPublishedVersion());
+        // 原缓存对象必须原封不动
+        assertEquals("你是客服", cached.getSystemPrompt());
+        assertEquals(3, cached.getVersion());
+        assertNotEquals(view, cached);
+    }
+
+    @Test
+    void d1SnapshotAgentFallsBackOnMissingVersion() {
+        AgentInfo cached = agent();
+        when(versionMapper.selectOne(any())).thenReturn(null);
+        AgentInfo view = service().snapshotAgent(cached, 99);
+        assertEquals(cached, view);
+        assertEquals("你是客服", view.getSystemPrompt());
+    }
+
+    @Test
+    void d1SnapshotAgentSkipsWithoutVersion() {
+        AgentInfo cached = agent();
+        assertEquals(cached, service().snapshotAgent(cached, null));
+    }
+
+    private static AgentVersion versionWithSnapshot(String json) {
+        AgentVersion v = new AgentVersion();
+        v.setSnapshotJson(json);
+        return v;
+    }
+
+    private static com.forgeagent.agent.domain.AgentSkillInstall skillInstall(Long skillId) {
+        com.forgeagent.agent.domain.AgentSkillInstall i = new com.forgeagent.agent.domain.AgentSkillInstall();
+        i.setSkillId(skillId);
+        return i;
     }
 
     private static Map<String, Object> row(Long id, Long skillId) {

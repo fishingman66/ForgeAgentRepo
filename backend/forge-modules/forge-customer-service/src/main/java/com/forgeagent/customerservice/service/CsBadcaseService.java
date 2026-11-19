@@ -96,19 +96,19 @@ public class CsBadcaseService {
             suggestionId, suggestion.getTriggerText(), firstItemContent(suggestion.getItems()));
     }
 
-    public List<CsBadcase> list(Long workspaceId, String status, int limit) {
+    public List<com.forgeagent.customerservice.domain.vo.CsBadcaseVo> list(Long workspaceId, String status, int limit) {
         LambdaQueryWrapper<CsBadcase> query = new LambdaQueryWrapper<CsBadcase>()
             .eq(CsBadcase::getWorkspaceId, workspaceId);
         if (status != null && !status.isBlank()) {
             query.eq(CsBadcase::getStatus, status);
         }
-        return badcaseMapper.selectList(query
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(badcaseMapper.selectList(query
             .orderByDesc(CsBadcase::getId)
-            .last("limit " + Math.max(1, Math.min(200, limit))));
+            .last("limit " + Math.max(1, Math.min(200, limit)))), com.forgeagent.customerservice.domain.vo.CsBadcaseVo.class);
     }
 
     /** 出口一:采纳为知识(生成待审 FAQ,答案留给运营补)。 */
-    public CsKnowledgeAnswer adoptKnowledge(Long id, Long workspaceId, String operator) {
+    public com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo adoptKnowledge(Long id, Long workspaceId, String operator) {
         CsBadcase badcase = require(id, workspaceId);
         String question = badcase.getQuestion();
         if (question == null || question.isBlank()) {
@@ -122,7 +122,7 @@ public class CsBadcaseService {
             .last("limit 1"));
         if (existing != null) {
             finish(badcase, "ADOPTED_KB", operator);
-            return existing;
+            return com.forgeagent.common.core.utils.MapstructUtils.convert(existing, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
         }
         CsKnowledgeAnswer answer = new CsKnowledgeAnswer();
         answer.setWorkspaceId(workspaceId);
@@ -135,7 +135,7 @@ public class CsBadcaseService {
         answer.setCreateTime(new Date());
         answerMapper.insert(answer);
         finish(badcase, "ADOPTED_KB", operator);
-        return answer;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answer, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
     /**
@@ -144,7 +144,7 @@ public class CsBadcaseService {
      * <p>D2 起直接写平台评测集 {@code agent_eval_case}(待确认态),
      * 不再依赖「导出 JSON → 运营手工导入」的搬运;幂等由唯一键兜住。</p>
      */
-    public CsBadcase adoptEval(Long id, Long workspaceId, String operator) {
+    public com.forgeagent.customerservice.domain.vo.CsBadcaseVo adoptEval(Long id, Long workspaceId, String operator) {
         CsBadcase badcase = require(id, workspaceId);
         if (badcase.getQuestion() == null || badcase.getQuestion().isBlank()) {
             throw new ServiceException("该 badcase 没有问题文本，无法作为评测用例");
@@ -157,18 +157,18 @@ public class CsBadcaseService {
                 .set(CsBadcase::getExported, "1"));
         }
         log.info("[CSP][D2] badcase {} 已推送评测集, caseId={}", id, caseId);
-        return badcaseMapper.selectById(id);
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(badcaseMapper.selectById(id), com.forgeagent.customerservice.domain.vo.CsBadcaseVo.class);
     }
 
     /** 出口三:忽略。 */
-    public CsBadcase ignore(Long id, Long workspaceId, String operator, String note) {
+    public com.forgeagent.customerservice.domain.vo.CsBadcaseVo ignore(Long id, Long workspaceId, String operator, String note) {
         CsBadcase badcase = require(id, workspaceId);
         finish(badcase, "IGNORED", operator);
         if (note != null && !note.isBlank()) {
             badcase.setNote(truncate(note, 500));
             badcaseMapper.updateById(badcase);
         }
-        return badcaseMapper.selectById(id);
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(badcaseMapper.selectById(id), com.forgeagent.customerservice.domain.vo.CsBadcaseVo.class);
     }
 
     /**
@@ -177,14 +177,14 @@ public class CsBadcaseService {
      * <p>新数据在 {@link #adoptEval} 时已直写评测集,所以正常情况下这里返回空列表。
      * 返回值仍保留原结构(含 caseId)供旧调用方使用,不再产出「待人工导入的 JSON」。</p>
      */
-    public List<Map<String, Object>> exportEval(Long workspaceId, int limit) {
+    public List<com.forgeagent.customerservice.domain.vo.CsExportEvalRowVo> exportEval(Long workspaceId, int limit) {
         List<CsBadcase> rows = badcaseMapper.selectList(new LambdaQueryWrapper<CsBadcase>()
             .eq(CsBadcase::getWorkspaceId, workspaceId)
             .eq(CsBadcase::getStatus, "ADOPTED_EVAL")
             .eq(CsBadcase::getExported, "0")
             .orderByAsc(CsBadcase::getId)
             .last("limit " + Math.max(1, Math.min(500, limit))));
-        List<Map<String, Object>> payload = new ArrayList<>();
+        List<com.forgeagent.customerservice.domain.vo.CsExportEvalRowVo> payload = new ArrayList<>();
         for (CsBadcase row : rows) {
             Long caseId;
             try {
@@ -193,13 +193,13 @@ public class CsBadcaseService {
                 log.warn("[CSP][D2] badcase {} 补推评测集失败: {}", row.getId(), e.getMessage());
                 continue;
             }
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("caseId", caseId);
-            item.put("badcaseId", row.getId());
-            item.put("source", row.getSource());
-            item.put("question", row.getQuestion());
-            item.put("expectedAnswer", row.getAnswer());
-            item.put("conversationId", row.getConversationId());
+            com.forgeagent.customerservice.domain.vo.CsExportEvalRowVo item = new com.forgeagent.customerservice.domain.vo.CsExportEvalRowVo();
+            item.setCaseId(caseId);
+            item.setBadcaseId(row.getId());
+            item.setSource(row.getSource());
+            item.setQuestion(row.getQuestion());
+            item.setExpectedAnswer(row.getAnswer());
+            item.setConversationId(row.getConversationId());
             payload.add(item);
             badcaseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<CsBadcase>()
                 .eq(CsBadcase::getId, row.getId())

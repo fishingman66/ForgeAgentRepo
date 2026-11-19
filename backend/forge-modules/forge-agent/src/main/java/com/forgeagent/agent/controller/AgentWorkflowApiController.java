@@ -3,6 +3,7 @@ package com.forgeagent.agent.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
+import com.forgeagent.agent.domain.vo.AgentWorkflowApiInvokeVo;
 import com.forgeagent.agent.service.IAgentWorkflowEndpointService;
 import com.forgeagent.common.core.domain.R;
 import com.forgeagent.common.core.exception.ServiceException;
@@ -11,8 +12,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Map;
 
 /**
  * 工作流对外调用入口(G2,免登录)
@@ -35,7 +34,7 @@ public class AgentWorkflowApiController {
      * 同步执行工作流并返回终态结果
      */
     @PostMapping("/workflow-api/{endpointCode}")
-    public R<Map<String, Object>> invoke(@NotBlank(message = "端点编码不能为空")
+    public R<AgentWorkflowApiInvokeVo> invoke(@NotBlank(message = "端点编码不能为空")
                                          @PathVariable String endpointCode,
                                          @RequestHeader(value = "Authorization", required = false) String authorization,
                                          @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,

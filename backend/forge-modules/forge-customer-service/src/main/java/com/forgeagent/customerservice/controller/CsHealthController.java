@@ -26,12 +26,12 @@ public class CsHealthController extends BaseController {
     private final CsModuleProperties properties;
 
     @GetMapping("/health")
-    public R<Map<String, Object>> health() {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("module", "forge-customer-service");
-        data.put("enabled", properties.getEnabled());
-        data.put("transport", properties.getTransport());
-        data.put("stage", "S0");
+    public R<com.forgeagent.customerservice.domain.vo.CsHealthVo> health() {
+        com.forgeagent.customerservice.domain.vo.CsHealthVo data = new com.forgeagent.customerservice.domain.vo.CsHealthVo();
+        data.setModule("forge-customer-service");
+        data.setEnabled(properties.getEnabled());
+        data.setTransport(properties.getTransport());
+        data.setStage("S0");
         return R.ok(data);
     }
 }

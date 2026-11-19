@@ -109,6 +109,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
 
     private final ChatRetrievalSupport retrievalSupport;
     private final com.forgeagent.agent.service.support.CsToolGuardService csToolGuardService;
+    private final com.forgeagent.agent.service.governance.AgentVersionService agentVersionService;
     private final ChatContextAssembler contextAssembler;
     private final ChatStreamSupport streamSupport;
     private final RunTraceService runTrace;
@@ -1066,6 +1067,13 @@ public class AgentChatServiceImpl implements IAgentChatService {
         AgentInfo agent = agentConfigCache.getAgentById(session.getAgentId());
         if (agent == null) {
             throw new ServiceException("会话对应的 Agent 已不存在");
+        }
+        // D1 灰度:会话创建时锁定的版本在每轮装配前生效——替换成快照视图(deep-copy,
+        // 不改缓存共享引用);控制台链路 csGuard 为 null,此分支跳过,存量行为零变更。
+        Integer pinnedVersion = session.getCsGuard() == null ? null : session.getCsGuard().pinnedVersion();
+        if (pinnedVersion != null) {
+            agent = agentVersionService.snapshotAgent(agent, pinnedVersion);
+            buildMetrics.put("pinnedVersion", pinnedVersion);
         }
         // 体检修复(H1):会话归属 ≠ Agent 空间归属——禁止用任意 agentId 跨空间执行他人 Agent
         // (对话、工具、工作流路由全走此处,统一在此收敛空间成员校验;触发器以归属人身份执行,归属人必然是空间成员)

@@ -11,13 +11,17 @@ import com.forgeagent.common.log.enums.BusinessType;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
 import com.forgeagent.common.web.core.BaseController;
 import com.forgeagent.rag.domain.AgentKbEvalCase;
-import com.forgeagent.rag.domain.AgentKbEvalRun;
+import com.forgeagent.rag.domain.bo.KbEvalCaseBo;
+import com.forgeagent.rag.domain.vo.AgentKbEvalCaseVo;
+import com.forgeagent.rag.domain.vo.AgentKbEvalRunVo;
+import com.forgeagent.rag.domain.vo.KbEvalCompareVo;
+import com.forgeagent.rag.domain.vo.KbEvalGateVo;
+import com.forgeagent.rag.domain.vo.KbEvalRunResultVo;
 import com.forgeagent.rag.service.KbEvalService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 知识库检索评测 Controller:维护评测问题集,批量运行检索并统计命中率与 MRR
@@ -37,7 +41,7 @@ public class AgentKbEvalController extends BaseController {
      */
     @SaCheckPermission("agent:knowledge:query")
     @GetMapping("/cases")
-    public R<List<AgentKbEvalCase>> cases(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
+    public R<List<AgentKbEvalCaseVo>> cases(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
         return R.ok(evalService.listCases(knowledgeId));
     }
 
@@ -47,8 +51,8 @@ public class AgentKbEvalController extends BaseController {
     @SaCheckPermission("agent:knowledge:edit")
     @Log(title = "知识库评测用例", businessType = BusinessType.INSERT)
     @PostMapping("/case")
-    public R<Long> addCase(@RequestBody AgentKbEvalCase evalCase) {
-        return R.ok(evalService.saveCase(evalCase));
+    public R<Long> addCase(@Validated(AddGroup.class) @RequestBody KbEvalCaseBo bo) {
+        return R.ok(evalService.saveCase(toEntity(bo)));
     }
 
     /**
@@ -68,8 +72,8 @@ public class AgentKbEvalController extends BaseController {
     @SaCheckPermission("agent:knowledge:edit")
     @Log(title = "知识库检索评测", businessType = BusinessType.OTHER)
     @PostMapping("/run")
-    public R<Map<String, Object>> run(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
-                                      Integer topK) {
+    public R<KbEvalRunResultVo> run(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                    Integer topK) {
         return R.ok(evalService.runEvaluation(knowledgeId, topK));
     }
 
@@ -78,8 +82,8 @@ public class AgentKbEvalController extends BaseController {
      */
     @SaCheckPermission("agent:knowledge:query")
     @GetMapping("/runs")
-    public R<List<AgentKbEvalRun>> runs(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
-                                        Integer limit) {
+    public R<List<AgentKbEvalRunVo>> runs(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                          Integer limit) {
         return R.ok(evalService.listRuns(knowledgeId, limit));
     }
 
@@ -88,8 +92,8 @@ public class AgentKbEvalController extends BaseController {
      */
     @SaCheckPermission("agent:knowledge:query")
     @GetMapping("/runs/page")
-    public R<PageResult<AgentKbEvalRun>> runsPage(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
-                                                  PageQuery pageQuery) {
+    public R<PageResult<AgentKbEvalRunVo>> runsPage(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                                    PageQuery pageQuery) {
         return R.ok(evalService.pageRuns(knowledgeId, pageQuery));
     }
 
@@ -108,9 +112,9 @@ public class AgentKbEvalController extends BaseController {
     @SaCheckPermission("agent:knowledge:edit")
     @Log(title = "知识库评测对比", businessType = BusinessType.OTHER)
     @PostMapping("/compare")
-    public R<Map<String, Object>> compare(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
-                                          @NotNull(message = "基线运行ID不能为空") Long baselineRunId,
-                                          @NotNull(message = "候选运行ID不能为空") Long candidateRunId) {
+    public R<KbEvalCompareVo> compare(@NotNull(message = "知识库ID不能为空") Long knowledgeId,
+                                      @NotNull(message = "基线运行ID不能为空") Long baselineRunId,
+                                      @NotNull(message = "候选运行ID不能为空") Long candidateRunId) {
         return R.ok(evalService.compare(knowledgeId, baselineRunId, candidateRunId));
     }
 
@@ -119,7 +123,27 @@ public class AgentKbEvalController extends BaseController {
      */
     @SaCheckPermission("agent:knowledge:query")
     @GetMapping("/gate")
-    public R<Map<String, Object>> gate(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
+    public R<KbEvalGateVo> gate(@NotNull(message = "知识库ID不能为空") Long knowledgeId) {
         return R.ok(evalService.gateCheck(knowledgeId));
+    }
+
+    /**
+     * Bo → 实体。手写映射而不走 MapstructUtils:
+     * 后者静态初始化依赖 Spring 容器,纯 Mockito 场景下类加载即失败(docs/12 第八节)。
+     */
+    private AgentKbEvalCase toEntity(KbEvalCaseBo bo) {
+        AgentKbEvalCase entity = new AgentKbEvalCase();
+        entity.setId(bo.getId());
+        entity.setKnowledgeId(bo.getKnowledgeId());
+        entity.setQuestion(bo.getQuestion());
+        entity.setExpectedDocName(bo.getExpectedDocName());
+        entity.setExpectedKeywords(bo.getExpectedKeywords());
+        entity.setEvidences(bo.getEvidences());
+        entity.setStatus(bo.getStatus());
+        entity.setSource(bo.getSource());
+        entity.setSourceId(bo.getSourceId());
+        entity.setDatasetRevision(bo.getDatasetRevision());
+        entity.setRemark(bo.getRemark());
+        return entity;
     }
 }

@@ -29,20 +29,18 @@ public class CsKnowledgeAnswerService {
     private final CsKnowledgeAnswerMapper answerMapper;
     private final AgentKbZeroHitLogMapper zeroHitMapper;
 
-    public List<CsKnowledgeAnswer> list(Long workspaceId, String status) {
+    public List<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo> list(Long workspaceId, String status) {
         LambdaQueryWrapper<CsKnowledgeAnswer> q = new LambdaQueryWrapper<CsKnowledgeAnswer>()
             .eq(CsKnowledgeAnswer::getWorkspaceId, workspaceId);
         if (status != null && !status.isBlank()) {
             q.eq(CsKnowledgeAnswer::getStatus, status);
         }
-        return answerMapper.selectList(q.orderByDesc(CsKnowledgeAnswer::getId));
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answerMapper.selectList(q.orderByDesc(CsKnowledgeAnswer::getId)), com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
-    public CsKnowledgeAnswer save(CsKnowledgeAnswer answer) {
-        if (answer.getQuestion() == null || answer.getQuestion().isBlank()
-            || answer.getAnswer() == null || answer.getAnswer().isBlank()) {
-            throw new ServiceException("问题与答案不能为空");
-        }
+    public com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo save(com.forgeagent.customerservice.domain.bo.CsKnowledgeAnswerSaveBo bo, Long workspaceId) {
+        CsKnowledgeAnswer answer = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsKnowledgeAnswer.class);
+        answer.setWorkspaceId(workspaceId);
         String hash = hash(answer.getQuestion());
         answer.setQuestionHash(hash);
         answer.setStatus("PENDING");
@@ -59,13 +57,13 @@ public class CsKnowledgeAnswerService {
             existing.setAuditBy(null);
             existing.setAuditNote(null);
             answerMapper.updateById(existing);
-            return existing;
+            return com.forgeagent.common.core.utils.MapstructUtils.convert(existing, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
         }
         answerMapper.insert(answer);
-        return answer;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answer, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
-    public CsKnowledgeAnswer audit(Long id, String status, Long auditBy, String note) {
+    public com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo audit(Long id, String status, Long auditBy, String note) {
         CsKnowledgeAnswer answer = answerMapper.selectById(id);
         if (answer == null) {
             throw new ServiceException("答案不存在");
@@ -77,7 +75,7 @@ public class CsKnowledgeAnswerService {
             answer.setEffectiveFrom(new Date());
         }
         answerMapper.updateById(answer);
-        return answer;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answer, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
     /** 当前生效答案(状态 + 生效期双重判定)。 */
@@ -159,6 +157,12 @@ public class CsKnowledgeAnswerService {
             answerMapper.updateById(answer);
         }
         return expired.size();
+    }
+
+    /** 内部链路(数据飞轮/负反馈)直接落实体;对外走 Bo 重载。 */
+    public com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo save(CsKnowledgeAnswer answer) {
+        answerMapper.insert(answer);
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answer, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
     public static String hash(String question) {

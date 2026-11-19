@@ -8,12 +8,11 @@ import com.forgeagent.common.log.annotation.Log;
 import com.forgeagent.common.log.enums.BusinessType;
 import com.forgeagent.common.web.core.BaseController;
 import com.forgeagent.rag.domain.bo.KbVlmConfigBo;
+import com.forgeagent.rag.domain.vo.KbVlmConfigTestVo;
 import com.forgeagent.rag.domain.vo.KbVlmConfigVo;
 import com.forgeagent.rag.service.KbVlmConfigService;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 /**
  * 知识库图片识别模型配置(按工作空间):平台模型或第三方 OpenAI 兼容模型
@@ -53,7 +52,7 @@ public class KbVlmConfigController extends BaseController {
      */
     @SaCheckPermission("agent:knowledge:edit")
     @PostMapping("/test")
-    public R<Map<String, Object>> test(@RequestBody KbVlmConfigBo bo) {
+    public R<KbVlmConfigTestVo> test(@RequestBody KbVlmConfigBo bo) {
         return R.ok(vlmConfigService.test(bo));
     }
 }

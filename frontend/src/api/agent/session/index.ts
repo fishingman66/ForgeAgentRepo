@@ -156,14 +156,14 @@ export const recallMessage = (messageId: string | number) => {
 
 /** 运行链路步骤(P0 / A2) */
 export interface RunStepVO {
-  step_no: number;
-  step_type: string;
-  step_name: string;
+  stepNo: number;
+  stepType: string;
+  stepName: string;
   status: string;
-  latency_ms: number | null;
-  token_usage: number | null;
+  latencyMs: number | null;
+  tokenUsage: number | null;
   payload: string | null;
-  create_time: string;
+  createTime: string;
 }
 
 /** 运行链路详情 */
@@ -187,7 +187,7 @@ const MAX_RECONNECT = 3;
 
 /**
  * 流式发送消息(SSE):以 fetch + ReadableStream 消费后端事件流。
- * 事件序列 run_id → meta → delta* → usage → done,error 事件表示执行失败。
+ * 事件序列 runId → meta → delta* → usage → done,error 事件表示执行失败。
  *
  * P0/A1:记录每帧 id 作为断点游标;连接异常中断且已拿到 runId 时,
  * 携带 after=cursor 请求 /agent/chat/run/{runId}/events 重放剩余事件,最多 3 次。
@@ -214,7 +214,7 @@ export const streamDebugChat = async (data: ChatSendForm, cb: StreamCallbacks, s
 };
 
 /**
- * 流式重新生成最后一条助手回复(SSE):事件序列 run_id → delta* → done。
+ * 流式重新生成最后一条助手回复(SSE):事件序列 runId → delta* → done。
  */
 export const streamRegenerate = async (sessionId: string | number, cb: StreamCallbacks, signal?: AbortSignal): Promise<boolean> => {
   return consumeSse(`/agent/chat/${sessionId}/regenerate/stream`, { method: 'POST', signal }, cb);

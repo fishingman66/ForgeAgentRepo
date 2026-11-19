@@ -9,6 +9,7 @@ import com.forgeagent.rag.domain.bo.AgentKnowledgeBo;
 import com.forgeagent.rag.domain.bo.KnowledgeSearchBo;
 import com.forgeagent.rag.domain.vo.AgentKbZeroHitLogVo;
 import com.forgeagent.rag.domain.vo.AgentKnowledgeVo;
+import com.forgeagent.rag.domain.vo.KbEvalGateVo;
 import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import com.forgeagent.rag.domain.vo.KbRebuildProgressVo;
 import com.forgeagent.rag.config.KnowledgeProperties;
@@ -50,9 +51,9 @@ public class AgentKnowledgeController extends BaseController {
         if (!Boolean.TRUE.equals(properties.getGateRequired())) {
             return;
         }
-        Map<String, Object> verdict = evalService.gateCheck(id);
-        if ("BLOCKED".equals(verdict.get("state"))) {
-            throw new ServiceException("重建被评测门禁拦截:" + verdict.get("description")
+        KbEvalGateVo verdict = evalService.gateCheck(id);
+        if ("BLOCKED".equals(verdict.getState())) {
+            throw new ServiceException("重建被评测门禁拦截:" + verdict.getDescription()
                 + ";请先修复召回质量,或临时关闭 rag.knowledge.gate.required 后强制执行");
         }
     }

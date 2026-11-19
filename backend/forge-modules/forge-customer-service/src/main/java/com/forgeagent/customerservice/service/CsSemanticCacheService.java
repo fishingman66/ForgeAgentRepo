@@ -133,10 +133,10 @@ public class CsSemanticCacheService {
     }
 
     /** 运营查看:按分区倒序列出。 */
-    public List<CsSemanticCache> list(Long workspaceId, String channelCode, int limit) {
-        return cacheMapper.selectList(baseQuery(workspaceId, channelCode)
+    public List<com.forgeagent.customerservice.domain.vo.CsSemanticCacheVo> list(Long workspaceId, String channelCode, int limit) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(cacheMapper.selectList(baseQuery(workspaceId, channelCode)
             .orderByDesc(CsSemanticCache::getUpdateTime)
-            .last("limit " + Math.max(1, Math.min(200, limit))));
+            .last("limit " + Math.max(1, Math.min(200, limit)))), com.forgeagent.customerservice.domain.vo.CsSemanticCacheVo.class);
     }
 
     public boolean remove(Long id) {

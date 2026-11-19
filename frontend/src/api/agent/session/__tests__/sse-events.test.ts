@@ -18,7 +18,8 @@ const stubCb = (log: Array<[string, unknown[]]>): StreamCallbacks => ({
   onWfStart: (...a) => log.push(['wf_start', a]),
   onWfNodeStart: (...a) => log.push(['node_start', a]),
   onWfNodeDone: (...a) => log.push(['node_done', a]),
-  onWfNodeError: (...a) => log.push(['node_error', a])
+  onWfNodeError: (...a) => log.push(['node_error', a]),
+  onApprovalResult: (...a) => log.push(['cs_approval_result', a])
 });
 
 describe('dispatchStreamEvent', () => {
@@ -108,5 +109,19 @@ describe('dispatchStreamEvent', () => {
     const log: Array<[string, unknown[]]> = [];
     dispatchStreamEvent(state, '', '{}', 1, stubCb(log));
     expect(log).toEqual([]);
+  });
+
+  it('C4 cs_approval_result 解析状态与工具名回执', () => {
+    const state = newState();
+    const log: Array<[string, unknown[]]> = [];
+    dispatchStreamEvent(
+      state,
+      'cs_approval_result',
+      '{"status":"approved","toolName":"refund","message":"操作已执行"}',
+      12,
+      stubCb(log)
+    );
+    expect(state.cursor).toBe(12);
+    expect(log).toEqual([['cs_approval_result', ['approved', 'refund', '操作已执行']]]);
   });
 });

@@ -4,7 +4,7 @@
       <el-tab-pane label="评测集与运行" name="dataset">
         <div class="toolbar">
           <el-select v-model="datasetId" placeholder="选择评测集" size="small" style="width: 220px" @change="loadCases">
-            <el-option v-for="d in datasets" :key="d.id" :label="`${d.name} (${d.case_count} 条)`" :value="d.id" />
+            <el-option v-for="d in datasets" :key="d.id" :label="`${d.name} (${d.caseCount} 条)`" :value="d.id" />
           </el-select>
           <el-button size="small" @click="newVisible = true">新建评测集</el-button>
           <el-button size="small" type="primary" :loading="running" :disabled="!datasetId" @click="doRun">运行评测</el-button>
@@ -32,7 +32,7 @@
         </div>
         <el-table :data="cases" size="small" border max-height="220">
           <el-table-column prop="question" label="问题" show-overflow-tooltip />
-          <el-table-column prop="expected_keywords" label="关键词" width="180" show-overflow-tooltip />
+          <el-table-column prop="expectedKeywords" label="关键词" width="180" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
 
@@ -41,19 +41,19 @@
         <el-table :data="runs" size="small" border max-height="240" @row-click="showRun">
           <el-table-column prop="id" label="任务" width="70" />
           <el-table-column prop="status" label="状态" width="90" />
-          <el-table-column prop="avg_score" label="得分" width="90" />
-          <el-table-column prop="p95_latency_ms" label="P95(ms)" width="100" />
-          <el-table-column prop="total_cases" label="样本" width="70" />
-          <el-table-column prop="create_time" label="时间" width="160" />
+          <el-table-column prop="avgScore" label="得分" width="90" />
+          <el-table-column prop="p95LatencyMs" label="P95(ms)" width="100" />
+          <el-table-column prop="totalCases" label="样本" width="70" />
+          <el-table-column prop="createTime" label="时间" width="160" />
         </el-table>
         <div class="section-title">逐样本结果</div>
         <el-table :data="results" size="small" border max-height="280">
           <el-table-column prop="question" label="问题" show-overflow-tooltip />
           <el-table-column prop="score" label="得分" width="80" />
-          <el-table-column prop="judge_score" label="裁判分" width="80" />
-          <el-table-column prop="latency_ms" label="耗时" width="90" />
+          <el-table-column prop="judgeScore" label="裁判分" width="80" />
+          <el-table-column prop="latencyMs" label="耗时" width="90" />
           <el-table-column prop="answer" label="回答" show-overflow-tooltip />
-          <el-table-column prop="error_message" label="异常" show-overflow-tooltip />
+          <el-table-column prop="errorMessage" label="异常" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
     </el-tabs>

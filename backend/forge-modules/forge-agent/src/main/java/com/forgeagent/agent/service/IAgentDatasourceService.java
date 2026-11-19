@@ -62,5 +62,5 @@ public interface IAgentDatasourceService {
     /**
      * 可查询表清单(从已同步的 schemaTables 读取,供白名单选择与展示)
      */
-    List<java.util.Map<String, Object>> listTables(Long id);
+    List<com.forgeagent.agent.domain.vo.AgentDatasourceTableVo> listTables(Long id);
 }

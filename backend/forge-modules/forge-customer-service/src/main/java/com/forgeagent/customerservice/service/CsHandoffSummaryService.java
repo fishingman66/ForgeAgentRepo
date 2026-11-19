@@ -77,7 +77,7 @@ public class CsHandoffSummaryService {
     }
 
     /** 生成并落库(同一会话覆盖写)。 */
-    public Map<String, Object> generate(Long workspaceId, Long conversationId, Long ticketId) throws Exception {
+    public com.forgeagent.customerservice.domain.vo.CsSummaryVo generate(Long workspaceId, Long conversationId, Long ticketId) throws Exception {
         CsConversation conv = conversationMapper.selectById(conversationId);
         if (conv == null) {
             throw new ServiceException("会话不存在");
@@ -93,36 +93,35 @@ public class CsHandoffSummaryService {
         List<String> pending = pendingQuestions(conv);
         String emotion = judgeEmotion(texts);
 
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("oneLineSummary", oneLine(intent, emotion, texts.size(), pending.size()));
-        summary.put("userIntent", intent);
-        summary.put("emotion", emotion);
-        summary.put("triedSolutions", triedSolutions(recent, pending));
-        summary.put("pendingIssues", pending);
-        summary.put("suggestedNextStep", nextStep(intent, pending));
-        summary.put("suggestedReply", opening);
-        summary.put("turns", texts.size());
+        com.forgeagent.customerservice.domain.vo.CsSummaryVo summary = new com.forgeagent.customerservice.domain.vo.CsSummaryVo();
+        summary.setOneLineSummary(oneLine(intent, emotion, texts.size(), pending.size()));
+        summary.setUserIntent(intent);
+        summary.setEmotion(emotion);
+        summary.setTriedSolutions(triedSolutions(recent, pending));
+        summary.setPendingIssues(pending);
+        summary.setSuggestedNextStep(nextStep(intent, pending));
+        summary.setSuggestedReply(opening);
+        summary.setTurns(texts.size());
         // 没有候选话术说明没跑过检索(关键词/敏感词直接转人工),此时摘要只有规则结论
-        summary.put("degraded", opening == null);
+        summary.setDegraded(opening == null);
         upsert(workspaceId, conversationId, ticketId, summary, texts.size());
         return summary;
     }
 
-    /** 坐席侧读取:按工单取最新一条,没有返回空对象(前端据此不渲染卡片)。 */
-    public Map<String, Object> latest(Long workspaceId, Long ticketId) {
+    /** 坐席侧读取:按工单取最新一条,没有返回 null(前端据此不渲染卡片)。 */
+    public com.forgeagent.customerservice.domain.vo.CsSummaryVo latest(Long workspaceId, Long ticketId) {
         CsHandoffSummary row = summaryMapper.selectOne(new LambdaQueryWrapper<CsHandoffSummary>()
             .eq(CsHandoffSummary::getWorkspaceId, workspaceId)
             .eq(CsHandoffSummary::getTicketId, ticketId)
             .orderByDesc(CsHandoffSummary::getId).last("limit 1"));
         if (row == null || row.getSummaryJson() == null || row.getSummaryJson().isBlank()) {
-            return Map.of();
+            return null;
         }
         try {
-            return MAPPER.readValue(row.getSummaryJson(), new TypeReference<Map<String, Object>>() {
-            });
+            return MAPPER.readValue(row.getSummaryJson(), com.forgeagent.customerservice.domain.vo.CsSummaryVo.class);
         } catch (Exception e) {
             log.warn("[CS] 交接摘要解析失败 ticketId={}: {}", ticketId, e.getMessage());
-            return Map.of();
+            return null;
         }
     }
 
@@ -259,7 +258,7 @@ public class CsHandoffSummaryService {
     }
 
     private void upsert(Long workspaceId, Long conversationId, Long ticketId,
-                        Map<String, Object> summary, int turns) throws Exception {
+                        com.forgeagent.customerservice.domain.vo.CsSummaryVo summary, int turns) throws Exception {
         CsHandoffSummary row = summaryMapper.selectOne(new LambdaQueryWrapper<CsHandoffSummary>()
             .eq(CsHandoffSummary::getConversationId, conversationId).last("limit 1"));
         boolean insert = row == null;
@@ -272,7 +271,7 @@ public class CsHandoffSummaryService {
         row.setTicketId(ticketId);
         row.setSummaryJson(MAPPER.writeValueAsString(summary));
         row.setSourceVersion(turns);
-        row.setDegraded(Boolean.TRUE.equals(summary.get("degraded")) ? "1" : "0");
+        row.setDegraded(Boolean.TRUE.equals(summary.getDegraded()) ? "1" : "0");
         row.setUpdateTime(new Date());
         if (insert) {
             summaryMapper.insert(row);

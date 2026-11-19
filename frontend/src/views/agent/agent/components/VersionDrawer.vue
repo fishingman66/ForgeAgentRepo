@@ -7,15 +7,15 @@
           <span class="tip">发布与回滚都会生成不可变快照,历史不会被覆盖</span>
         </div>
         <el-table :data="versions" size="small" border v-loading="loading">
-          <el-table-column prop="version_no" label="版本" width="80">
-            <template #default="{ row }">v{{ row.version_no }}</template>
+          <el-table-column prop="versionNo" label="版本" width="80">
+            <template #default="{ row }">v{{ row.versionNo }}</template>
           </el-table-column>
           <el-table-column prop="source" label="来源" width="100" />
           <el-table-column prop="remark" label="说明" show-overflow-tooltip />
-          <el-table-column prop="config_hash" label="摘要" width="110">
-            <template #default="{ row }">{{ (row.config_hash || '').slice(0, 8) }}</template>
+          <el-table-column prop="configHash" label="摘要" width="110">
+            <template #default="{ row }">{{ (row.configHash || '').slice(0, 8) }}</template>
           </el-table-column>
-          <el-table-column prop="create_time" label="时间" width="160" />
+          <el-table-column prop="createTime" label="时间" width="160" />
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="showDetail(row)">详情</el-button>
@@ -43,7 +43,7 @@
         <el-table :data="executions" size="small" border max-height="220">
           <el-table-column prop="status" label="结果" width="90" />
           <el-table-column prop="reason" label="原因" show-overflow-tooltip />
-          <el-table-column prop="create_time" label="时间" width="160" />
+          <el-table-column prop="createTime" label="时间" width="160" />
         </el-table>
         <div class="section-title">门禁豁免</div>
         <div class="toolbar">
@@ -133,7 +133,7 @@ const doPreview = async () => {
 
 const showDetail = async (raw: any) => {
   const row = raw as VersionItem;
-  const res = await getVersion(props.agentId, row.version_no);
+  const res = await getVersion(props.agentId, row.versionNo);
   detailText.value = JSON.stringify(res.data ?? {}, null, 2);
   detailVisible.value = true;
 };
@@ -141,11 +141,11 @@ const showDetail = async (raw: any) => {
 const showDiff = async (raw: any) => {
   const row = raw as VersionItem;
   const current = versions.value[0];
-  if (!current || current.version_no === row.version_no) {
+  if (!current || current.versionNo === row.versionNo) {
     ElMessage.info('请选择与当前版本不同的历史版本进行对比');
     return;
   }
-  const res = await diffVersions(props.agentId, row.version_no, current.version_no);
+  const res = await diffVersions(props.agentId, row.versionNo, current.versionNo);
   detailText.value = JSON.stringify(res.data ?? {}, null, 2);
   detailVisible.value = true;
 };
@@ -153,10 +153,10 @@ const showDiff = async (raw: any) => {
 const doRollback = async (raw: any) => {
   const row = raw as VersionItem;
   await ElMessageBox.confirm(
-    `将 Agent 配置回滚到 v${row.version_no}?回滚会生成一条新版本快照,当前历史不会被删除;已发布 Agent 需先停用。`,
+    `将 Agent 配置回滚到 v${row.versionNo}?回滚会生成一条新版本快照,当前历史不会被删除;已发布 Agent 需先停用。`,
     '回滚确认', { type: 'warning' }
   );
-  await rollbackVersion(props.agentId, row.version_no);
+  await rollbackVersion(props.agentId, row.versionNo);
   ElMessage.success('已回滚');
   emit('rolledBack');
   await load();

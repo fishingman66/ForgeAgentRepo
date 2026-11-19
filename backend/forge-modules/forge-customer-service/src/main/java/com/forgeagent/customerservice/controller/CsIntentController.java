@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -36,14 +37,14 @@ public class CsIntentController extends BaseController {
 
     /** 平台级 + 本空间意图,按优先级排序。 */
     @GetMapping
-    public R<List<CsIntent>> list() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsIntentVo>> list() {
         return R.ok(intentService.list(workspaceResolver.currentWorkspaceId()));
     }
 
     /** 新增或编辑;编辑时 workspace 归属以库内原行为准,不允许跨空间搬移。 */
     @PostMapping
-    public R<CsIntent> save(@RequestBody CsIntent intent) {
-        return R.ok(intentService.save(intent, workspaceResolver.currentWorkspaceId()));
+    public R<com.forgeagent.customerservice.domain.vo.CsIntentVo> save(@Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsIntentSaveBo bo) {
+        return R.ok(intentService.save(bo, workspaceResolver.currentWorkspaceId()));
     }
 
     /** 删除空间级意图;平台级意图由服务层拒绝。 */

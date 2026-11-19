@@ -135,7 +135,7 @@ public class CsStreamService {
                     String binding = channel.getIdentityBinding();
                     CsChatFacade.GuardContext guardContext = new CsChatFacade.GuardContext(
                         conv.getId(), visitorId, channel.getWorkspaceId(), channel.getChannelCode(),
-                        binding != null && !binding.isBlank());
+                        binding != null && !binding.isBlank(), conv.getPinnedVersion());
                     CsChatFacade.CsChatRequest request = new CsChatFacade.CsChatRequest(
                         conv.getAgentSessionId(), agentId, content,
                         channel.getOwnerUserId(), channel.getWorkspaceId(),

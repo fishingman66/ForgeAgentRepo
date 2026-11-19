@@ -36,6 +36,8 @@ export interface StreamCallbacks {
   onWfNodeDone?: (nodeId: string, nodeName: string, nodeType: string, status: string) => void;
   /** 工作流节点失败 */
   onWfNodeError?: (nodeId: string, nodeName: string, nodeType: string, error: string) => void;
+  /** C4:工具审批结果回执(status=submitted/approved/rejected/failed) */
+  onApprovalResult?: (status: string, toolName: string, message: string) => void;
 }
 
 /** SSE 消费状态:游标与终态标志由分发函数更新,消费循环据此判定续传/退出 */
@@ -97,6 +99,10 @@ export const dispatchStreamEvent = (
     } else if (ev === 'node_error') {
       const d = JSON.parse(payload);
       cb.onWfNodeError?.(String(d.nodeId ?? ''), String(d.nodeName ?? ''), String(d.nodeType ?? ''), String(d.error ?? ''));
+    } else if (ev === 'cs_approval_result') {
+      // C4:异步 HITL 工具审批回执;旧前端无此回调时静默忽略(后端先行兼容)
+      const d = JSON.parse(payload);
+      cb.onApprovalResult?.(String(d.status ?? ''), String(d.toolName ?? ''), String(d.message ?? ''));
     } else if (ev === 'done') {
       state.ok = true;
       cb.onDone?.(JSON.parse(payload));

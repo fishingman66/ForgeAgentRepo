@@ -8,7 +8,10 @@ import com.forgeagent.customerservice.domain.CsTicket;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.callcenter.common.EvalFeedbackWriter;
+import com.forgeagent.customerservice.mapper.CsBadcaseMapper;
+import com.forgeagent.customerservice.mapper.CsConversationMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -56,11 +59,16 @@ public class CsEvalFeedbackService {
     private static final int QUESTION_MAX = 2000;
     private static final int REFERENCE_MAX = 8000;
 
-    private final JdbcTemplate jdbc;
+    private final EvalFeedbackWriter evalWriter;
+    private final CsBadcaseMapper badcaseMapper;
+    private final CsConversationMapper conversationMapper;
     private final CsModuleProperties properties;
 
-    public CsEvalFeedbackService(JdbcTemplate jdbc, CsModuleProperties properties) {
-        this.jdbc = jdbc;
+    public CsEvalFeedbackService(EvalFeedbackWriter evalWriter, CsBadcaseMapper badcaseMapper,
+                                 CsConversationMapper conversationMapper, CsModuleProperties properties) {
+        this.evalWriter = evalWriter;
+        this.badcaseMapper = badcaseMapper;
+        this.conversationMapper = conversationMapper;
         this.properties = properties;
     }
 
@@ -74,9 +82,10 @@ public class CsEvalFeedbackService {
             throw new ServiceException("该 badcase 没有问题文本,无法作为评测用例");
         }
         Long agentId = agentIdOfConversation(badcase.getConversationId());
-        Long datasetId = ensureDataset(badcase.getWorkspaceId(), agentId);
-        return insertCase(datasetId, SOURCE_BADCASE, badcase.getId(),
-            badcase.getQuestion(), badcase.getAnswer());
+        Long datasetId = evalWriter.ensureDataset(badcase.getWorkspaceId(), agentId,
+            DATASET_NAME, "客服 badcase 与坐席优质会话自动沉淀(D2)");
+        return evalWriter.insertCase(datasetId, SOURCE_BADCASE, badcase.getId(),
+            badcase.getQuestion(), badcase.getAnswer(), REVIEW_PENDING);
     }
 
     /**
@@ -97,18 +106,16 @@ public class CsEvalFeedbackService {
             if (conv.getAgentId() == null || conv.getAgentSessionId() == null) {
                 return;
             }
-            Map<String, Object> lastVisitor = lastMessage(conv.getAgentSessionId(), "user");
+            Map<String, Object> lastVisitor = evalWriter.lastMessage(conv.getAgentSessionId(), "user");
             if (lastVisitor == null || StringUtils.isBlank(text(lastVisitor.get("content")))) {
                 return;
             }
-            Integer turns = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM agent_message WHERE session_id=? AND role='user'",
-                Integer.class, conv.getAgentSessionId());
-            if (turns == null || turns < MIN_VISITOR_TURNS) {
+            int turns = evalWriter.countVisitorTurns(conv.getAgentSessionId());
+            if (turns < MIN_VISITOR_TURNS) {
                 return;
             }
-            Integer badcases = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM agent_cs_badcase WHERE conversation_id=?", Integer.class, conv.getId());
+            Long badcases = badcaseMapper.selectCount(Wrappers.<com.forgeagent.customerservice.domain.CsBadcase>lambdaQuery()
+                .eq(com.forgeagent.customerservice.domain.CsBadcase::getConversationId, conv.getId()));
             if (badcases != null && badcases > 0) {
                 // 已经进过改进单的会话,走人工标记路径,不重复采样
                 return;
@@ -117,9 +124,10 @@ public class CsEvalFeedbackService {
             if (StringUtils.isBlank(reference)) {
                 return;
             }
-            Long datasetId = ensureDataset(conv.getWorkspaceId(), conv.getAgentId());
-            Long caseId = insertCase(datasetId, SOURCE_SAMPLED, conv.getId(),
-                text(lastVisitor.get("content")), reference);
+            Long datasetId = evalWriter.ensureDataset(conv.getWorkspaceId(), conv.getAgentId(),
+                DATASET_NAME, "客服 badcase 与坐席优质会话自动沉淀(D2)");
+            Long caseId = evalWriter.insertCase(datasetId, SOURCE_SAMPLED, conv.getId(),
+                text(lastVisitor.get("content")), reference, REVIEW_PENDING);
             log.info("[CSP][D2] 会话 {} 采样入评测集, caseId={}", conv.getId(), caseId);
         } catch (Exception e) {
             log.warn("[CSP][D2] 会话 {} 采样失败: {}", conv.getId(), e.getMessage());
@@ -127,47 +135,33 @@ public class CsEvalFeedbackService {
     }
 
     /** 待确认/已通过/已驳回用例列表(按 workspace 圈定数据集) */
-    public List<Map<String, Object>> listCases(Long workspaceId, String reviewStatus, int limit) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT c.id,c.dataset_id,c.question,c.reference_answer,c.source,c.source_ref_id,
-                       c.review_status,c.create_time
-                FROM agent_eval_case c
-                JOIN agent_eval_dataset d ON d.id = c.dataset_id AND d.del_flag = 0
-                WHERE d.workspace_id = ? AND c.source IS NOT NULL
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(workspaceId);
-        if (StringUtils.isNotBlank(reviewStatus)) {
-            sql.append(" AND c.review_status = ? ");
-            args.add(reviewStatus);
+    public List<com.forgeagent.customerservice.domain.vo.CsEvalCaseRowVo> listCases(Long workspaceId, String reviewStatus, int limit) {
+        List<Map<String, Object>> rows = evalWriter.listCases(workspaceId, StringUtils.isBlank(reviewStatus) ? null : reviewStatus,
+            Math.max(1, Math.min(200, limit)));
+        List<com.forgeagent.customerservice.domain.vo.CsEvalCaseRowVo> result = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            com.forgeagent.customerservice.domain.vo.CsEvalCaseRowVo vo = new com.forgeagent.customerservice.domain.vo.CsEvalCaseRowVo();
+            vo.setId(((Number) row.get("id")).longValue());
+            vo.setDatasetId(row.get("dataset_id") == null ? null : ((Number) row.get("dataset_id")).longValue());
+            vo.setQuestion((String) row.get("question"));
+            vo.setReferenceAnswer((String) row.get("reference_answer"));
+            vo.setSource((String) row.get("source"));
+            vo.setSourceRefId(row.get("source_ref_id") == null ? null : ((Number) row.get("source_ref_id")).longValue());
+            vo.setReviewStatus((String) row.get("review_status"));
+            vo.setCreateTime((java.util.Date) row.get("create_time"));
+            result.add(vo);
         }
-        sql.append(" ORDER BY c.id DESC LIMIT ? ");
-        args.add(Math.max(1, Math.min(200, limit)));
-        return jdbc.queryForList(sql.toString(), args.toArray());
+        return result;
     }
 
     /** 确认或驳回一条回流用例 */
     public void review(Long caseId, Long workspaceId, boolean approve) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT c.id,c.review_status FROM agent_eval_case c
-                JOIN agent_eval_dataset d ON d.id = c.dataset_id AND d.del_flag = 0
-                WHERE c.id = ? AND d.workspace_id = ?
-                """, caseId, workspaceId);
-        if (rows.isEmpty()) {
-            throw new ServiceException("评测用例不存在");
-        }
-        jdbc.update("UPDATE agent_eval_case SET review_status=? WHERE id=?",
-            approve ? REVIEW_APPROVED : REVIEW_REJECTED, caseId);
+        evalWriter.review(caseId, workspaceId, approve, REVIEW_APPROVED, REVIEW_REJECTED);
     }
 
     /** 待确认数量(运营页角标) */
     public int pendingCount(Long workspaceId) {
-        Integer count = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM agent_eval_case c
-                JOIN agent_eval_dataset d ON d.id = c.dataset_id AND d.del_flag = 0
-                WHERE d.workspace_id = ? AND c.source IS NOT NULL AND c.review_status = '0'
-                """, Integer.class, workspaceId);
-        return count == null ? 0 : count;
+        return evalWriter.pendingCount(workspaceId, REVIEW_PENDING);
     }
 
     /**
@@ -178,56 +172,13 @@ public class CsEvalFeedbackService {
         if (workspaceId == null) {
             throw new ServiceException("工作空间不能为空");
         }
-        List<Long> exists = agentId == null
-            ? jdbc.queryForList("""
-                SELECT id FROM agent_eval_dataset
-                WHERE workspace_id=? AND agent_id IS NULL AND name=? AND del_flag=0
-                ORDER BY id LIMIT 1
-                """, Long.class, workspaceId, DATASET_NAME)
-            : jdbc.queryForList("""
-                SELECT id FROM agent_eval_dataset
-                WHERE workspace_id=? AND agent_id=? AND name=? AND del_flag=0
-                ORDER BY id LIMIT 1
-                """, Long.class, workspaceId, agentId, DATASET_NAME);
-        if (!exists.isEmpty()) {
-            return exists.getFirst();
-        }
-        jdbc.update("""
-                INSERT INTO agent_eval_dataset (workspace_id,agent_id,name,description,create_time)
-                VALUES (?,?,?,?,NOW())
-                """, workspaceId, agentId, DATASET_NAME, "客服 badcase 与坐席优质会话自动沉淀(D2)");
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-    }
-
-    /**
-     * 写一条待确认用例。唯一键冲突说明该 badcase/会话已推过,直接取回原 id。
-     */
-    private Long insertCase(Long datasetId, String source, Long sourceRefId,
-                            String question, String reference) {
-        jdbc.update("""
-                INSERT IGNORE INTO agent_eval_case
-                  (dataset_id,question,expected_keywords,reference_answer,expected_refusal,
-                   source,source_ref_id,review_status,create_time)
-                VALUES (?,?,NULL,?,0,?,?,?,NOW())
-                """, datasetId, truncate(question, QUESTION_MAX),
-            truncate(reference, REFERENCE_MAX), source, sourceRefId, REVIEW_PENDING);
-        List<Long> id = jdbc.queryForList("""
-                SELECT id FROM agent_eval_case WHERE source=? AND source_ref_id=? ORDER BY id LIMIT 1
-                """, Long.class, source, sourceRefId);
-        return id.isEmpty() ? null : id.getFirst();
-    }
-
-    private Map<String, Object> lastMessage(Long sessionId, String role) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT content FROM agent_message WHERE session_id=? AND role=?
-                ORDER BY id DESC LIMIT 1
-                """, sessionId, role);
-        return rows.isEmpty() ? null : rows.getFirst();
+        return evalWriter.ensureDataset(workspaceId, agentId,
+            DATASET_NAME, "客服 badcase 与坐席优质会话自动沉淀(D2)");
     }
 
     /** 参考答案优先取坐席最后一条回复,退化为结案备注 */
     private String referenceAnswer(CsConversation conv, CsTicket ticket) {
-        Map<String, Object> lastSeat = lastMessage(conv.getAgentSessionId(), "assistant");
+        Map<String, Object> lastSeat = evalWriter.lastMessage(conv.getAgentSessionId(), "assistant");
         if (lastSeat != null && StringUtils.isNotBlank(text(lastSeat.get("content")))) {
             return text(lastSeat.get("content"));
         }
@@ -241,9 +192,8 @@ public class CsEvalFeedbackService {
         if (conversationId == null) {
             return null;
         }
-        List<Long> ids = jdbc.queryForList(
-            "SELECT agent_id FROM agent_cs_conversation WHERE id=?", Long.class, conversationId);
-        return ids.isEmpty() ? null : ids.getFirst();
+        com.forgeagent.customerservice.domain.CsConversation conv = conversationMapper.selectById(conversationId);
+        return conv == null ? null : conv.getAgentId();
     }
 
     private double sampleRate() {
@@ -266,11 +216,11 @@ public class CsEvalFeedbackService {
     }
 
     /** 供运维页展示当前采样比例 */
-    public Map<String, Object> sampleInfo() {
-        Map<String, Object> info = new LinkedHashMap<>();
-        info.put("sampleRate", sampleRate());
-        info.put("minVisitorTurns", MIN_VISITOR_TURNS);
-        info.put("datasetName", DATASET_NAME);
+    public com.forgeagent.customerservice.domain.vo.CsEvalSampleInfoVo sampleInfo() {
+        com.forgeagent.customerservice.domain.vo.CsEvalSampleInfoVo info = new com.forgeagent.customerservice.domain.vo.CsEvalSampleInfoVo();
+        info.setSampleRate(sampleRate());
+        info.setMinVisitorTurns(MIN_VISITOR_TURNS);
+        info.setDatasetName(DATASET_NAME);
         return info;
     }
 }

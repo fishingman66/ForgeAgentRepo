@@ -118,7 +118,7 @@ public class CsCostService {
     }
 
     /** 看板数据:最近 N 天日成本 + 汇总 + 两个业务单位成本。 */
-    public Map<String, Object> overview(Long workspaceId, int days) {
+    public com.forgeagent.customerservice.domain.vo.CsCostOverviewVo overview(Long workspaceId, int days) {
         int span = Math.max(1, Math.min(90, days));
         List<CsCostDaily> rows = new ArrayList<>();
         for (int i = 0; i < span; i++) {
@@ -132,21 +132,23 @@ public class CsCostService {
         long resolved = rows.stream().mapToLong(r -> nzLong(r.getResolvedCount())).sum();
         BigDecimal amount = sumAmount(rows);
 
-        Map<String, Object> total = new LinkedHashMap<>();
-        total.put("totalTokens", totalTokens);
-        total.put("callCount", calls);
-        total.put("conversationCount", conversations);
-        total.put("resolvedCount", resolved);
-        total.put("tokensPerConversation", rate(totalTokens, conversations));
-        total.put("tokensPerResolved", rate(totalTokens, resolved));
-        total.put("costAmount", amount);
-        total.put("amountAvailable", amount != null);
-        total.put("currency", properties.getCostCurrency());
+        com.forgeagent.customerservice.domain.vo.CsCostOverviewVo.Total total =
+            new com.forgeagent.customerservice.domain.vo.CsCostOverviewVo.Total();
+        total.setTotalTokens(totalTokens);
+        total.setCallCount((int) calls);
+        total.setConversationCount((int) conversations);
+        total.setResolvedCount((int) resolved);
+        total.setTokensPerConversation((double) rate(totalTokens, conversations));
+        total.setTokensPerResolved((double) rate(totalTokens, resolved));
+        total.setCostAmount(amount);
+        total.setAmountAvailable(amount != null);
+        total.setCurrency(properties.getCostCurrency());
 
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("days", rows);
-        data.put("total", total);
-        data.put("priceNote", amount == null
+        com.forgeagent.customerservice.domain.vo.CsCostOverviewVo data =
+            new com.forgeagent.customerservice.domain.vo.CsCostOverviewVo();
+        data.setDays(rows);
+        data.setTotal(total);
+        data.setPriceNote(amount == null
             ? "未配置 cost-per-1k-tokens，只统计 token 不折算金额" : "金额按配置单价折算，仅供参考");
         return data;
     }

@@ -16,6 +16,14 @@ import com.forgeagent.rag.domain.AgentKbEvalRun;
 import com.forgeagent.rag.domain.AgentKnowledge;
 import com.forgeagent.rag.domain.AgentKnowledgeDocument;
 import com.forgeagent.rag.domain.bo.KnowledgeSearchBo;
+import com.forgeagent.rag.domain.vo.AgentKbEvalCaseVo;
+import com.forgeagent.rag.domain.vo.AgentKbEvalRunVo;
+import com.forgeagent.rag.domain.vo.KbEvalCaseResultVo;
+import com.forgeagent.rag.domain.vo.KbEvalCompareVo;
+import com.forgeagent.rag.domain.vo.KbEvalGateVo;
+import com.forgeagent.rag.domain.vo.KbEvalGroupMetricsVo;
+import com.forgeagent.rag.domain.vo.KbEvalMetricsVo;
+import com.forgeagent.rag.domain.vo.KbEvalRunResultVo;
 import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import com.forgeagent.rag.mapper.AgentKbChunkMapper;
 import com.forgeagent.rag.mapper.AgentKbEvalCaseMapper;
@@ -100,15 +108,47 @@ public class KbEvalServiceImpl implements KbEvalService {
     }
 
     @Override
-    public List<AgentKbEvalCase> listCases(Long knowledgeId) {
+    public List<AgentKbEvalCaseVo> listCases(Long knowledgeId) {
+        return listCaseEntities(knowledgeId).stream().map(this::toCaseVo).toList();
+    }
+
+    /**
+     * 内部用的实体列表(评测运行要读 evidences/keywords 原始列,不能先转 Vo)
+     */
+    private List<AgentKbEvalCase> listCaseEntities(Long knowledgeId) {
         return caseMapper.selectList(new LambdaQueryWrapper<AgentKbEvalCase>()
             .eq(AgentKbEvalCase::getKnowledgeId, knowledgeId)
             .orderByAsc(AgentKbEvalCase::getId));
     }
 
+    /**
+     * 评测用例实体 → Vo。手写映射而不走 MapstructUtils:
+     * 后者静态初始化依赖 Spring 容器,纯 Mockito 场景下类加载即失败(docs/12 第八节)。
+     */
+    private AgentKbEvalCaseVo toCaseVo(AgentKbEvalCase c) {
+        if (c == null) {
+            return null;
+        }
+        AgentKbEvalCaseVo vo = new AgentKbEvalCaseVo();
+        vo.setId(c.getId());
+        vo.setKnowledgeId(c.getKnowledgeId());
+        vo.setQuestion(c.getQuestion());
+        vo.setExpectedDocName(c.getExpectedDocName());
+        vo.setExpectedKeywords(c.getExpectedKeywords());
+        vo.setEvidences(c.getEvidences());
+        vo.setStatus(c.getStatus());
+        vo.setSource(c.getSource());
+        vo.setSourceId(c.getSourceId());
+        vo.setDatasetRevision(c.getDatasetRevision());
+        vo.setRemark(c.getRemark());
+        vo.setCreateTime(c.getCreateTime());
+        vo.setUpdateTime(c.getUpdateTime());
+        return vo;
+    }
+
     @Override
-    public Map<String, Object> runEvaluation(Long knowledgeId, Integer topK) {
-        List<AgentKbEvalCase> cases = listCases(knowledgeId);
+    public KbEvalRunResultVo runEvaluation(Long knowledgeId, Integer topK) {
+        List<AgentKbEvalCase> cases = listCaseEntities(knowledgeId);
         if (cases.isEmpty()) {
             throw new ServiceException("该知识库还没有评测用例,请先添加");
         }
@@ -121,7 +161,7 @@ public class KbEvalServiceImpl implements KbEvalService {
         double scoreSum = 0;
         int scoreCount = 0;
         List<EvalMetricsCalculator.CaseOutcome> outcomes = new ArrayList<>();
-        List<Map<String, Object>> caseResults = new ArrayList<>(cases.size());
+        List<KbEvalCaseResultVo> caseResults = new ArrayList<>(cases.size());
 
         for (AgentKbEvalCase evalCase : cases) {
             String status = StringUtils.defaultIfBlank(evalCase.getStatus(), STATUS_ACTIVE);
@@ -193,30 +233,97 @@ public class KbEvalServiceImpl implements KbEvalService {
         run.setCreateTime(new Date());
         runMapper.insert(run);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("run", run);
-        result.put("hitRate", run.getHitRate());
-        result.put("metrics", metrics);
-        result.put("deprecatedCases", deprecatedCases);
-        result.put("caseResults", caseResults);
+        KbEvalRunResultVo result = new KbEvalRunResultVo();
+        result.setRun(toRunVo(run));
+        result.setHitRate(run.getHitRate());
+        result.setMetrics(toMetricsVo(metrics));
+        result.setDeprecatedCases(deprecatedCases);
+        result.setCaseResults(caseResults);
         return result;
     }
 
-    @Override
-    public List<AgentKbEvalRun> listRuns(Long knowledgeId, Integer limit) {
-        return runMapper.selectList(new LambdaQueryWrapper<AgentKbEvalRun>()
-            .eq(AgentKbEvalRun::getKnowledgeId, knowledgeId)
-            .orderByDesc(AgentKbEvalRun::getId)
-            .last(limit != null && limit > 0 ? "limit " + limit : ""));
+    /**
+     * 运行记录实体 → Vo。手写映射而不走 MapstructUtils:
+     * 后者静态初始化依赖 Spring 容器,纯 Mockito 场景下类加载即失败(docs/12 第八节)。
+     */
+    private AgentKbEvalRunVo toRunVo(AgentKbEvalRun run) {
+        if (run == null) {
+            return null;
+        }
+        AgentKbEvalRunVo vo = new AgentKbEvalRunVo();
+        vo.setId(run.getId());
+        vo.setKnowledgeId(run.getKnowledgeId());
+        vo.setTopK(run.getTopK());
+        vo.setTotalCases(run.getTotalCases());
+        vo.setHitCases(run.getHitCases());
+        vo.setMrr(run.getMrr());
+        vo.setHitRate(run.getHitRate());
+        vo.setRecallAtK(run.getRecallAtK());
+        vo.setPrecisionAtK(run.getPrecisionAtK());
+        vo.setNdcgAtK(run.getNdcgAtK());
+        vo.setMetricsJson(run.getMetricsJson());
+        vo.setConfigSnapshot(run.getConfigSnapshot());
+        vo.setCorpusFingerprint(run.getCorpusFingerprint());
+        vo.setDatasetRevision(run.getDatasetRevision());
+        vo.setEffectiveCases(run.getEffectiveCases());
+        vo.setStaleCases(run.getStaleCases());
+        vo.setDegradedCases(run.getDegradedCases());
+        vo.setGateState(run.getGateState());
+        vo.setGateReason(run.getGateReason());
+        vo.setCaseResultsJson(run.getCaseResultsJson());
+        vo.setAvgScore(run.getAvgScore());
+        vo.setDurationMs(run.getDurationMs());
+        vo.setCreateTime(run.getCreateTime());
+        return vo;
+    }
+
+    /**
+     * 指标计算器 record → Vo(overall + 各分组数量与五指标)
+     */
+    private KbEvalMetricsVo toMetricsVo(EvalMetricsCalculator.Metrics metrics) {
+        if (metrics == null) {
+            return null;
+        }
+        KbEvalMetricsVo vo = new KbEvalMetricsVo();
+        vo.setOverall(toGroupMetricsVo(metrics.overall()));
+        vo.setGroups(metrics.groups() == null ? null : metrics.groups().stream()
+            .map(this::toGroupMetricsVo).toList());
+        return vo;
+    }
+
+    private KbEvalGroupMetricsVo toGroupMetricsVo(EvalMetricsCalculator.GroupMetrics g) {
+        if (g == null) {
+            return null;
+        }
+        KbEvalGroupMetricsVo vo = new KbEvalGroupMetricsVo();
+        vo.setGroup(g.group());
+        vo.setCases(g.cases());
+        vo.setHitRate(g.hitRate());
+        vo.setCiLow(g.ciLow());
+        vo.setCiHigh(g.ciHigh());
+        vo.setRecall(g.recall());
+        vo.setPrecision(g.precision());
+        vo.setMrr(g.mrr());
+        vo.setNdcg(g.ndcg());
+        return vo;
     }
 
     @Override
-    public PageResult<AgentKbEvalRun> pageRuns(Long knowledgeId, PageQuery pageQuery) {
+    public List<AgentKbEvalRunVo> listRuns(Long knowledgeId, Integer limit) {
+        return runMapper.selectList(new LambdaQueryWrapper<AgentKbEvalRun>()
+                .eq(AgentKbEvalRun::getKnowledgeId, knowledgeId)
+                .orderByDesc(AgentKbEvalRun::getId)
+                .last(limit != null && limit > 0 ? "limit " + limit : ""))
+            .stream().map(this::toRunVo).toList();
+    }
+
+    @Override
+    public PageResult<AgentKbEvalRunVo> pageRuns(Long knowledgeId, PageQuery pageQuery) {
         Page<AgentKbEvalRun> page = runMapper.selectPage(pageQuery.build(),
             new LambdaQueryWrapper<AgentKbEvalRun>()
                 .eq(AgentKbEvalRun::getKnowledgeId, knowledgeId)
                 .orderByDesc(AgentKbEvalRun::getId));
-        return PageResult.build(page.getRecords(), page.getTotal());
+        return PageResult.build(page.getRecords().stream().map(this::toRunVo).toList(), page.getTotal());
     }
 
     /**
@@ -391,21 +498,21 @@ public class KbEvalServiceImpl implements KbEvalService {
             relevant, ndcg, coverages);
     }
 
-    private Map<String, Object> caseRow(AgentKbEvalCase evalCase, String status, boolean hit,
-                                        Integer rank, double score, List<Double> coverages,
-                                        boolean degraded) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("caseId", evalCase.getId());
-        row.put("question", evalCase.getQuestion());
-        row.put("status", status);
-        row.put("legacy", StringUtils.isBlank(evalCase.getEvidences()));
-        row.put("hit", hit);
-        row.put("rank", rank);
-        row.put("score", score);
-        row.put("evidenceCoverages", coverages);
-        row.put("degraded", degraded);
-        row.put("expectedDocName", StringUtils.defaultString(evalCase.getExpectedDocName()));
-        row.put("expectedKeywords", StringUtils.defaultString(evalCase.getExpectedKeywords()));
+    private KbEvalCaseResultVo caseRow(AgentKbEvalCase evalCase, String status, boolean hit,
+                                       Integer rank, double score, List<Double> coverages,
+                                       boolean degraded) {
+        KbEvalCaseResultVo row = new KbEvalCaseResultVo();
+        row.setCaseId(evalCase.getId());
+        row.setQuestion(evalCase.getQuestion());
+        row.setStatus(status);
+        row.setLegacy(StringUtils.isBlank(evalCase.getEvidences()));
+        row.setHit(hit);
+        row.setRank(rank);
+        row.setScore(score);
+        row.setEvidenceCoverages(coverages);
+        row.setDegraded(degraded);
+        row.setExpectedDocName(StringUtils.defaultString(evalCase.getExpectedDocName()));
+        row.setExpectedKeywords(StringUtils.defaultString(evalCase.getExpectedKeywords()));
         return row;
     }
 
@@ -424,7 +531,7 @@ public class KbEvalServiceImpl implements KbEvalService {
     }
 
     @Override
-    public Map<String, Object> compare(Long knowledgeId, Long baselineRunId, Long candidateRunId) {
+    public KbEvalCompareVo compare(Long knowledgeId, Long baselineRunId, Long candidateRunId) {
         AgentKbEvalRun baseline = runMapper.selectById(baselineRunId);
         AgentKbEvalRun candidate = runMapper.selectById(candidateRunId);
         if (baseline == null || candidate == null) {
@@ -462,20 +569,20 @@ public class KbEvalServiceImpl implements KbEvalService {
             .set(AgentKbEvalRun::getGateState, verdict.state().name())
             .set(AgentKbEvalRun::getGateReason, verdict.reason().name()));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("state", verdict.state().name());
-        result.put("reason", verdict.reason().name());
-        result.put("epsilon", verdict.epsilon());
-        result.put("delta", verdict.delta());
-        result.put("baselineHitRate", verdict.baselineHitRate());
-        result.put("candidateHitRate", verdict.candidateHitRate());
-        result.put("intersectionCases", intersection.size());
-        result.put("description", GateJudgeCore.describe(verdict));
+        KbEvalCompareVo result = new KbEvalCompareVo();
+        result.setState(verdict.state().name());
+        result.setReason(verdict.reason().name());
+        result.setEpsilon(verdict.epsilon());
+        result.setDelta(verdict.delta());
+        result.setBaselineHitRate(verdict.baselineHitRate());
+        result.setCandidateHitRate(verdict.candidateHitRate());
+        result.setIntersectionCases(intersection.size());
+        result.setDescription(GateJudgeCore.describe(verdict));
         return result;
     }
 
     @Override
-    public Map<String, Object> gateCheck(Long knowledgeId) {
+    public KbEvalGateVo gateCheck(Long knowledgeId) {
         List<AgentKbEvalRun> runs = runMapper.selectList(new LambdaQueryWrapper<AgentKbEvalRun>()
             .eq(AgentKbEvalRun::getKnowledgeId, knowledgeId)
             .orderByDesc(AgentKbEvalRun::getId)
@@ -490,12 +597,12 @@ public class KbEvalServiceImpl implements KbEvalService {
             GateJudgeCore.Side baselineSide = runs.size() > 1 ? sideOf(runs.get(1)) : null;
             verdict = GateJudgeCore.judge(baselineSide, candidateSide);
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("state", verdict.state().name());
-        result.put("reason", verdict.reason().name());
-        result.put("epsilon", verdict.epsilon());
-        result.put("delta", verdict.delta());
-        result.put("description", GateJudgeCore.describe(verdict));
+        KbEvalGateVo result = new KbEvalGateVo();
+        result.setState(verdict.state().name());
+        result.setReason(verdict.reason().name());
+        result.setEpsilon(verdict.epsilon());
+        result.setDelta(verdict.delta());
+        result.setDescription(GateJudgeCore.describe(verdict));
         return result;
     }
 

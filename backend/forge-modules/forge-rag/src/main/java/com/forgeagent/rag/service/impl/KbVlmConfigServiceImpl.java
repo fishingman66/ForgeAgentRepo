@@ -16,6 +16,7 @@ import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.rag.domain.AgentKbVlmConfig;
 import com.forgeagent.rag.domain.AgentKnowledge;
 import com.forgeagent.rag.domain.bo.KbVlmConfigBo;
+import com.forgeagent.rag.domain.vo.KbVlmConfigTestVo;
 import com.forgeagent.rag.domain.vo.KbVlmConfigVo;
 import com.forgeagent.rag.mapper.AgentKbVlmConfigMapper;
 import com.forgeagent.rag.service.KbVlmConfigService;
@@ -25,9 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 图片识别模型配置服务实现
@@ -147,12 +146,12 @@ public class KbVlmConfigServiceImpl implements KbVlmConfigService {
     }
 
     @Override
-    public Map<String, Object> test(KbVlmConfigBo bo) {
-        Map<String, Object> result = new LinkedHashMap<>();
+    public KbVlmConfigTestVo test(KbVlmConfigBo bo) {
+        KbVlmConfigTestVo result = new KbVlmConfigTestVo();
         KbVlmConfigResolver.Resolved resolved = resolver.fromBo(bo);
         if (resolved == null) {
-            result.put("ok", false);
-            result.put("message", "配置不完整:平台模型不存在,或自定义模式缺少 baseUrl/modelName/API Key");
+            result.setOk(false);
+            result.setMessage("配置不完整:平台模型不存在,或自定义模式缺少 baseUrl/modelName/API Key");
             return result;
         }
         try {
@@ -163,15 +162,15 @@ public class KbVlmConfigServiceImpl implements KbVlmConfigService {
                     .textContent("回复 OK 两个字母即可").build())
                 .block(Duration.ofSeconds(20));
             String text = reply == null ? null : reply.getTextContent();
-            result.put("ok", StringUtils.isNotBlank(text));
-            result.put("message", StringUtils.isNotBlank(text) ? "连通正常:" + StringUtils.substring(text, 0, 40)
+            result.setOk(StringUtils.isNotBlank(text));
+            result.setMessage(StringUtils.isNotBlank(text) ? "连通正常:" + StringUtils.substring(text, 0, 40)
                 : "模型返回为空");
-            result.put("model", resolved.modelName());
+            result.setModel(resolved.modelName());
         } catch (Exception e) {
             log.warn("[知识库] 图片识别模型连通性测试失败: {}", e.getMessage());
-            result.put("ok", false);
-            result.put("message", "连通失败:" + StringUtils.substring(e.getMessage(), 0, 200));
-            result.put("model", resolved.modelName());
+            result.setOk(false);
+            result.setMessage("连通失败:" + StringUtils.substring(e.getMessage(), 0, 200));
+            result.setModel(resolved.modelName());
         }
         return result;
     }

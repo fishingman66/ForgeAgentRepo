@@ -89,7 +89,7 @@ class MemoryGovernanceServiceTest {
     @Test
     void archiveDisabledWhenRetentionZero() {
         properties.setArchiveRetentionDays(0);
-        assertEquals(0, service.runOnce().get("archivedMessages"));
+        assertEquals(0, service.runOnce().getArchivedMessages());
         // 只有归档步受 retention 开关;TTL 与配额照常跑(各自有零命中路径)
         verify(governanceMapper, never()).archiveMessages(anyInt(), anyInt(), any());
     }
@@ -100,7 +100,7 @@ class MemoryGovernanceServiceTest {
         properties.setArchiveBatch(10);
         when(governanceMapper.archiveExpiredMemories(eq(30), eq(10), any())).thenReturn(0);
 
-        assertEquals(0, service.runOnce().get("ttlArchived"));
+        assertEquals(0, service.runOnce().getTtlArchived());
         verify(governanceMapper).archiveExpiredMemories(eq(30), eq(10), any());
     }
 
@@ -112,7 +112,7 @@ class MemoryGovernanceServiceTest {
         when(memoryMapper.selectList(any())).thenReturn(List.of(
             memory(1, 9, 0), memory(2, 1, 0), memory(3, 5, 0)));
 
-        long evicted = service.runOnce().get("quotaEvicted");
+        long evicted = service.runOnce().getQuotaEvicted();
 
         assertEquals(2, evicted);
         ArgumentCaptor<AgentMemory> captor = ArgumentCaptor.forClass(AgentMemory.class);
@@ -130,7 +130,7 @@ class MemoryGovernanceServiceTest {
         when(governanceMapper.countOverQuotaGroups(0)).thenReturn(List.of(Map.of(
             "agentId", 7L, "userId", 42L, "cnt", 500L, "quota", 0L)));
 
-        assertEquals(0, service.runOnce().get("quotaEvicted"));
+        assertEquals(0, service.runOnce().getQuotaEvicted());
         verify(memoryMapper, never()).selectList(any());
     }
 
@@ -160,8 +160,8 @@ class MemoryGovernanceServiceTest {
         properties.setArchiveRetentionDays(0);
         properties.setTtlDays(0);
         when(governanceMapper.countOverQuotaGroups(anyInt())).thenReturn(List.of());
-        Map<String, Long> result = service.runOnce();
-        assertEquals(0L, result.get("quotaEvicted"));
-        assertTrue(result.containsKey("archivedMessages"));
+        com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo result = service.runOnce();
+        assertEquals(0L, result.getQuotaEvicted());
+        assertEquals(0L, result.getArchivedMessages());
     }
 }

@@ -212,7 +212,7 @@ public class AgentChatController extends BaseController {
      */
     @SaCheckPermission("agent:chat:send")
     @GetMapping("/run/{runId}")
-    public R<Map<String, Object>> runDetail(@PathVariable String runId) {
+    public R<com.forgeagent.agent.domain.vo.RunTraceDetailVo> runDetail(@PathVariable String runId) {
         if (!isOwnedRun(runId)) {
             return R.fail("无权查看该运行记录");
         }

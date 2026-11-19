@@ -104,18 +104,16 @@ public class CsSensitiveWordService {
     }
 
     /** 管理页:平台级 + 本空间词条。 */
-    public List<CsSensitiveWord> list(Long workspaceId) {
-        return wordMapper.selectList(new LambdaQueryWrapper<CsSensitiveWord>()
+    public List<com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo> list(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(wordMapper.selectList(new LambdaQueryWrapper<CsSensitiveWord>()
             .and(w -> w.isNull(CsSensitiveWord::getWorkspaceId)
                 .or().eq(CsSensitiveWord::getWorkspaceId, workspaceId))
-            .orderByDesc(CsSensitiveWord::getId));
+            .orderByDesc(CsSensitiveWord::getId)), com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo.class);
     }
 
     /** 新增/编辑空间级词条;平台级词条只读（与意图同口径）。 */
-    public CsSensitiveWord save(CsSensitiveWord word, Long workspaceId) {
-        if (word == null || word.getWord() == null || word.getWord().isBlank()) {
-            throw new ServiceException("词条不能为空");
-        }
+    public com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo save(com.forgeagent.customerservice.domain.bo.CsSensitiveWordSaveBo bo, Long workspaceId) {
+        CsSensitiveWord word = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsSensitiveWord.class);
         word.setWord(word.getWord().trim());
         word.setSeverity(normalize(word.getSeverity()));
         word.setEnabled(word.getEnabled() == null ? "1" : word.getEnabled());
@@ -136,7 +134,7 @@ public class CsSensitiveWordService {
             wordMapper.updateById(word);
         }
         invalidate();
-        return word;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(word, com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo.class);
     }
 
     /** 删除空间级词条;不存在按幂等成功处理。 */

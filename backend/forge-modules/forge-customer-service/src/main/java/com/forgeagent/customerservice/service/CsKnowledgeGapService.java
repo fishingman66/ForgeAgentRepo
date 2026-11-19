@@ -82,20 +82,20 @@ public class CsKnowledgeGapService {
     }
 
     /** 运营列表:默认只看 OPEN,按命中次数倒序。 */
-    public List<CsKnowledgeGap> list(Long workspaceId, String status, int limit) {
+    public List<com.forgeagent.customerservice.domain.vo.CsKnowledgeGapVo> list(Long workspaceId, String status, int limit) {
         LambdaQueryWrapper<CsKnowledgeGap> query = new LambdaQueryWrapper<CsKnowledgeGap>()
             .eq(CsKnowledgeGap::getWorkspaceId, workspaceId);
         if (status != null && !status.isBlank()) {
             query.eq(CsKnowledgeGap::getStatus, status);
         }
-        return gapMapper.selectList(query
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(gapMapper.selectList(query
             .orderByDesc(CsKnowledgeGap::getHitCount)
             .orderByDesc(CsKnowledgeGap::getId)
-            .last("limit " + Math.max(1, Math.min(200, limit))));
+            .last("limit " + Math.max(1, Math.min(200, limit)))), com.forgeagent.customerservice.domain.vo.CsKnowledgeGapVo.class);
     }
 
     /** 一键把缺口转成待审答案:问题即缺口原文,答案留给运营补。 */
-    public CsKnowledgeAnswer createAnswer(Long gapId, Long workspaceId) {
+    public com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo createAnswer(Long gapId, Long workspaceId) {
         CsKnowledgeGap gap = gapMapper.selectById(gapId);
         if (gap == null || !gap.getWorkspaceId().equals(workspaceId)) {
             throw new ServiceException("知识缺口不存在");
@@ -103,7 +103,7 @@ public class CsKnowledgeGapService {
         if ("FILLED".equals(gap.getStatus()) && gap.getAnswerId() != null) {
             CsKnowledgeAnswer existing = answerMapper.selectById(gap.getAnswerId());
             if (existing != null) {
-                return existing;
+                return com.forgeagent.common.core.utils.MapstructUtils.convert(existing, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
             }
         }
         CsKnowledgeAnswer answer = new CsKnowledgeAnswer();
@@ -121,7 +121,7 @@ public class CsKnowledgeGapService {
         gap.setAnswerId(answer.getId());
         gap.setUpdateTime(new Date());
         gapMapper.updateById(gap);
-        return answer;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(answer, com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo.class);
     }
 
     /** 忽略一个缺口(判断为无效提问或不该由 AI 回答)。 */

@@ -3,7 +3,10 @@ package com.forgeagent.agent.service.support;
 import com.forgeagent.agent.domain.AgentSkill;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentSkillVersion;
+import com.forgeagent.agent.mapper.AgentSkillVersionMapper;
+import com.forgeagent.agent.mapper.AgentSkillMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -31,10 +34,12 @@ public class AgentSkillVersionService {
     /** 字段分隔符:用不可见控制符,避免内容里的普通字符造成拼接歧义 */
     private static final char SEP = '\u0001';
 
-    private final JdbcTemplate jdbc;
+    private final AgentSkillVersionMapper versionMapper;
+    private final AgentSkillMapper skillMapper;
 
-    public AgentSkillVersionService(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public AgentSkillVersionService(AgentSkillVersionMapper versionMapper, AgentSkillMapper skillMapper) {
+        this.versionMapper = versionMapper;
+        this.skillMapper = skillMapper;
     }
 
     /**
@@ -65,17 +70,7 @@ public class AgentSkillVersionService {
             return;
         }
         int versionNo = skill.getVersion() == null ? 1 : skill.getVersion();
-        jdbc.update("""
-                INSERT INTO agent_skill_version
-                  (skill_id,version_no,name,description,instructions,tool_ids,mcp_ids,
-                   knowledge_ids,prompt_fragment,content_hash,create_by,create_time)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())
-                ON DUPLICATE KEY UPDATE
-                  name=VALUES(name), description=VALUES(description), instructions=VALUES(instructions),
-                  tool_ids=VALUES(tool_ids), mcp_ids=VALUES(mcp_ids),
-                  knowledge_ids=VALUES(knowledge_ids), prompt_fragment=VALUES(prompt_fragment),
-                  content_hash=VALUES(content_hash)
-                """, skill.getId(), versionNo, skill.getName(), nvl(skill.getDescription()),
+        versionMapper.archive(skill.getId(), versionNo, skill.getName(), nvl(skill.getDescription()),
             nvl(skill.getInstructions()), nvl(skill.getToolIds()), nvl(skill.getMcpIds()),
             nvl(skill.getKnowledgeIds()), nvl(skill.getPromptFragment()),
             contentHash(skill), currentUserId());
@@ -102,23 +97,8 @@ public class AgentSkillVersionService {
         if (skillIds == null || skillIds.isEmpty()) {
             return;
         }
-        String placeholders = String.join(",", java.util.Collections.nCopies(skillIds.size(), "?"));
-        List<AgentSkill> skills = jdbc.query(
-            "SELECT id,name,description,instructions,tool_ids,mcp_ids,knowledge_ids,"
-                + "prompt_fragment,COALESCE(version,1) AS version FROM agent_skill WHERE id IN (" + placeholders + ")",
-            (rs, rowNum) -> {
-                AgentSkill skill = new AgentSkill();
-                skill.setId(rs.getLong("id"));
-                skill.setName(rs.getString("name"));
-                skill.setDescription(rs.getString("description"));
-                skill.setInstructions(rs.getString("instructions"));
-                skill.setToolIds(rs.getString("tool_ids"));
-                skill.setMcpIds(rs.getString("mcp_ids"));
-                skill.setKnowledgeIds(rs.getString("knowledge_ids"));
-                skill.setPromptFragment(rs.getString("prompt_fragment"));
-                skill.setVersion(rs.getInt("version"));
-                return skill;
-            }, skillIds.toArray());
+        List<AgentSkill> skills = skillMapper.selectList(
+            Wrappers.<AgentSkill>lambdaQuery().in(AgentSkill::getId, skillIds));
         archiveAll(skills);
     }
 
@@ -127,12 +107,23 @@ public class AgentSkillVersionService {
         if (skillId == null || versionNo == null) {
             return Map.of();
         }
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT skill_id,version_no,name,description,instructions,tool_ids,mcp_ids,
-                       knowledge_ids,prompt_fragment,content_hash
-                FROM agent_skill_version WHERE skill_id=? AND version_no=?
-                """, skillId, versionNo);
-        return rows.isEmpty() ? Map.of() : rows.getFirst();
+        AgentSkillVersion row = versionMapper.selectOne(
+            Wrappers.<AgentSkillVersion>lambdaQuery()
+                .eq(AgentSkillVersion::getSkillId, skillId)
+                .eq(AgentSkillVersion::getVersionNo, versionNo));
+        if (row == null) {
+            return Map.of();
+        }
+        Map<String, Object> map = new java.util.LinkedHashMap<>();
+        map.put("name", row.getName());
+        map.put("description", row.getDescription());
+        map.put("instructions", row.getInstructions());
+        map.put("tool_ids", row.getToolIds());
+        map.put("mcp_ids", row.getMcpIds());
+        map.put("knowledge_ids", row.getKnowledgeIds());
+        map.put("prompt_fragment", row.getPromptFragment());
+        map.put("content_hash", row.getContentHash());
+        return map;
     }
 
     /** 某版本的 contentHash,缺失返回 null */

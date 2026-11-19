@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import com.forgeagent.agent.domain.bo.AgentDatasourceBo;
+import com.forgeagent.agent.domain.vo.AgentDatasourceTableVo;
+import com.forgeagent.agent.domain.vo.AgentDatasourceTestVo;
 import com.forgeagent.agent.domain.vo.AgentDatasourceVo;
 import com.forgeagent.agent.service.IAgentDatasourceService;
 import com.forgeagent.common.core.domain.PageResult;
@@ -28,7 +30,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 问数数据源 Controller
@@ -109,9 +110,10 @@ public class AgentDatasourceController extends BaseController {
      */
     @SaCheckPermission("agent:datasource:test")
     @PostMapping("/test")
-    public R<Map<String, Object>> test(@RequestBody AgentDatasourceBo bo) {
-        Long elapsed = datasourceService.testConnection(bo);
-        return R.ok(Map.of("elapsedMs", elapsed));
+    public R<AgentDatasourceTestVo> test(@RequestBody AgentDatasourceBo bo) {
+        AgentDatasourceTestVo vo = new AgentDatasourceTestVo();
+        vo.setElapsedMs(datasourceService.testConnection(bo));
+        return R.ok(vo);
     }
 
     /**
@@ -141,8 +143,8 @@ public class AgentDatasourceController extends BaseController {
      */
     @SaCheckPermission("agent:datasource:query")
     @GetMapping("/{id}/tables")
-    public R<List<Map<String, Object>>> listTables(@NotNull(message = "主键不能为空")
-                                                   @PathVariable Long id) {
+    public R<List<AgentDatasourceTableVo>> listTables(@NotNull(message = "主键不能为空")
+                                                      @PathVariable Long id) {
         return R.ok(datasourceService.listTables(id));
     }
 }

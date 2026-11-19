@@ -108,6 +108,7 @@ class CsVisitorServiceZeroHitTest {
         conv.setAgentId(9L);
         conv.setAgentRouted("1");
         conv.setStatus("ACTIVE");
+        conv.setPinnedVersion(4); // D1:灰度会话锁定版本,每轮随 guardContext 透传
 
         lenient().when(properties.getMaxMessageChars()).thenReturn(2000);
         lenient().when(conversationMapper.selectById(5L)).thenReturn(conv);
@@ -128,7 +129,7 @@ class CsVisitorServiceZeroHitTest {
         lenient().when(conversationMapper.updateById(any(CsConversation.class))).thenReturn(1);
     }
 
-    private Map<String, Object> send() {
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo send() {
         return service.send(channel, 5L, 11L, "c1", QUESTION, List.of());
     }
 
@@ -154,10 +155,10 @@ class CsVisitorServiceZeroHitTest {
         lenient().when(ticketService.requestHandoff(any(CsConversation.class), eq("zero_hit")))
             .thenReturn(new CsTicket());
 
-        Map<String, Object> result = send();
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = send();
 
-        assertEquals("兜底文案", result.get("content"));
-        assertTrue((Boolean) result.get("fallback"));
+        assertEquals("兜底文案", result.getContent());
+        assertTrue((Boolean) result.getFallback());
         verify(chatFacade, never()).send(any());
         verify(ticketService).requestHandoff(any(CsConversation.class), eq("zero_hit"));
         verify(knowledgeGapService).record(eq(1L), eq(QUESTION));
@@ -170,11 +171,11 @@ class CsVisitorServiceZeroHitTest {
         // A1 终态:KB 零命中时链路回传权威零命中信号,CS 层据此记录运营信号
         stubModelReply(modelReply(true, 0));
 
-        Map<String, Object> result = send();
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = send();
 
-        assertEquals("你的快递已在派送中，预计今天送达", result.get("content"));
-        assertFalse((Boolean) result.get("fallback"));
-        assertEquals(1001L, ((Number) result.get("messageId")).longValue());
+        assertEquals("你的快递已在派送中，预计今天送达", result.getContent());
+        assertFalse((Boolean) result.getFallback());
+        assertEquals(1001L, ((Number) result.getMessageId()).longValue());
         verify(ticketService, never()).requestHandoff(any(CsConversation.class), anyString());
         verify(knowledgeGateway, never()).recordZeroHit(anyLong(), anyLong(), anyLong(), anyString(), any());
         // A2:预取检索结果随请求透传,链路按 KB 集合一致性核对后复用
@@ -186,6 +187,8 @@ class CsVisitorServiceZeroHitTest {
         assertEquals(QUESTION, prefetched.query());
         assertEquals(List.of(3L), prefetched.knowledgeIds());
         assertTrue(prefetched.hits().isEmpty());
+        // D1:会话锁定版本随 guardContext 透传到链路(同会话每轮同一版本)
+        assertEquals(4, captor.getValue().guardContext().pinnedVersion());
         // A1 终态:链路零命中信号兜住运营信号,驱动 FAQ 补录
         verify(knowledgeGapService).record(eq(1L), eq(QUESTION));
         verify(badcaseService).record(eq(1L), eq("ZERO_HIT"), eq(5L), any(), any(), eq(QUESTION), any());
@@ -204,9 +207,9 @@ class CsVisitorServiceZeroHitTest {
             .thenReturn(new CsKnowledgeGateway.RetrievalOutcome(List.of(hit), Map.of()));
         stubModelReply(modelReply(true, 0));
 
-        Map<String, Object> result = send();
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = send();
 
-        assertFalse((Boolean) result.get("fallback"));
+        assertFalse((Boolean) result.getFallback());
         verify(knowledgeGapService).record(eq(1L), eq(QUESTION));
         verify(badcaseService).record(eq(1L), eq("ZERO_HIT"), eq(5L), any(), any(), eq(QUESTION), any());
         verify(ticketService, never()).requestHandoff(any(CsConversation.class), anyString());
@@ -222,9 +225,9 @@ class CsVisitorServiceZeroHitTest {
             .thenReturn(new CsKnowledgeGateway.RetrievalOutcome(List.of(hit), Map.of()));
         stubModelReply(modelReply(false, 1));
 
-        Map<String, Object> result = send();
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = send();
 
-        assertFalse((Boolean) result.get("fallback"));
+        assertFalse((Boolean) result.getFallback());
         verify(knowledgeGapService, never()).record(anyLong(), anyString());
         verify(badcaseService, never()).record(any(), anyString(), any(), any(), any(), any(), any());
     }

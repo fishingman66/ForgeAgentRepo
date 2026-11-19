@@ -7,6 +7,8 @@ import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.rag.domain.AgentKbExtItem;
 import com.forgeagent.rag.domain.AgentKbExtSource;
+import com.forgeagent.rag.domain.vo.AgentKbExtSourceVo;
+import com.forgeagent.rag.domain.vo.KbExtSourceSyncVo;
 import com.forgeagent.rag.mapper.AgentKbExtItemMapper;
 import com.forgeagent.rag.mapper.AgentKbExtSourceMapper;
 import com.forgeagent.rag.service.IAgentKnowledgeDocumentService;
@@ -17,7 +19,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -70,15 +71,37 @@ public class KbExtSourceServiceImpl implements KbExtSourceService {
     }
 
     @Override
-    public List<AgentKbExtSource> list(Long knowledgeId) {
+    public List<AgentKbExtSourceVo> list(Long knowledgeId) {
         return sourceMapper.selectList(new LambdaQueryWrapper<AgentKbExtSource>()
-            .eq(AgentKbExtSource::getKnowledgeId, knowledgeId)
-            .orderByDesc(AgentKbExtSource::getId));
+                .eq(AgentKbExtSource::getKnowledgeId, knowledgeId)
+                .orderByDesc(AgentKbExtSource::getId))
+            .stream().map(this::toVo).toList();
+    }
+
+    /**
+     * 外部源实体 → Vo。手写映射而不走 MapstructUtils:
+     * 后者静态初始化依赖 Spring 容器,纯 Mockito 场景下类加载即失败(docs/12 第八节)。
+     */
+    private AgentKbExtSourceVo toVo(AgentKbExtSource s) {
+        if (s == null) {
+            return null;
+        }
+        AgentKbExtSourceVo vo = new AgentKbExtSourceVo();
+        vo.setId(s.getId());
+        vo.setKnowledgeId(s.getKnowledgeId());
+        vo.setSourceType(s.getSourceType());
+        vo.setName(s.getName());
+        vo.setConfigJson(s.getConfigJson());
+        vo.setStatus(s.getStatus());
+        vo.setLastSyncAt(s.getLastSyncAt());
+        vo.setLastError(s.getLastError());
+        vo.setCreateTime(s.getCreateTime());
+        return vo;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Map<String, Object> sync(Long sourceId) {
+    public KbExtSourceSyncVo sync(Long sourceId) {
         AgentKbExtSource source = sourceMapper.selectById(sourceId);
         if (source == null) {
             throw new ServiceException("外部源不存在");
@@ -146,11 +169,11 @@ public class KbExtSourceServiceImpl implements KbExtSourceService {
                 .set(AgentKbExtSource::getLastError, StringUtils.substring(e.getMessage(), 0, 500)));
             throw new ServiceException("同步失败:" + e.getMessage());
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("sourceId", sourceId);
-        result.put("imported", imported);
-        result.put("skipped", skipped);
-        result.put("failed", failed);
+        KbExtSourceSyncVo result = new KbExtSourceSyncVo();
+        result.setSourceId(sourceId);
+        result.setImported(imported);
+        result.setSkipped(skipped);
+        result.setFailed(failed);
         return result;
     }
 }

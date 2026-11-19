@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
@@ -70,21 +71,21 @@ public class CsOperationController extends BaseController {
     private final com.forgeagent.customerservice.service.CsEvalFeedbackService evalFeedbackService;
 
     @GetMapping("/csat")
-    public R<List<CsCsat>> csatList() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsCsatVo>> csatList() {
         return R.ok(csatService.list(currentWorkspaceId()));
     }
 
     /** 多 Agent 路由(P3):channelCode 为空=空间级,对所有渠道生效。 */
     @GetMapping("/agent-routes")
-    public R<List<com.forgeagent.customerservice.domain.CsAgentRoute>> agentRoutes(
+    public R<List<com.forgeagent.customerservice.domain.vo.CsAgentRouteVo>> agentRoutes(
         @RequestParam(required = false) String channelCode) {
         return R.ok(agentRouteService.list(currentWorkspaceId(), channelCode));
     }
 
     @PostMapping("/agent-routes")
-    public R<com.forgeagent.customerservice.domain.CsAgentRoute> saveAgentRoute(
-        @RequestBody com.forgeagent.customerservice.domain.CsAgentRoute route) {
-        return R.ok(agentRouteService.save(route, currentWorkspaceId()));
+    public R<com.forgeagent.customerservice.domain.vo.CsAgentRouteVo> saveAgentRoute(
+        @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsAgentRouteSaveBo bo) {
+        return R.ok(agentRouteService.save(bo, currentWorkspaceId()));
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/agent-routes/{id}")
@@ -94,14 +95,14 @@ public class CsOperationController extends BaseController {
 
     /** 知识缺口(P1):默认只看 OPEN,按命中次数倒序。 */
     @GetMapping("/knowledge-gaps")
-    public R<List<com.forgeagent.customerservice.domain.CsKnowledgeGap>> knowledgeGaps(
+    public R<List<com.forgeagent.customerservice.domain.vo.CsKnowledgeGapVo>> knowledgeGaps(
         @RequestParam(required = false) String status, @RequestParam(defaultValue = "50") int limit) {
         return R.ok(knowledgeGapService.list(currentWorkspaceId(), status, limit));
     }
 
     /** 一键把缺口转成待审答案(问题即缺口原文,答案留空待运营补)。 */
     @PostMapping("/knowledge-gaps/{id}/create-answer")
-    public R<CsKnowledgeAnswer> createGapAnswer(@PathVariable Long id) {
+    public R<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo> createGapAnswer(@PathVariable Long id) {
         return R.ok(knowledgeGapService.createAnswer(id, currentWorkspaceId()));
     }
 
@@ -112,39 +113,38 @@ public class CsOperationController extends BaseController {
 
     /** 改进单(P1 badcase):默认待处理,三个出口分别采纳为知识 / 标记评测 / 忽略。 */
     @GetMapping("/improvements")
-    public R<List<com.forgeagent.customerservice.domain.CsBadcase>> improvements(
+    public R<List<com.forgeagent.customerservice.domain.vo.CsBadcaseVo>> improvements(
         @RequestParam(required = false) String status, @RequestParam(defaultValue = "50") int limit) {
         return R.ok(badcaseService.list(currentWorkspaceId(), status, limit));
     }
 
     @PostMapping("/improvements/{id}/adopt-kb")
-    public R<CsKnowledgeAnswer> adoptKb(@PathVariable Long id) {
+    public R<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo> adoptKb(@PathVariable Long id) {
         return R.ok(badcaseService.adoptKnowledge(id, currentWorkspaceId(),
             String.valueOf(LoginHelper.getUserId())));
     }
 
     @PostMapping("/improvements/{id}/adopt-eval")
-    public R<com.forgeagent.customerservice.domain.CsBadcase> adoptEval(@PathVariable Long id) {
+    public R<com.forgeagent.customerservice.domain.vo.CsBadcaseVo> adoptEval(@PathVariable Long id) {
         return R.ok(badcaseService.adoptEval(id, currentWorkspaceId(),
             String.valueOf(LoginHelper.getUserId())));
     }
 
     @PostMapping("/improvements/{id}/ignore")
-    public R<com.forgeagent.customerservice.domain.CsBadcase> ignoreImprovement(
-        @PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
-        String note = body == null || body.get("note") == null ? null : String.valueOf(body.get("note"));
+    public R<com.forgeagent.customerservice.domain.vo.CsBadcaseVo> ignoreImprovement(
+        @PathVariable Long id, @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsNoteBo bo) {
         return R.ok(badcaseService.ignore(id, currentWorkspaceId(),
-            String.valueOf(LoginHelper.getUserId()), note));
+            String.valueOf(LoginHelper.getUserId()), bo == null ? null : bo.getNote()));
     }
 
     /** 导出已标记的评测样本(JSON),由运营导入平台评测集——客服域不自建评测引擎。 */
     @GetMapping("/improvements/export-eval")
-    public R<List<Map<String, Object>>> exportEval(@RequestParam(defaultValue = "200") int limit) {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsExportEvalRowVo>> exportEval(@RequestParam(defaultValue = "200") int limit) {
         return R.ok(badcaseService.exportEval(currentWorkspaceId(), limit));
     }
 
     /** 语义缓存(P1):按「空间 + 渠道」分区查看;知识更新后可清空一个分区。 */    @GetMapping("/semantic-cache")
-    public R<List<com.forgeagent.customerservice.domain.CsSemanticCache>> semanticCache(
+    public R<List<com.forgeagent.customerservice.domain.vo.CsSemanticCacheVo>> semanticCache(
         @RequestParam String channelCode, @RequestParam(defaultValue = "50") int limit) {
         return R.ok(semanticCacheService.list(currentWorkspaceId(), channelCode, limit));
     }
@@ -160,14 +160,14 @@ public class CsOperationController extends BaseController {
     }
 
     /** 敏感词词库(P0):平台级只读,空间级可增删改;改完立即失效本地快照。 */    @GetMapping("/sensitive-words")
-    public R<List<com.forgeagent.customerservice.domain.CsSensitiveWord>> sensitiveWords() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo>> sensitiveWords() {
         return R.ok(sensitiveWordService.list(currentWorkspaceId()));
     }
 
     @PostMapping("/sensitive-words")
-    public R<com.forgeagent.customerservice.domain.CsSensitiveWord> saveSensitiveWord(
-        @RequestBody com.forgeagent.customerservice.domain.CsSensitiveWord word) {
-        return R.ok(sensitiveWordService.save(word, currentWorkspaceId()));
+    public R<com.forgeagent.customerservice.domain.vo.CsSensitiveWordVo> saveSensitiveWord(
+        @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsSensitiveWordSaveBo bo) {
+        return R.ok(sensitiveWordService.save(bo, currentWorkspaceId()));
     }
 
     @org.springframework.web.bind.annotation.DeleteMapping("/sensitive-words/{id}")
@@ -176,45 +176,43 @@ public class CsOperationController extends BaseController {
     }
 
     @GetMapping("/csat/stats")
-    public R<Map<String, Object>> csatStats(@RequestParam(required = false) String from,
+    public R<com.forgeagent.customerservice.domain.vo.CsCsatStatsVo> csatStats(@RequestParam(required = false) String from,
                                             @RequestParam(required = false) String to) {
         return R.ok(csatService.stats(currentWorkspaceId(), parseDate(from), parseDate(to)));
     }
 
     @GetMapping("/quality/rules")
-    public R<List<CsQualityRule>> qualityRules() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsQualityRuleVo>> qualityRules() {
         return R.ok(qualityService.rules(currentWorkspaceId()));
     }
 
     @PostMapping("/quality/rules")
-    public R<CsQualityRule> saveQualityRule(@RequestBody CsQualityRule rule) {
-        rule.setWorkspaceId(currentWorkspaceId());
-        return R.ok(qualityService.saveRule(rule));
+    public R<com.forgeagent.customerservice.domain.vo.CsQualityRuleVo> saveQualityRule(@Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsQualityRuleSaveBo bo) {
+        return R.ok(qualityService.saveRule(bo, currentWorkspaceId()));
     }
 
     @GetMapping("/quality/checks")
-    public R<List<CsQualityCheck>> qualityChecks() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsQualityCheckVo>> qualityChecks() {
         return R.ok(qualityService.checks(currentWorkspaceId()));
     }
 
     @PostMapping("/quality/checks/{id}/review")
-    public R<CsQualityCheck> reviewQuality(@PathVariable Long id, @RequestParam String status) {
+    public R<com.forgeagent.customerservice.domain.vo.CsQualityCheckVo> reviewQuality(@PathVariable Long id, @RequestParam String status) {
         return R.ok(qualityService.review(id, status));
     }
 
     @GetMapping("/knowledge-answers")
-    public R<List<CsKnowledgeAnswer>> answers(@RequestParam(required = false) String status) {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo>> answers(@RequestParam(required = false) String status) {
         return R.ok(knowledgeAnswerService.list(currentWorkspaceId(), status));
     }
 
     @PostMapping("/knowledge-answers")
-    public R<CsKnowledgeAnswer> saveAnswer(@RequestBody CsKnowledgeAnswer answer) {
-        answer.setWorkspaceId(currentWorkspaceId());
-        return R.ok(knowledgeAnswerService.save(answer));
+    public R<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo> saveAnswer(@Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsKnowledgeAnswerSaveBo bo) {
+        return R.ok(knowledgeAnswerService.save(bo, currentWorkspaceId()));
     }
 
     @PostMapping("/knowledge-answers/{id}/audit")
-    public R<CsKnowledgeAnswer> auditAnswer(@PathVariable Long id,
+    public R<com.forgeagent.customerservice.domain.vo.CsKnowledgeAnswerVo> auditAnswer(@PathVariable Long id,
                                             @RequestParam String status,
                                             @RequestParam(required = false) String note) {
         return R.ok(knowledgeAnswerService.audit(id, status, LoginHelper.getUserId(), note));
@@ -232,13 +230,13 @@ public class CsOperationController extends BaseController {
     }
 
     @GetMapping("/metrics")
-    public R<List<CsMetricDaily>> metrics(@RequestParam(required = false) String from,
+    public R<List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo>> metrics(@RequestParam(required = false) String from,
                                           @RequestParam(required = false) String to) {
         return R.ok(metricService.list(currentWorkspaceId(), parseDate(from), parseDate(to)));
     }
 
     @PostMapping("/metrics/rebuild")
-    public R<java.util.List<CsMetricDaily>> rebuildMetrics(@RequestParam(required = false) String statDate) {
+    public R<java.util.List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo>> rebuildMetrics(@RequestParam(required = false) String statDate) {
         Date day = statDate == null || statDate.isBlank()
             ? new Date() : parseDate(statDate);
         return R.ok(metricService.rebuild(currentWorkspaceId(), day));
@@ -279,7 +277,7 @@ public class CsOperationController extends BaseController {
 
     /** C4:合规审计 / 擦除 / 留存清理 / 客服模板。 */
     @GetMapping("/compliance/audit")
-    public R<List<com.forgeagent.customerservice.domain.CsAuditLog>> audit() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsAuditLogVo>> audit() {
         return R.ok(complianceService.listAudit(currentWorkspaceId()));
     }
 
@@ -294,13 +292,13 @@ public class CsOperationController extends BaseController {
     }
 
     @GetMapping("/templates")
-    public R<List<Map<String, Object>>> templates() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsTemplateItemVo>> templates() {
         return R.ok(templateService.templates());
     }
 
     @PostMapping("/templates/{code}/apply")
-    public R<Object> applyTemplate(@PathVariable String code, @RequestParam String channelCode) {
-        return R.ok(templateService.apply(code, channelCode));
+    public R<com.forgeagent.customerservice.domain.vo.CsChannelVo> applyTemplate(@PathVariable String code, @RequestParam String channelCode) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(templateService.apply(code, channelCode), com.forgeagent.customerservice.domain.vo.CsChannelVo.class));
     }
 
     private Long currentWorkspaceId() {
@@ -313,7 +311,7 @@ public class CsOperationController extends BaseController {
 
     /** 回流用例列表:默认只看待确认(reviewStatus=0),传空串看全部 */
     @GetMapping("/eval/cases")
-    public R<List<Map<String, Object>>> evalCases(@RequestParam(required = false) String reviewStatus,
+    public R<List<com.forgeagent.customerservice.domain.vo.CsEvalCaseRowVo>> evalCases(@RequestParam(required = false) String reviewStatus,
                                                  @RequestParam(defaultValue = "50") int limit) {
         return R.ok(evalFeedbackService.listCases(currentWorkspaceId(),
             reviewStatus == null ? "0" : reviewStatus, limit));
@@ -328,16 +326,14 @@ public class CsOperationController extends BaseController {
     /** 确认或驳回一条回流用例;只有已确认的用例会参与评测运行 */
     @PostMapping("/eval/cases/{id}/review")
     public R<Void> reviewEvalCase(@PathVariable Long id,
-                                  @RequestBody(required = false) Map<String, Object> body) {
-        Object raw = body == null ? null : body.get("approve");
-        boolean approve = Boolean.TRUE.equals(raw) || "true".equalsIgnoreCase(String.valueOf(raw));
-        evalFeedbackService.review(id, currentWorkspaceId(), approve);
+                                  @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsEvalReviewBo bo) {
+        evalFeedbackService.review(id, currentWorkspaceId(), bo != null && Boolean.TRUE.equals(bo.getApprove()));
         return R.ok();
     }
 
     /** 采样口径说明(比例 / 最少访客轮次 / 评测集名) */
     @GetMapping("/eval/sample-info")
-    public R<Map<String, Object>> evalSampleInfo() {
+    public R<com.forgeagent.customerservice.domain.vo.CsEvalSampleInfoVo> evalSampleInfo() {
         return R.ok(evalFeedbackService.sampleInfo());
     }
 

@@ -7,7 +7,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.mapper.AgentSkillMapper;
+import com.forgeagent.agent.mapper.AgentSkillVersionMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -33,11 +35,24 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AgentSkillVersionServiceTest {
 
-    @Mock
-    private JdbcTemplate jdbc;
+    @Mock private AgentSkillVersionMapper versionMapper;
+    @Mock private AgentSkillMapper skillMapper;
 
     private AgentSkillVersionService service() {
-        return new AgentSkillVersionService(jdbc);
+        return new AgentSkillVersionService(versionMapper, skillMapper);
+    }
+
+    private static com.forgeagent.agent.domain.AgentSkillVersion versionRow(String name, String instructions, String fragment) {
+        com.forgeagent.agent.domain.AgentSkillVersion v = new com.forgeagent.agent.domain.AgentSkillVersion();
+        v.setName(name);
+        v.setDescription("旧摘要");
+        v.setInstructions(instructions);
+        v.setToolIds("11");
+        v.setMcpIds("21");
+        v.setKnowledgeIds("31");
+        v.setPromptFragment(fragment);
+        v.setContentHash("abc");
+        return v;
     }
 
     private static AgentSkill skill() {
@@ -111,13 +126,10 @@ class AgentSkillVersionServiceTest {
         AgentSkill target = skill();
         service().archive(target);
 
-        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbc).update(anyString(), args.capture());
-        Object[] values = args.getValue();
-        assertEquals(1L, values[0]);
-        assertEquals(2, values[1]);
-        assertEquals("退换货处理", values[2]);
-        assertEquals(64, String.valueOf(values[9]).length());
+        org.mockito.ArgumentCaptor<String> hash = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(versionMapper).archive(eq(1L), eq(2), eq("退换货处理"),
+            any(), any(), any(), any(), any(), any(), hash.capture(), any());
+        assertEquals(64, hash.getValue().length());
     }
 
     @Test
@@ -130,16 +142,7 @@ class AgentSkillVersionServiceTest {
     @Test
     void applyPinnedOverridesContentWithoutTouchingEntity() {
         AgentSkill target = skill(); // 当前 v2
-        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of(Map.of(
-            "name", "退换货处理(旧版)",
-            "description", "旧摘要",
-            "instructions", "旧手册",
-            "tool_ids", "11",
-            "mcp_ids", "21",
-            "knowledge_ids", "31",
-            "prompt_fragment", "旧语气",
-            "content_hash", "abc"
-        )));
+        when(versionMapper.selectOne(any())).thenReturn(versionRow("退换货处理(旧版)", "旧手册", "旧语气"));
 
         AgentSkill view = service().applyPinned(target, 1);
 
@@ -156,7 +159,7 @@ class AgentSkillVersionServiceTest {
     @Test
     void applyPinnedFallsBackWhenVersionRowMissing() {
         AgentSkill target = skill();
-        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
+        when(versionMapper.selectOne(any())).thenReturn(null);
 
         AgentSkill view = service().applyPinned(target, 1);
 
@@ -166,7 +169,7 @@ class AgentSkillVersionServiceTest {
 
     @Test
     void contentHashOfMissingVersionIsNull() {
-        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
+        when(versionMapper.selectOne(any())).thenReturn(null);
         assertNull(service().contentHashOf(1L, 5));
         assertTrue(service().versionOf(1L, 5).isEmpty());
     }

@@ -8,7 +8,11 @@ import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.common.json.utils.JsonUtils;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentPromptTemplate;
+import com.forgeagent.agent.domain.AgentPromptVersion;
+import com.forgeagent.agent.mapper.AgentPromptTemplateMapper;
+import com.forgeagent.agent.mapper.AgentPromptVersionMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -38,76 +42,75 @@ public class PromptTemplateService {
                            List<String> layers) {
     }
 
-    private final JdbcTemplate jdbc;
+    private final AgentPromptTemplateMapper templateMapper;
+    private final AgentPromptVersionMapper versionMapper;
 
-    public PromptTemplateService(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public PromptTemplateService(AgentPromptTemplateMapper templateMapper, AgentPromptVersionMapper versionMapper) {
+        this.templateMapper = templateMapper;
+        this.versionMapper = versionMapper;
     }
 
-    public List<Map<String, Object>> listTemplates(Long workspaceId) {
-        return jdbc.queryForList("""
-                SELECT id,workspace_id,name,description,category,stable_version_id,status,create_time
-                FROM agent_prompt_template WHERE del_flag=0 AND (workspace_id=? OR workspace_id=0)
-                ORDER BY id DESC
-                """, workspaceId == null ? 0L : workspaceId);
+    public List<com.forgeagent.agent.domain.vo.AgentPromptTemplateVo> listTemplates(Long workspaceId) {
+        return templateMapper.listTemplates(workspaceId == null ? 0L : workspaceId);
     }
 
-    public Map<String, Object> getTemplate(Long id) {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-            "SELECT * FROM agent_prompt_template WHERE id=? AND del_flag=0", id);
-        if (rows.isEmpty()) {
+    public com.forgeagent.agent.domain.vo.AgentPromptTemplateVo getTemplate(Long id) {
+        AgentPromptTemplate t = templateMapper.selectById(id);
+        if (t == null || !"0".equals(String.valueOf(t.getDelFlag()))) {
             throw new ServiceException("Prompt 模板不存在");
         }
-        return rows.getFirst();
+        return MAPPER.convertValue(t, com.forgeagent.agent.domain.vo.AgentPromptTemplateVo.class);
     }
 
-    public Long saveTemplate(Map<String, Object> body) {
-        Long id = longOf(body.get("id"));
-        String name = StringUtils.defaultIfBlank(text(body.get("name")), "未命名模板");
-        String content = text(body.get("content"));
+    public Long saveTemplate(com.forgeagent.agent.domain.bo.PromptTemplateSaveBo body) {
+        Long id = body.getId();
+        String name = StringUtils.defaultIfBlank(body.getName(), "未命名模板");
+        String content = body.getContent();
         if (StringUtils.isBlank(content)) {
             throw new ServiceException("模板内容不能为空");
         }
-        Long workspaceId = longOf(body.get("workspaceId"));
+        Long workspaceId = body.getWorkspaceId();
         if (workspaceId == null) {
             throw new ServiceException("工作空间不能为空");
         }
-        String schema = text(body.get("variableSchema"));
+        String schema = body.getVariableSchema();
         validateSchema(schema);
         if (id == null) {
-            jdbc.update("""
-                    INSERT INTO agent_prompt_template
-                      (workspace_id,name,description,category,content,variable_schema,status,create_by,create_time)
-                    VALUES (?,?,?,?,?,?,'draft',?,NOW())
-                    """, workspaceId, name, text(body.get("description")),
-                StringUtils.defaultIfBlank(text(body.get("category")), "system"),
-                content, schema, currentUserId());
-            return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+            AgentPromptTemplate entity = new AgentPromptTemplate();
+            entity.setWorkspaceId(workspaceId);
+            entity.setName(name);
+            entity.setDescription(body.getDescription());
+            entity.setCategory(StringUtils.defaultIfBlank(body.getCategory(), "system"));
+            entity.setContent(content);
+            entity.setVariableSchema(schema);
+            entity.setStatus("draft");
+            entity.setCreateBy(currentUserId());
+            templateMapper.insert(entity);
+            return entity.getId();
         }
         getTemplate(id);
-        jdbc.update("""
-                UPDATE agent_prompt_template SET name=?,description=?,category=?,content=?,
-                  variable_schema=?,update_time=NOW() WHERE id=?
-                """, name, text(body.get("description")),
-            StringUtils.defaultIfBlank(text(body.get("category")), "system"),
-            content, schema, id);
+        AgentPromptTemplate update = new AgentPromptTemplate();
+        update.setId(id);
+        update.setName(name);
+        update.setDescription(body.getDescription());
+        update.setCategory(StringUtils.defaultIfBlank(body.getCategory(), "system"));
+        update.setContent(content);
+        update.setVariableSchema(schema);
+        update.setUpdateTime(new java.util.Date());
+        templateMapper.updateById(update);
         return id;
     }
 
-    public List<Map<String, Object>> listVersions(Long templateId) {
-        return jdbc.queryForList("""
-                SELECT id,template_id,version_no,content_hash,remark,create_by,create_time
-                FROM agent_prompt_version WHERE template_id=? ORDER BY version_no DESC
-                """, templateId);
+    public List<com.forgeagent.agent.domain.vo.AgentPromptVersionVo> listVersions(Long templateId) {
+        return versionMapper.listByTemplate(templateId);
     }
 
-    public Map<String, Object> getVersion(Long versionId) {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-            "SELECT * FROM agent_prompt_version WHERE id=?", versionId);
-        if (rows.isEmpty()) {
+    public com.forgeagent.agent.domain.vo.AgentPromptVersionVo getVersion(Long versionId) {
+        AgentPromptVersion v = versionMapper.selectById(versionId);
+        if (v == null) {
             throw new ServiceException("模板版本不存在");
         }
-        return rows.getFirst();
+        return MAPPER.convertValue(v, com.forgeagent.agent.domain.vo.AgentPromptVersionVo.class);
     }
 
     /** 发布不可变版本;asStable=true 时同步设为模板稳定版 */
@@ -117,19 +120,23 @@ public class PromptTemplateService {
             throw new ServiceException("模板内容不能为空");
         }
         validateSchema(schema);
-        Integer next = jdbc.queryForObject(
-            "SELECT COALESCE(MAX(version_no),0)+1 FROM agent_prompt_version WHERE template_id=?",
-            Integer.class, templateId);
+        Integer next = versionMapper.nextVersionNo(templateId);
         int versionNo = next == null ? 1 : next;
-        jdbc.update("""
-                INSERT INTO agent_prompt_version
-                  (template_id,version_no,content,variable_schema,content_hash,remark,create_by,create_time)
-                VALUES (?,?,?,?,?,?,?,NOW())
-                """, templateId, versionNo, content, schema, sha256(content),
-            remark, currentUserId());
-        Long versionId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        jdbc.update("UPDATE agent_prompt_template SET status='published',update_time=NOW() WHERE id=?",
-            templateId);
+        AgentPromptVersion version = new AgentPromptVersion();
+        version.setTemplateId(templateId);
+        version.setVersionNo(versionNo);
+        version.setContent(content);
+        version.setVariableSchema(schema);
+        version.setContentHash(sha256(content));
+        version.setRemark(remark);
+        version.setCreateBy(currentUserId());
+        versionMapper.insert(version);
+        Long versionId = version.getId();
+        AgentPromptTemplate published = new AgentPromptTemplate();
+        published.setId(templateId);
+        published.setStatus("published");
+        published.setUpdateTime(new java.util.Date());
+        templateMapper.updateById(published);
         if (asStable) {
             setStable(templateId, versionId);
         }
@@ -139,20 +146,23 @@ public class PromptTemplateService {
     public void setStable(Long templateId, Long versionId) {
         getTemplate(templateId);
         getVersion(versionId);
-        jdbc.update("UPDATE agent_prompt_template SET stable_version_id=?,update_time=NOW() WHERE id=?",
-            versionId, templateId);
+        AgentPromptTemplate stable = new AgentPromptTemplate();
+        stable.setId(templateId);
+        stable.setStableVersionId(versionId);
+        stable.setUpdateTime(new java.util.Date());
+        templateMapper.updateById(stable);
     }
 
     /** 编译预览:返回渲染结果、变量契约校验结果与内容摘要 */
-    public Map<String, Object> preview(Long versionId, String variablesJson) {
-        Map<String, Object> version = getVersion(versionId);
-        String rendered = render(text(version.get("content")),
-            text(version.get("variable_schema")), variablesJson);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("content", rendered);
-        result.put("contentHash", sha256(rendered));
-        result.put("layers", List.of("TEMPLATE"));
-        result.put("estimatedTokens", Math.max(1, rendered.length() / 4));
+    public com.forgeagent.agent.domain.vo.PromptPreviewVo preview(Long versionId, String variablesJson) {
+        com.forgeagent.agent.domain.vo.AgentPromptVersionVo version = getVersion(versionId);
+        String rendered = render(version.getContent(),
+            version.getVariableSchema(), variablesJson);
+        com.forgeagent.agent.domain.vo.PromptPreviewVo result = new com.forgeagent.agent.domain.vo.PromptPreviewVo();
+        result.setContent(rendered);
+        result.setContentHash(sha256(rendered));
+        result.setLayers(List.of("TEMPLATE"));
+        result.setEstimatedTokens(Math.max(1, rendered.length() / 4));
         return result;
     }
 
@@ -176,19 +186,17 @@ public class PromptTemplateService {
                 throw new ServiceException("LOCKED 模式必须指定锁定的模板版本");
             }
         } else {
-            List<Long> stable = jdbc.queryForList(
-                "SELECT stable_version_id FROM agent_prompt_template WHERE id=? AND del_flag=0",
-                Long.class, templateId);
+            List<Long> stable = templateMapper.stableVersionId(templateId);
             versionId = stable.isEmpty() ? null : stable.getFirst();
         }
         if (versionId == null) {
             throw new ServiceException("模板尚未设置稳定版,无法以 FOLLOW_STABLE 模式运行");
         }
-        Map<String, Object> version = getVersion(versionId);
-        String rendered = render(text(version.get("content")),
-            text(version.get("variable_schema")), agent.getPromptVariables());
+        com.forgeagent.agent.domain.vo.AgentPromptVersionVo version = getVersion(versionId);
+        String rendered = render(version.getContent(),
+            version.getVariableSchema(), agent.getPromptVariables());
         List<String> layers = new ArrayList<>();
-        layers.add("TEMPLATE:v" + text(version.get("version_no")));
+        layers.add("TEMPLATE:v" + version.getVersionNo());
         if (StringUtils.isNotBlank(agent.getSystemPrompt())) {
             rendered = rendered + "\n\n## 补充指令\n" + agent.getSystemPrompt();
             layers.add("AGENT_SUPPLEMENT");

@@ -98,7 +98,19 @@ class CsMetricServiceChannelTest {
         lenient().when(properties.getSlaFirstResponseMs()).thenReturn(60000L);
         lenient().when(metricMapper.selectOne(any())).thenReturn(null);
 
-        List<CsMetricDaily> rows = service.rebuild(1L, now);
+        java.util.List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo> rows;
+        CsMetricService spyService = org.mockito.Mockito.spy(service);
+        org.mockito.Mockito.doAnswer(inv -> {
+            java.util.List<?> src = inv.getArgument(0);
+            java.util.List<Object> out = new java.util.ArrayList<>();
+            for (Object o : src) {
+                com.forgeagent.customerservice.domain.vo.CsMetricDailyVo vo = new com.forgeagent.customerservice.domain.vo.CsMetricDailyVo();
+                org.springframework.beans.BeanUtils.copyProperties(o, vo);
+                out.add(vo);
+            }
+            return out;
+        }).when(spyService).toVoList(org.mockito.ArgumentMatchers.anyList());
+        rows = spyService.rebuild(1L, now);
 
         // 全渠道行 + web 行 + app 行
         assertEquals(3, rows.size());
@@ -106,18 +118,18 @@ class CsMetricServiceChannelTest {
         assertEquals("web", rows.get(1).getChannelCode());
         assertEquals("app", rows.get(2).getChannelCode());
 
-        CsMetricDaily total = rows.get(0);
+        com.forgeagent.customerservice.domain.vo.CsMetricDailyVo total = rows.get(0);
         // containment:3 条会话 2 条未建单
         assertEquals(66.67, total.getContainmentRate());
         // 重复进线:访客 11 的 2 条会话命中 24h 内已有进线
         assertEquals(66.67, total.getRepeatContactRate());
 
-        CsMetricDaily web = rows.get(1);
+        com.forgeagent.customerservice.domain.vo.CsMetricDailyVo web = rows.get(1);
         assertEquals(2, web.getBotSessions());
         assertEquals(100.0, web.getRepeatContactRate());
         assertEquals(50.0, web.getContainmentRate());
 
-        CsMetricDaily app = rows.get(2);
+        com.forgeagent.customerservice.domain.vo.CsMetricDailyVo app = rows.get(2);
         assertEquals(0.0, app.getRepeatContactRate());
         assertEquals(100.0, app.getContainmentRate());
 
@@ -137,7 +149,10 @@ class CsMetricServiceChannelTest {
         existing.setId(88L);
         when(metricMapper.selectOne(any())).thenReturn(existing);
 
-        service.rebuild(1L, now);
+        CsMetricService spyService = org.mockito.Mockito.spy(service);
+        org.mockito.Mockito.doReturn(java.util.List.of()).when(spyService)
+            .toVoList(org.mockito.ArgumentMatchers.anyList());
+        spyService.rebuild(1L, now);
 
         ArgumentCaptor<CsMetricDaily> captor = ArgumentCaptor.forClass(CsMetricDaily.class);
         verify(metricMapper, times(2)).updateById(captor.capture());

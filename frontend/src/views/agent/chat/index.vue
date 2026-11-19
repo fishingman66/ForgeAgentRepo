@@ -1319,6 +1319,17 @@ const handleSend = async () => {
         applyResult(data);
       },
       onUsage: () => refreshUsage(),
+      onApprovalResult: (status, toolName, message) => {
+        // C4:异步 HITL 工具审批回执 —— 用非阻塞提示,不打断当前对话流
+        const tip = `[${toolName || '工具'}] ${message || ''}`;
+        if (status === 'approved') {
+          proxy?.$modal.msgSuccess(tip);
+        } else if (status === 'submitted') {
+          proxy?.$modal.msg(`已提交审批:${tip}`);
+        } else {
+          proxy?.$modal.msgWarning(tip);
+        }
+      },
       onError: (msg) => {
         if (streamStarted && botMsg.content) {
           // 已有部分输出:保留内容并标注中断
@@ -1520,6 +1531,17 @@ const handleRegenerate = async () => {
         replaceDone(data);
       },
       onUsage: () => refreshUsage(),
+      onApprovalResult: (status, toolName, message) => {
+        // C4:异步 HITL 工具审批回执 —— 用非阻塞提示,不打断当前对话流
+        const tip = `[${toolName || '工具'}] ${message || ''}`;
+        if (status === 'approved') {
+          proxy?.$modal.msgSuccess(tip);
+        } else if (status === 'submitted') {
+          proxy?.$modal.msg(`已提交审批:${tip}`);
+        } else {
+          proxy?.$modal.msgWarning(tip);
+        }
+      },
       onError: (msg) => {
         if (streamStarted && botMsg.content) {
           botMsg.typing = false;

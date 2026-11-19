@@ -61,6 +61,32 @@ public class CsChatFacadeImpl implements CsChatFacade {
         }
     }
 
+    @Override
+    public Integer decidePinnedVersion(Long agentId, Long visitorId) {
+        if (agentId == null || visitorId == null) {
+            return null;
+        }
+        try {
+            AgentInfo agent = agentInfoMapper.selectById(agentId);
+            if (agent == null || agent.getPublishedVersion() == null) {
+                // 未发布过:没有快照可锁,走现行版
+                return null;
+            }
+            int percent = agent.getRolloutPercent() == null ? 100 : agent.getRolloutPercent();
+            if (percent <= 0) {
+                return null;
+            }
+            if (percent >= 100) {
+                return agent.getPublishedVersion();
+            }
+            int bucket = Math.floorMod(visitorId.hashCode(), 100);
+            return bucket < percent ? agent.getPublishedVersion() : null;
+        } catch (Exception e) {
+            log.warn("[CS] D1 灰度判定失败 agentId={} visitorId={}: {}", agentId, visitorId, e.getMessage());
+            return null;
+        }
+    }
+
     private ChatSendBo toBo(CsChatRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("客服对话请求不能为空");

@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Date;
@@ -43,54 +44,52 @@ public class CsSeatController extends BaseController {
     private final com.forgeagent.customerservice.compliance.CsSecretCipher secretCipher;
 
     @GetMapping("/tickets")
-    public R<List<CsTicket>> tickets(@RequestParam(required = false) String status) {
-        return R.ok(ticketService.list(currentWorkspaceId(), status));
+    public R<List<com.forgeagent.customerservice.domain.vo.CsTicketVo>> tickets(@RequestParam(required = false) String status) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.list(currentWorkspaceId(), status), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @GetMapping("/tickets/{id}")
-    public R<Map<String, Object>> ticket(@PathVariable Long id) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("ticket", ticketDetail(id));
-        data.put("events", ticketService.events(id));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketDetailVo> ticket(@PathVariable Long id) {
+        com.forgeagent.customerservice.domain.vo.CsTicketDetailVo data = new com.forgeagent.customerservice.domain.vo.CsTicketDetailVo();
+        data.setTicket(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketDetail(id), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
+        data.setEvents(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.events(id), com.forgeagent.customerservice.domain.vo.CsTicketEventVo.class));
         return R.ok(data);
     }
 
     @PostMapping("/tickets/{id}/claim")
-    public R<CsTicket> claim(@PathVariable Long id) {
-        return R.ok(ticketService.claim(id, LoginHelper.getUserId()));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> claim(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.claim(id, LoginHelper.getUserId()), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/tickets/{id}/reply")
-    public R<Map<String, Object>> reply(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        String content = body.get("content") == null ? "" : String.valueOf(body.get("content"));
-        return R.ok(ticketService.reply(id, LoginHelper.getUserId(), content));
+    public R<com.forgeagent.customerservice.domain.vo.CsReplyResultVo> reply(@PathVariable Long id, @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsReplyBo bo) {
+        return R.ok(ticketService.reply(id, LoginHelper.getUserId(), bo.getContent()));
     }
 
     @PostMapping("/tickets/{id}/hold")
-    public R<CsTicket> hold(@PathVariable Long id) {
-        return R.ok(ticketService.transition(id, "ON_HOLD", "HOLD", "SEAT", LoginHelper.getUserId(), null));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> hold(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "ON_HOLD", "HOLD", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/tickets/{id}/resume")
-    public R<CsTicket> resume(@PathVariable Long id) {
-        return R.ok(ticketService.transition(id, "PROCESSING", "RESUME", "SEAT", LoginHelper.getUserId(), null));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> resume(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "PROCESSING", "RESUME", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/tickets/{id}/resolve")
-    public R<CsTicket> resolve(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
-        String note = body == null || body.get("note") == null ? null : String.valueOf(body.get("note"));
-        return R.ok(ticketService.transition(id, "WAITING_CONFIRM", "MARK_RESOLVED",
-            "SEAT", LoginHelper.getUserId(), note));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> resolve(@PathVariable Long id, @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsNoteBo bo) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "WAITING_CONFIRM", "MARK_RESOLVED",
+            "SEAT", LoginHelper.getUserId(), bo == null ? null : bo.getNote()), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/tickets/{id}/close")
-    public R<CsTicket> close(@PathVariable Long id) {
-        return R.ok(ticketService.transition(id, "CLOSED", "CLOSE", "SEAT", LoginHelper.getUserId(), null));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> close(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "CLOSED", "CLOSE", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/tickets/{id}/reopen")
-    public R<CsTicket> reopen(@PathVariable Long id) {
-        return R.ok(ticketService.transition(id, "WAITING_AGENT", "REOPEN", "SEAT", LoginHelper.getUserId(), null));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> reopen(@PathVariable Long id) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "WAITING_AGENT", "REOPEN", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     /**
@@ -98,33 +97,32 @@ public class CsSeatController extends BaseController {
      * 目标坐席在线且未满、当前操作人是受理人,两个条件由服务层校验。
      */
     @PostMapping("/tickets/{id}/transfer")
-    public R<CsTicket> transfer(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
-        Object target = body == null ? null : body.get("assigneeId");
-        String note = body == null || body.get("note") == null ? null : String.valueOf(body.get("note"));
-        if (target == null || String.valueOf(target).isBlank()) {
-            return R.ok(ticketService.transferToPool(id, LoginHelper.getUserId(), note));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> transfer(@PathVariable Long id, @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsTransferBo bo) {
+        Long target = bo == null ? null : bo.getAssigneeId();
+        String note = bo == null ? null : bo.getNote();
+        if (target == null) {
+            return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transferToPool(id, LoginHelper.getUserId(), note), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
         }
         long assigneeId;
         try {
-            assigneeId = Long.parseLong(String.valueOf(target));
+            assigneeId = target;
         } catch (NumberFormatException e) {
             return R.fail("目标坐席ID非法");
         }
-        return R.ok(ticketService.transferToAgent(id, LoginHelper.getUserId(), assigneeId, note));
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transferToAgent(id, LoginHelper.getUserId(), assigneeId, note), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     /** 取消转人工(P0):排队中的工单回到 AI 接待。 */
     @PostMapping("/tickets/{id}/cancel-handoff")
-    public R<CsTicket> cancelHandoff(@PathVariable Long id,
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> cancelHandoff(@PathVariable Long id,
                                      @RequestParam(required = false) String reason) {
-        return R.ok(ticketService.cancelHandoff(id, reason));
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.cancelHandoff(id, reason), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     /** 驳回待确认(P0):客户反馈未解决,退回处理中。 */
     @PostMapping("/tickets/{id}/reject")
-    public R<CsTicket> reject(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
-        String note = body == null || body.get("note") == null ? null : String.valueOf(body.get("note"));
-        return R.ok(ticketService.reject(id, LoginHelper.getUserId(), note));
+    public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> reject(@PathVariable Long id, @RequestBody(required = false) com.forgeagent.customerservice.domain.bo.CsNoteBo bo) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.reject(id, LoginHelper.getUserId(), bo == null ? null : bo.getNote()), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
     }
 
     @PostMapping("/queue/assign")
@@ -133,16 +131,17 @@ public class CsSeatController extends BaseController {
     }
 
     @GetMapping("/channels")
-    public R<List<CsChannel>> channels() {
+    public R<List<com.forgeagent.customerservice.domain.vo.CsChannelVo>> channels() {
         List<CsChannel> list = channelMapper.selectList(new LambdaQueryWrapper<CsChannel>()
             .eq(CsChannel::getWorkspaceId, currentWorkspaceId()).orderByDesc(CsChannel::getId));
         // C4:密钥不回显到管理端
         list.forEach(item -> item.setChannelSecret(null));
-        return R.ok(list);
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(list, com.forgeagent.customerservice.domain.vo.CsChannelVo.class));
     }
 
     @PostMapping("/channels")
-    public R<CsChannel> saveChannel(@RequestBody CsChannel channel) {
+    public R<com.forgeagent.customerservice.domain.vo.CsChannelVo> saveChannel(@Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsChannelSaveBo bo) {
+        CsChannel channel = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsChannel.class);
         channel.setWorkspaceId(currentWorkspaceId());
         channel.setStatus(channel.getStatus() == null ? "0" : channel.getStatus());
         channel.setCreateTime(new Date());
@@ -159,13 +158,13 @@ public class CsSeatController extends BaseController {
             channelMapper.updateById(channel);
         }
         channel.setChannelSecret(null);
-        return R.ok(channel);
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(channel, com.forgeagent.customerservice.domain.vo.CsChannelVo.class));
     }
 
     @GetMapping("/seats")
-    public R<List<CsSeat>> seats() {
-        return R.ok(seatMapper.selectList(new LambdaQueryWrapper<CsSeat>()
-            .eq(CsSeat::getWorkspaceId, currentWorkspaceId())));
+    public R<List<com.forgeagent.customerservice.domain.vo.CsSeatVo>> seats() {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(seatMapper.selectList(new LambdaQueryWrapper<CsSeat>()
+            .eq(CsSeat::getWorkspaceId, currentWorkspaceId())), com.forgeagent.customerservice.domain.vo.CsSeatVo.class));
     }
 
     private CsTicket ticketDetail(Long id) {

@@ -132,13 +132,13 @@ public class CsTicketService {
         return ticket;
     }
 
-    public Map<String, Object> handoffView(CsConversation conv, String reason) {
+    public com.forgeagent.customerservice.domain.vo.CsHandoffViewVo handoffView(CsConversation conv, String reason) {
         CsTicket ticket = requestHandoff(conv, reason);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("ticketId", ticket.getId());
-        data.put("ticketNo", ticket.getTicketNo());
-        data.put("status", ticket.getStatus());
-        data.put("waitingSince", ticket.getWaitingSince());
+        com.forgeagent.customerservice.domain.vo.CsHandoffViewVo data = new com.forgeagent.customerservice.domain.vo.CsHandoffViewVo();
+        data.setTicketId(ticket.getId());
+        data.setTicketNo(ticket.getTicketNo());
+        data.setStatus(ticket.getStatus());
+        data.setWaitingSince(ticket.getWaitingSince());
         return data;
     }
 
@@ -403,7 +403,7 @@ public class CsTicketService {
     }
 
     /** 坐席回复:写 agent_message(sender_type=seat)并记录首响。 */
-    public Map<String, Object> reply(Long ticketId, Long seatUserId, String content) {
+    public com.forgeagent.customerservice.domain.vo.CsReplyResultVo reply(Long ticketId, Long seatUserId, String content) {
         CsTicket ticket = ticketMapper.selectById(ticketId);
         if (ticket == null || !CsTicketStatus.PROCESSING.name().equals(ticket.getStatus())) {
             throw new ServiceException("工单不在处理中");
@@ -428,9 +428,11 @@ public class CsTicketService {
         }
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT, ticket.getConversationId(), ticketId,
             Map.of("content", content, "senderType", "seat", "messageId", msg.getId())));
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("messageId", msg.getId());
-        data.put("ticketId", ticketId);
+        com.forgeagent.customerservice.domain.vo.CsReplyResultVo data = new com.forgeagent.customerservice.domain.vo.CsReplyResultVo();
+        data.setMessageId(msg.getId());
+        data.setTicketId(ticketId);
+        data.setContent(content);
+        data.setState(ticket.getStatus());
         return data;
     }
 

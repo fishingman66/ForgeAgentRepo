@@ -5,7 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.mapper.SchemaIntrospectMapper;
 import org.springframework.stereotype.Component;
 
 /**
@@ -24,7 +24,7 @@ public class WorkflowSchemaGuard implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(WorkflowSchemaGuard.class);
 
-    private final JdbcTemplate jdbcTemplate;
+    private final SchemaIntrospectMapper schemaMapper;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -41,20 +41,15 @@ public class WorkflowSchemaGuard implements ApplicationRunner {
     }
 
     private void checkTable(String table, String script, String impact) {
-        Long count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?",
-            Long.class, table);
-        if (count == null || count == 0) {
+        long count = schemaMapper.countTable(table);
+        if (count == 0) {
             log.warn("[工作流自检] 缺少表 {},请核对结构基线 {}。影响: {}", table, script, impact);
         }
     }
 
     private void checkColumnNullable(String table, String column, String script, String impact) {
-        Long count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM information_schema.columns "
-                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? AND is_nullable = 'NO'",
-            Long.class, table, column);
-        if (count != null && count > 0) {
+        long count = schemaMapper.countNotNullColumn(table, column);
+        if (count > 0) {
             log.warn("[工作流自检] 表 {}.{} 仍为 NOT NULL,请按基线 {} 放开非空约束。影响: {}",
                 table, column, script, impact);
         }

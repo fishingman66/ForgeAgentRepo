@@ -27,7 +27,7 @@ public class CsAgentTemplateService {
     private final CsGovernanceFacade governanceFacade;
     private final CsComplianceService complianceService;
 
-    public List<Map<String, Object>> templates() {
+    public List<com.forgeagent.customerservice.domain.vo.CsTemplateItemVo> templates() {
         return List.of(
             template("standard", "标准客服", "zero_hit", "抱歉，暂时没有找到相关答案，已为你转接人工客服。",
                 "Sorry, I could not find a relevant answer. Connecting you to an agent.", "zh-CN"),
@@ -40,8 +40,8 @@ public class CsAgentTemplateService {
 
     /** 应用模板到渠道;发布门禁不通过时拒绝,并留审计。 */
     public CsChannel apply(String templateCode, String channelCode) {
-        Map<String, Object> chosen = templates().stream()
-            .filter(t -> templateCode.equals(t.get("code"))).findFirst()
+        com.forgeagent.customerservice.domain.vo.CsTemplateItemVo chosen = templates().stream()
+            .filter(t -> templateCode.equals(t.getCode())).findFirst()
             .orElseThrow(() -> new IllegalArgumentException("未知客服模板: " + templateCode));
         CsChannel channel = channelMapper.selectOne(
             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CsChannel>()
@@ -52,25 +52,25 @@ public class CsAgentTemplateService {
         if (!governanceFacade.canPublish(channel.getAgentId())) {
             throw new IllegalStateException("客服 Agent 未通过发布门禁,模板不可应用");
         }
-        channel.setHandoffPolicy(String.valueOf(chosen.get("handoffPolicy")));
-        channel.setFallbackReply(String.valueOf(chosen.get("fallbackReply")));
-        channel.setFallbackReplyEn(String.valueOf(chosen.get("fallbackReplyEn")));
-        channel.setLocale(String.valueOf(chosen.get("locale")));
+        channel.setHandoffPolicy(chosen.getHandoffPolicy());
+        channel.setFallbackReply(chosen.getFallbackReply());
+        channel.setFallbackReplyEn(chosen.getFallbackReplyEn());
+        channel.setLocale(chosen.getLocale());
         channelMapper.updateById(channel);
         complianceService.record("TEMPLATE_APPLY", "SYSTEM", templateCode,
             channel.getWorkspaceId(), channelCode, "template=" + templateCode);
         return channel;
     }
 
-    private static Map<String, Object> template(String code, String name, String handoffPolicy,
+    private static com.forgeagent.customerservice.domain.vo.CsTemplateItemVo template(String code, String name, String handoffPolicy,
                                                 String zh, String en, String locale) {
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("code", code);
-        item.put("name", name);
-        item.put("handoffPolicy", handoffPolicy);
-        item.put("fallbackReply", zh);
-        item.put("fallbackReplyEn", en);
-        item.put("locale", locale);
+        com.forgeagent.customerservice.domain.vo.CsTemplateItemVo item = new com.forgeagent.customerservice.domain.vo.CsTemplateItemVo();
+        item.setCode(code);
+        item.setName(name);
+        item.setHandoffPolicy(handoffPolicy);
+        item.setFallbackReply(zh);
+        item.setFallbackReplyEn(en);
+        item.setLocale(locale);
         return item;
     }
 }

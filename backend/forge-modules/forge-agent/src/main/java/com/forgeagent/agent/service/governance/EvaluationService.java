@@ -13,7 +13,21 @@ import com.forgeagent.common.satoken.utils.LoginHelper;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.domain.AgentEvalBaseline;
+import com.forgeagent.agent.domain.AgentEvalCase;
+import com.forgeagent.agent.domain.AgentEvalCaseResult;
+import com.forgeagent.agent.domain.AgentEvalDataset;
+import com.forgeagent.agent.domain.AgentEvalRun;
+import com.forgeagent.agent.mapper.AgentEvalBaselineMapper;
+import com.forgeagent.agent.mapper.AgentEvalCaseMapper;
+import com.forgeagent.agent.mapper.AgentEvalCaseResultMapper;
+import com.forgeagent.agent.mapper.AgentEvalDatasetMapper;
+import com.forgeagent.agent.mapper.AgentEvalRunMapper;
+import com.forgeagent.agentcore.domain.AgentInfo;
+import com.forgeagent.agentcore.domain.AgentModel;
+import com.forgeagent.agentcore.mapper.AgentInfoMapper;
+import com.forgeagent.agentcore.mapper.AgentModelMapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -53,70 +67,80 @@ public class EvaluationService {
         期望拒答的用例以 refusal_correctness 为主。不要输出 JSON 之外的文字。
         """;
 
-    private final JdbcTemplate jdbc;
+    private final AgentEvalDatasetMapper datasetMapper;
+    private final AgentEvalCaseMapper caseMapper;
+    private final AgentEvalRunMapper runMapper;
+    private final AgentEvalCaseResultMapper resultMapper;
+    private final AgentEvalBaselineMapper baselineMapper;
+    private final AgentInfoMapper agentInfoMapper;
+    private final AgentModelMapper agentModelMapper;
+    private final com.forgeagent.agent.mapper.AgentSessionMapper agentSessionMapper;
     private final IAgentChatService chatService;
 
-    public EvaluationService(JdbcTemplate jdbc, IAgentChatService chatService) {
-        this.jdbc = jdbc;
+    public EvaluationService(AgentEvalDatasetMapper datasetMapper, AgentEvalCaseMapper caseMapper,
+                             AgentEvalRunMapper runMapper, AgentEvalCaseResultMapper resultMapper,
+                             AgentEvalBaselineMapper baselineMapper, AgentInfoMapper agentInfoMapper,
+                             AgentModelMapper agentModelMapper,
+                             com.forgeagent.agent.mapper.AgentSessionMapper agentSessionMapper,
+                             IAgentChatService chatService) {
+        this.datasetMapper = datasetMapper;
+        this.caseMapper = caseMapper;
+        this.runMapper = runMapper;
+        this.resultMapper = resultMapper;
+        this.baselineMapper = baselineMapper;
+        this.agentInfoMapper = agentInfoMapper;
+        this.agentModelMapper = agentModelMapper;
+        this.agentSessionMapper = agentSessionMapper;
         this.chatService = chatService;
     }
 
-    public List<Map<String, Object>> listDatasets(Long workspaceId) {
-        return jdbc.queryForList("""
-                SELECT d.id,d.workspace_id,d.agent_id,d.name,d.description,d.create_time,
-                  (SELECT COUNT(*) FROM agent_eval_case c WHERE c.dataset_id=d.id) AS case_count
-                FROM agent_eval_dataset d WHERE d.del_flag=0 AND (d.workspace_id=? OR d.workspace_id=0)
-                ORDER BY d.id DESC
-                """, workspaceId == null ? 0L : workspaceId);
+    public List<com.forgeagent.agent.domain.vo.AgentEvalDatasetVo> listDatasets(Long workspaceId) {
+        return datasetMapper.listWithCaseCount(workspaceId == null ? 0L : workspaceId);
     }
 
-    public Long createDataset(Map<String, Object> body) {
-        String name = text(body.get("name"));
+    public Long createDataset(com.forgeagent.agent.domain.bo.EvalDatasetCreateBo body) {
+        String name = body.getName();
         if (StringUtils.isBlank(name)) {
             throw new ServiceException("评测集名称不能为空");
         }
-        Long workspaceId = longOf(body.get("workspaceId"));
+        Long workspaceId = body.getWorkspaceId();
         if (workspaceId == null) {
             throw new ServiceException("工作空间不能为空");
         }
-        jdbc.update("""
-                INSERT INTO agent_eval_dataset (workspace_id,agent_id,name,description,create_by,create_time)
-                VALUES (?,?,?,?,?,NOW())
-                """, workspaceId, longOf(body.get("agentId")), name,
-            text(body.get("description")), currentUserId());
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        AgentEvalDataset entity = new AgentEvalDataset();
+        entity.setWorkspaceId(workspaceId);
+        entity.setAgentId(body.getAgentId());
+        entity.setName(name);
+        entity.setDescription(body.getDescription());
+        entity.setCreateBy(currentUserId());
+        datasetMapper.insert(entity);
+        return entity.getId();
     }
 
-    public List<Map<String, Object>> listCases(Long datasetId) {
-        return jdbc.queryForList("""
-                SELECT id,dataset_id,question,expected_keywords,reference_answer,expected_refusal,
-                       source,source_ref_id,review_status,create_time
-                FROM agent_eval_case WHERE dataset_id=? ORDER BY id
-                """, datasetId);
+    public List<com.forgeagent.agent.domain.vo.AgentEvalCaseVo> listCases(Long datasetId) {
+        return caseMapper.listByDataset(datasetId);
     }
 
-    /** 批量导入样本;body.cases 为数组,元素含 question / expectedKeywords / referenceAnswer / expectedRefusal */
-    public int addCases(Long datasetId, Object casesRaw) {
-        if (!(casesRaw instanceof List<?> cases)) {
+    /** 批量导入样本;cases 元素含 question / expectedKeywords / referenceAnswer / expectedRefusal */
+    public int addCases(com.forgeagent.agent.domain.bo.EvalCasesAddBo bo) {
+        List<com.forgeagent.agent.domain.bo.EvalCasesAddBo.CaseItem> items = bo.getCases();
+        if (items == null || items.isEmpty()) {
             throw new ServiceException("cases 必须是数组");
         }
         int count = 0;
-        for (Object item : cases) {
-            if (!(item instanceof Map<?, ?> row)) {
-                continue;
-            }
-            String question = text(row.get("question"));
+        for (com.forgeagent.agent.domain.bo.EvalCasesAddBo.CaseItem row : items) {
+            String question = row.getQuestion();
             if (StringUtils.isBlank(question)) {
                 continue;
             }
-            boolean refusal = Boolean.TRUE.equals(row.get("expectedRefusal"))
-                || "1".equals(text(row.get("expectedRefusal")))
-                || "true".equalsIgnoreCase(text(row.get("expectedRefusal")));
-            jdbc.update("""
-                    INSERT INTO agent_eval_case (dataset_id,question,expected_keywords,reference_answer,expected_refusal,create_time)
-                    VALUES (?,?,?,?,?,NOW())
-                    """, datasetId, question, text(row.get("expectedKeywords")),
-                text(row.get("referenceAnswer")), refusal ? 1 : 0);
+            boolean refusal = Boolean.TRUE.equals(row.getExpectedRefusal());
+            AgentEvalCase entity = new AgentEvalCase();
+            entity.setDatasetId(bo.getDatasetId());
+            entity.setQuestion(question);
+            entity.setExpectedKeywords(row.getExpectedKeywords());
+            entity.setReferenceAnswer(row.getReferenceAnswer());
+            entity.setExpectedRefusal(refusal ? 1 : 0);
+            caseMapper.insert(entity);
             count++;
             if (count >= MAX_CASES) {
                 break;
@@ -126,29 +150,31 @@ public class EvaluationService {
     }
 
     /** 同步执行一次评测(样本上限 50,避免长请求) */
-    public Map<String, Object> run(Long datasetId, Long agentId, boolean judgeEnabled) {
+    public com.forgeagent.agent.domain.vo.EvalRunOutcomeVo run(com.forgeagent.agent.domain.bo.EvalRunStartBo bo) {
+        Long datasetId = bo.getDatasetId();
+        Long agentId = bo.getAgentId();
+        boolean judgeEnabled = Boolean.TRUE.equals(bo.getJudgeEnabled());
         // D2:待确认的回流样本(review_status='0')不参与评测,否则会稀释基线
-        List<Map<String, Object>> cases = jdbc.queryForList("""
-                SELECT id,question,expected_keywords,reference_answer,expected_refusal FROM agent_eval_case
-                WHERE dataset_id=? AND (review_status IS NULL OR review_status='1')
-                ORDER BY id LIMIT ?
-                """, datasetId, MAX_CASES);
+        List<Map<String, Object>> cases = caseMapper.selectApproved(datasetId, MAX_CASES);
         if (cases.isEmpty()) {
             throw new ServiceException("评测集没有已确认的可用样本");
         }
-        List<Map<String, Object>> agentRows = jdbc.queryForList(
-            "SELECT workspace_id,config_hash FROM agent_info WHERE id=?", agentId);
-        Long workspaceId = agentRows.isEmpty() ? null : longOf(agentRows.getFirst().get("workspace_id"));
+        AgentInfo agent = agentInfoMapper.selectById(agentId);
+        Long workspaceId = agent == null ? null : agent.getWorkspaceId();
         // 记录评测时刻的配置指纹,发布门禁据此判断「评测是否覆盖当前配置」
-        String configHash = agentRows.isEmpty() ? null : text(agentRows.getFirst().get("config_hash"));
+        String configHash = agent == null ? null : agent.getConfigHash();
         Long userId = currentUserId();
-        jdbc.update("""
-                INSERT INTO agent_eval_run
-                  (dataset_id,agent_id,workspace_id,status,total_cases,judge_enabled,config_hash,create_by,create_time)
-                VALUES (?,?,?,'running',?,?,?,?,NOW())
-                """, datasetId, agentId, workspaceId, cases.size(),
-            judgeEnabled ? "1" : "0", configHash, userId);
-        Long runId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        AgentEvalRun runEntity = new AgentEvalRun();
+        runEntity.setDatasetId(datasetId);
+        runEntity.setAgentId(agentId);
+        runEntity.setWorkspaceId(workspaceId);
+        runEntity.setStatus("running");
+        runEntity.setTotalCases(cases.size());
+        runEntity.setJudgeEnabled(judgeEnabled ? "1" : "0");
+        runEntity.setConfigHash(configHash);
+        runEntity.setCreateBy(userId);
+        runMapper.insert(runEntity);
+        Long runId = runEntity.getId();
 
         List<Double> scores = new ArrayList<>();
         List<Long> latencies = new ArrayList<>();
@@ -168,7 +194,10 @@ public class EvaluationService {
                         answer = vo.getAssistantMessage() == null ? null : vo.getAssistantMessage().getContent();
                         // 评测会话不进正式会话列表
                         if (vo.getSessionId() != null) {
-                            jdbc.update("UPDATE agent_session SET temp=1 WHERE id=?", vo.getSessionId());
+                            com.forgeagent.agent.domain.AgentSession sessionEntity = new com.forgeagent.agent.domain.AgentSession();
+                            sessionEntity.setId(vo.getSessionId());
+                            sessionEntity.setTemp(1);
+                            agentSessionMapper.updateById(sessionEntity);
                         }
                     }
                 } catch (Exception e) {
@@ -199,87 +228,101 @@ public class EvaluationService {
                 if (isRefusal(answer)) {
                     refusals++;
                 }
-                jdbc.update("""
-                        INSERT INTO agent_eval_case_result
-                          (run_id,case_id,question,answer,score,judge_score,judge_reason,latency_ms,total_tokens,error_message,create_time)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,NOW())
-                        """, runId, one.get("id"), question, answer, finalScore,
-                    judgeScore, judgeReason, latency, tokens, error);
+                AgentEvalCaseResult resultEntity = new AgentEvalCaseResult();
+                resultEntity.setRunId(runId);
+                resultEntity.setCaseId(((Number) one.get("id")).longValue());
+                resultEntity.setQuestion(question);
+                resultEntity.setAnswer(answer);
+                resultEntity.setScore(java.math.BigDecimal.valueOf(finalScore));
+                resultEntity.setJudgeScore(judgeScore == null ? null : java.math.BigDecimal.valueOf(judgeScore));
+                resultEntity.setJudgeReason(judgeReason);
+                resultEntity.setLatencyMs(latency);
+                resultEntity.setTotalTokens(tokens);
+                resultEntity.setErrorMessage(error);
+                resultMapper.insert(resultEntity);
                 finished++;
-                jdbc.update("UPDATE agent_eval_run SET finished_cases=? WHERE id=?", finished, runId);
+                AgentEvalRun progress = new AgentEvalRun();
+                progress.setId(runId);
+                progress.setFinishedCases(finished);
+                runMapper.updateById(progress);
             }
             double avg = scores.stream().mapToDouble(Double::doubleValue).average().orElse(0);
             long p95 = percentile95(latencies);
             double refusalRate = refusals * 100.0 / cases.size();
             double successRate = (cases.size() - countErrors(runId)) * 100.0 / cases.size();
-            jdbc.update("""
-                    UPDATE agent_eval_run SET status='success',avg_score=?,tool_success_rate=?,
-                      refusal_rate=?,p95_latency_ms=?,total_tokens=?,finish_time=NOW() WHERE id=?
-                    """, avg, successRate, refusalRate, p95, totalTokens, runId);
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("runId", runId);
-            result.put("status", "success");
-            result.put("avgScore", avg);
-            result.put("totalCases", cases.size());
-            result.put("p95LatencyMs", p95);
-            result.put("refusalRate", refusalRate);
-            result.put("judgeEnabled", judgeEnabled);
+            AgentEvalRun done = new AgentEvalRun();
+            done.setId(runId);
+            done.setStatus("success");
+            done.setAvgScore(java.math.BigDecimal.valueOf(avg));
+            done.setToolSuccessRate(java.math.BigDecimal.valueOf(successRate));
+            done.setRefusalRate(java.math.BigDecimal.valueOf(refusalRate));
+            done.setP95LatencyMs(p95);
+            done.setTotalTokens(totalTokens);
+            done.setFinishTime(new java.util.Date());
+            runMapper.updateById(done);
+            com.forgeagent.agent.domain.vo.EvalRunOutcomeVo result = new com.forgeagent.agent.domain.vo.EvalRunOutcomeVo();
+            result.setRunId(runId);
+            result.setStatus("success");
+            result.setAvgScore(avg);
+            result.setTotalCases(cases.size());
+            result.setP95LatencyMs(p95);
+            result.setRefusalRate(refusalRate);
+            result.setJudgeEnabled(judgeEnabled);
             return result;
         } catch (Exception e) {
-            jdbc.update("UPDATE agent_eval_run SET status='failed',error_message=?,finish_time=NOW() WHERE id=?",
-                cut(e.getMessage(), 900), runId);
+            AgentEvalRun failed = new AgentEvalRun();
+            failed.setId(runId);
+            failed.setStatus("failed");
+            failed.setErrorMessage(cut(e.getMessage(), 900));
+            failed.setFinishTime(new java.util.Date());
+            runMapper.updateById(failed);
             throw new ServiceException("评测执行失败: " + e.getMessage());
         }
     }
 
-    public Map<String, Object> runDetail(Long runId) {
-        List<Map<String, Object>> runs = jdbc.queryForList("SELECT * FROM agent_eval_run WHERE id=?", runId);
-        if (runs.isEmpty()) {
+    public com.forgeagent.agent.domain.vo.EvalRunDetailVo runDetail(Long runId) {
+        AgentEvalRun run = runMapper.selectById(runId);
+        if (run == null) {
             throw new ServiceException("评测任务不存在");
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("run", runs.getFirst());
-        result.put("results", jdbc.queryForList("""
-                SELECT id,case_id,question,answer,score,judge_score,judge_reason,latency_ms,error_message
-                FROM agent_eval_case_result WHERE run_id=? ORDER BY id
-                """, runId));
-        return result;
+        com.forgeagent.agent.domain.vo.EvalRunDetailVo detail = new com.forgeagent.agent.domain.vo.EvalRunDetailVo();
+        detail.setRun(MAPPER.convertValue(run, com.forgeagent.agent.domain.vo.AgentEvalRunVo.class));
+        detail.setResults(runMapper.selectResults(runId));
+        return detail;
     }
 
-    public List<Map<String, Object>> listRuns(Long agentId) {
-        return jdbc.queryForList("""
-                SELECT id,dataset_id,agent_id,status,total_cases,finished_cases,avg_score,
-                  tool_success_rate,refusal_rate,p95_latency_ms,judge_enabled,create_time,finish_time
-                FROM agent_eval_run WHERE agent_id=? ORDER BY id DESC LIMIT 50
-                """, agentId);
+    public List<com.forgeagent.agent.domain.vo.AgentEvalRunVo> listRuns(Long agentId) {
+        return runMapper.listByAgent(agentId);
     }
 
     /** 从一次成功评测生成黄金基线(单 active,旧基线自动失效) */
     public Long createBaseline(Long runId) {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-            "SELECT * FROM agent_eval_run WHERE id=? AND status='success'", runId);
-        if (rows.isEmpty()) {
+        AgentEvalRun run = runMapper.selectById(runId);
+        if (run == null || !"success".equals(run.getStatus())) {
             throw new ServiceException("只有成功的评测任务可以设为基线");
         }
-        Map<String, Object> run = rows.getFirst();
         Map<String, Object> metrics = new LinkedHashMap<>();
-        metrics.put("avgScore", run.get("avg_score"));
-        metrics.put("toolSuccessRate", run.get("tool_success_rate"));
-        metrics.put("refusalRate", run.get("refusal_rate"));
-        metrics.put("p95LatencyMs", run.get("p95_latency_ms"));
-        jdbc.update("UPDATE agent_eval_baseline SET active='0' WHERE agent_id=?", run.get("agent_id"));
-        jdbc.update("""
-                INSERT INTO agent_eval_baseline (agent_id,dataset_id,run_id,metrics_json,active,create_by,create_time)
-                VALUES (?,?,?,?,'1',?,NOW())
-                """, run.get("agent_id"), run.get("dataset_id"), runId,
-            JsonUtils.toJsonString(metrics), currentUserId());
-        return jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        metrics.put("avgScore", run.getAvgScore());
+        metrics.put("toolSuccessRate", run.getToolSuccessRate());
+        metrics.put("refusalRate", run.getRefusalRate());
+        metrics.put("p95LatencyMs", run.getP95LatencyMs());
+        // 旧基线失效(MP updateById 忽略 null,用 LambdaUpdateWrapper 明确置值)
+        baselineMapper.update(null, Wrappers.<AgentEvalBaseline>lambdaUpdate()
+            .eq(AgentEvalBaseline::getAgentId, run.getAgentId())
+            .set(AgentEvalBaseline::getActive, "0"));
+        AgentEvalBaseline baseline = new AgentEvalBaseline();
+        baseline.setAgentId(run.getAgentId());
+        baseline.setDatasetId(run.getDatasetId());
+        baseline.setRunId(runId);
+        baseline.setMetricsJson(JsonUtils.toJsonString(metrics));
+        baseline.setActive("1");
+        baseline.setCreateBy(currentUserId());
+        baselineMapper.insert(baseline);
+        return baseline.getId();
     }
 
     public Map<String, Object> activeBaseline(Long agentId) {
-        List<Map<String, Object>> rows = jdbc.queryForList("""
-                SELECT * FROM agent_eval_baseline WHERE agent_id=? AND active='1' ORDER BY id DESC LIMIT 1
-                """, agentId);
+        List<Map<String, Object>> rows = baselineMapper.selectActive(agentId);
         return rows.isEmpty() ? Map.of() : rows.getFirst();
     }
 
@@ -289,21 +332,14 @@ public class EvaluationService {
     /** LLM-as-Judge;模型不可用或输出非法时返回 null,由规则分兜底 */
     private Judge llmJudge(Long agentId, String question, String answer, String reference, boolean expectedRefusal) {
         try {
-            List<Map<String, Object>> models = jdbc.queryForList("""
-                    SELECT m.base_url,m.api_key,m.model_name FROM agent_model m
-                    JOIN agent_info a ON a.model_id=m.id WHERE a.id=? LIMIT 1
-                    """, agentId);
-            if (models.isEmpty()) {
+            AgentInfo agent = agentInfoMapper.selectById(agentId);
+            if (agent == null || agent.getModelId() == null) {
                 return null;
             }
-            Map<String, Object> cfg = models.getFirst();
-            if (text(cfg.get("base_url")) == null || text(cfg.get("api_key")) == null) {
+            AgentModel model = agentModelMapper.selectById(agent.getModelId());
+            if (model == null || text(model.getBaseUrl()) == null || text(model.getApiKey()) == null) {
                 return null;
             }
-            AgentModel model = new AgentModel();
-            model.setBaseUrl(text(cfg.get("base_url")));
-            model.setApiKey(text(cfg.get("api_key")));
-            model.setModelName(text(cfg.get("model_name")));
             String prompt = "问题:" + question + "\n助手回答:" + cut(answer, 2000)
                 + "\n参考答案:" + (reference == null ? "无" : cut(reference, 1000))
                 + (expectedRefusal ? "\n(本用例期望模型拒答:知识库无相关资料时应明确告知)" : "");
@@ -380,10 +416,9 @@ public class EvaluationService {
     }
 
     private int countErrors(Long runId) {
-        Integer count = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM agent_eval_case_result WHERE run_id=? AND error_message IS NOT NULL",
-            Integer.class, runId);
-        return count == null ? 0 : count;
+        return resultMapper.selectCount(Wrappers.<AgentEvalCaseResult>lambdaQuery()
+            .eq(AgentEvalCaseResult::getRunId, runId)
+            .isNotNull(AgentEvalCaseResult::getErrorMessage)).intValue();
     }
 
     private static long percentile95(List<Long> values) {

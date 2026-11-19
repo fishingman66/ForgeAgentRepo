@@ -4,12 +4,12 @@ import request from '@/utils/request';
 /** ============ P1 / B1 版本快照 ============ */
 export interface VersionItem {
   id: number;
-  agent_id: number;
-  version_no: number;
-  config_hash: string;
+  agentId: number;
+  versionNo: number;
+  configHash: string;
   remark: string;
   source: string;
-  create_time: string;
+  createTime: string;
 }
 
 export interface VersionDiff {
@@ -58,26 +58,26 @@ export const approveWaiver = (id: number, approve: boolean) =>
 /** ============ P1 / B2 Prompt 模板中心 ============ */
 export interface PromptTemplate {
   id: number;
-  workspace_id: number;
+  workspaceId: number;
   name: string;
   description?: string;
   category: string;
-  stable_version_id?: number;
+  stableVersionId?: number;
   status: string;
-  create_time: string;
+  createTime: string;
   content?: string;
-  variable_schema?: string;
+  variableSchema?: string;
 }
 
 export interface PromptVersion {
   id: number;
   template_id: number;
-  version_no: number;
-  content_hash: string;
+  versionNo: number;
+  contentHash: string;
   remark?: string;
-  create_time: string;
+  createTime: string;
   content?: string;
-  variable_schema?: string;
+  variableSchema?: string;
 }
 
 export const listPromptTemplates = (workspaceId?: string | number): AxiosPromise<PromptTemplate[]> =>
@@ -109,29 +109,29 @@ export interface EvalDataset {
   id: number;
   name: string;
   description?: string;
-  workspace_id: number;
-  case_count: number;
-  create_time: string;
+  workspaceId: number;
+  caseCount: number;
+  createTime: string;
 }
 
 export interface EvalCase {
   id: number;
   question: string;
-  expected_keywords?: string;
+  expectedKeywords?: string;
   reference_answer?: string;
 }
 
 export interface EvalRun {
   id: number;
   status: string;
-  avg_score?: number;
-  total_cases: number;
-  finished_cases: number;
-  p95_latency_ms?: number;
-  refusal_rate?: number;
-  tool_success_rate?: number;
-  judge_enabled: string;
-  create_time: string;
+  avgScore?: number;
+  totalCases: number;
+  finishedCases: number;
+  p95LatencyMs?: number;
+  refusalRate?: number;
+  toolSuccessRate?: number;
+  judgeEnabled: string;
+  createTime: string;
 }
 
 export const listEvalDatasets = (workspaceId?: string | number): AxiosPromise<EvalDataset[]> =>

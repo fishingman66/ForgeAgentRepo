@@ -128,7 +128,7 @@ public class CsAssistMetricService {
      * 看板数据:最近 N 天日指标 + 汇总。
      * 汇总的采纳率按条数重新算,不取各日均值——日均值会让低量天数权重失真。
      */
-    public Map<String, Object> overview(Long workspaceId, int days) {
+    public com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo overview(Long workspaceId, int days) {
         int span = Math.max(1, Math.min(90, days));
         List<CsAssistMetricDaily> rows = new ArrayList<>();
         for (int i = 0; i < span; i++) {
@@ -142,29 +142,30 @@ public class CsAssistMetricService {
         long intentTotal = rows.stream().mapToLong(r -> nz(r.getIntentCount())).sum();
         long recycledTotal = rows.stream().mapToLong(r -> nz(r.getRecycledCount())).sum();
 
-        Map<String, Object> total = new LinkedHashMap<>();
-        total.put("suggestionCount", suggestionTotal);
-        total.put("adoptedCount", adoptedTotal);
-        total.put("adoptRate", adoptRate(adoptedTotal, suggestionTotal));
-        total.put("actionCount", actionTotal);
-        total.put("intentCount", intentTotal);
-        total.put("intentRate", adoptRate(intentTotal, suggestionTotal));
-        total.put("recycledCount", recycledTotal);
+        com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo.Total total =
+            new com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo.Total();
+        total.setSuggestionCount(suggestionTotal);
+        total.setAdoptedCount(adoptedTotal);
+        total.setAdoptRate(adoptRate(adoptedTotal, suggestionTotal));
+        total.setActionCount(actionTotal);
+        total.setIntentCount(intentTotal);
+        total.setIntentRate(adoptRate(intentTotal, suggestionTotal));
+        total.setRecycledCount(recycledTotal);
 
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("days", rows);
-        data.put("total", total);
-        data.put("rateBasis", "推荐条数");
+        com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo data =
+            new com.forgeagent.customerservice.domain.vo.CsAssistOverviewVo();
+        data.setDays(rows);
+        data.setTotal(total);
+        data.setRateBasis("推荐条数");
         return data;
     }
-
     /**
      * 零采纳回流:超期未采纳 + 同会话最近 3 条全未采纳 → 生成待审 FAQ。
      *
      * @param hours 多久之前的推荐才处理(0 表示不限,验证/手动补跑时用)
      * @param limit 单次扫描上限,防止一次拉爆
      */
-    public Map<String, Object> recycle(Long workspaceId, int hours, int limit) {
+    public com.forgeagent.customerservice.domain.vo.CsRecycleResultVo recycle(Long workspaceId, int hours, int limit) {
         Date cutoff = new Date(System.currentTimeMillis() - Math.max(0, hours) * 3_600_000L);
         int cap = Math.max(1, Math.min(200, limit));
 
@@ -173,10 +174,10 @@ public class CsAssistMetricService {
                 .orderByDesc(CsConversation::getId).last("limit 500"))
             .stream().map(CsConversation::getId).toList();
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("scanned", 0);
-        result.put("recycled", 0);
-        result.put("created", 0);
+        com.forgeagent.customerservice.domain.vo.CsRecycleResultVo result = new com.forgeagent.customerservice.domain.vo.CsRecycleResultVo();
+        result.setScanned(0);
+        result.setRecycled(0);
+        result.setCreated(0);
         if (convIds.isEmpty()) {
             return result;
         }
@@ -214,9 +215,9 @@ public class CsAssistMetricService {
             markRecycled(candidate);
             recycled++;
         }
-        result.put("scanned", scanned);
-        result.put("recycled", recycled);
-        result.put("created", created);
+        result.setScanned(scanned);
+        result.setRecycled(recycled);
+        result.setCreated(created);
         log.info("[CS] 零采纳回流完成 workspaceId={} scanned={} recycled={} created={}",
             workspaceId, scanned, recycled, created);
         return result;

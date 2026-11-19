@@ -2,6 +2,10 @@ package com.forgeagent.callcenter.controller;
 
 import com.forgeagent.callcenter.domain.CsCallChannelConfig;
 import com.forgeagent.callcenter.domain.CsCallSeatState;
+import com.forgeagent.callcenter.domain.bo.CsCallChannelConfigBo;
+import com.forgeagent.callcenter.domain.bo.CsCallChannelStatusBo;
+import com.forgeagent.callcenter.domain.bo.CsCallSeatBindingBo;
+import com.forgeagent.callcenter.domain.vo.CsCallChannelConfigVo;
 import com.forgeagent.callcenter.mapper.CsCallChannelConfigMapper;
 import com.forgeagent.callcenter.mapper.CsCallSeatStateMapper;
 import org.junit.jupiter.api.Tag;
@@ -9,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -41,10 +44,26 @@ class CsVoiceOpsControllerTest {
         return c;
     }
 
+    private CsCallChannelConfigBo channelBo(String code, String provider) {
+        CsCallChannelConfigBo bo = new CsCallChannelConfigBo();
+        bo.setChannelCode(code);
+        bo.setMediaProvider(provider);
+        bo.setWorkspaceId(1L);
+        bo.setAgentId(1L);
+        bo.setStatus("0");
+        return bo;
+    }
+
+    private CsCallChannelStatusBo statusBo(String status) {
+        CsCallChannelStatusBo bo = new CsCallChannelStatusBo();
+        bo.setStatus(status);
+        return bo;
+    }
+
     @Test
     void upsertInsertsWhenAbsent() {
         when(channelMapper.selectOne(any())).thenReturn(null);
-        CsCallChannelConfig body = channel("CC_FS", "FS");
+        CsCallChannelConfigBo body = channelBo("CC_FS", "FS");
 
         var result = controller.upsertVoiceChannel(body);
 
@@ -53,6 +72,7 @@ class CsVoiceOpsControllerTest {
         verify(channelMapper).insert(cap.capture());
         assertNull(cap.getValue().getId(), "新增不应携带前端传入 id");
         assertNull(cap.getValue().getCallbackSecret(), "入口不写密钥");
+        assertEquals("FS", cap.getValue().getMediaProvider(), "入参必须落到实体");
     }
 
     @Test
@@ -61,7 +81,7 @@ class CsVoiceOpsControllerTest {
         existing.setId(9L);
         when(channelMapper.selectOne(any())).thenReturn(existing);
 
-        CsCallChannelConfig body = channel("CC_FS", "FS_MOCK");
+        CsCallChannelConfigBo body = channelBo("CC_FS", "FS_MOCK");
         var result = controller.upsertVoiceChannel(body);
 
         assertTrue(result.getCode() == 200);
@@ -72,9 +92,9 @@ class CsVoiceOpsControllerTest {
 
     @Test
     void upsertRejectsInvalidProviderAndMissingCode() {
-        CsCallChannelConfig badProvider = channel("CC_FS", "NOT_EXIST");
+        CsCallChannelConfigBo badProvider = channelBo("CC_FS", "NOT_EXIST");
         assertTrue(controller.upsertVoiceChannel(badProvider).getCode() != 200);
-        CsCallChannelConfig noCode = channel(null, "FS");
+        CsCallChannelConfigBo noCode = channelBo(null, "FS");
         assertTrue(controller.upsertVoiceChannel(noCode).getCode() != 200);
         verify(channelMapper, never()).insert(any(CsCallChannelConfig.class));
     }
@@ -85,37 +105,38 @@ class CsVoiceOpsControllerTest {
         withSecret.setCallbackSecret("cipher-text");
         when(channelMapper.selectList(any())).thenReturn(List.of(withSecret, channel("A1", "AICC")));
 
-        List<CsCallChannelConfig> rows = controller.voiceChannels().getData();
+        List<CsCallChannelConfigVo> rows = controller.voiceChannels().getData();
         assertEquals("__SET__", rows.get(0).getCallbackSecret(), "已配置密钥只回显置位标记");
         assertNull(rows.get(1).getCallbackSecret());
-        assertNull(rows.get(0).getVoiceConfigJson());
     }
 
     @Test
     void toggleValidatesStatusValue() {
-        assertTrue(controller.toggleVoiceChannel(1L, Map.of("status", "9")).getCode() != 200);
+        assertTrue(controller.toggleVoiceChannel(1L, statusBo("9")).getCode() != 200);
         CsCallChannelConfig channel = channel("CC_FS", "FS");
         channel.setId(1L);
         when(channelMapper.selectById(1L)).thenReturn(channel);
-        assertTrue(controller.toggleVoiceChannel(1L, Map.of("status", "1")).getCode() == 200);
+        assertTrue(controller.toggleVoiceChannel(1L, statusBo("1")).getCode() == 200);
         assertEquals("1", channel.getStatus());
     }
 
     @Test
     void bindSeatInsertsAndUpdates() {
         when(seatStateMapper.selectOne(any())).thenReturn(null);
-        CsCallSeatState bind = new CsCallSeatState();
+        CsCallSeatBindingBo bind = new CsCallSeatBindingBo();
         bind.setWorkNo("1001");
         bind.setExtension("1001");
         assertTrue(controller.bindSeat(bind).getCode() == 200);
-        verify(seatStateMapper).insert(bind);
-        assertEquals("OFFLINE", bind.getReadyState(), "新坐席默认 OFFLINE");
+        ArgumentCaptor<CsCallSeatState> inserted = ArgumentCaptor.forClass(CsCallSeatState.class);
+        verify(seatStateMapper).insert(inserted.capture());
+        assertEquals("OFFLINE", inserted.getValue().getReadyState(), "新坐席默认 OFFLINE");
+        assertEquals("1001", inserted.getValue().getExtension());
 
         CsCallSeatState existing = new CsCallSeatState();
         existing.setId(7L);
         existing.setWorkNo("1001");
         when(seatStateMapper.selectOne(any())).thenReturn(existing);
-        CsCallSeatState update = new CsCallSeatState();
+        CsCallSeatBindingBo update = new CsCallSeatBindingBo();
         update.setWorkNo("1001");
         update.setExtension("5001");
         assertTrue(controller.bindSeat(update).getCode() == 200);
@@ -125,7 +146,7 @@ class CsVoiceOpsControllerTest {
 
     @Test
     void bindSeatRequiresWorkNo() {
-        CsCallSeatState noWorkNo = new CsCallSeatState();
+        CsCallSeatBindingBo noWorkNo = new CsCallSeatBindingBo();
         assertTrue(controller.bindSeat(noWorkNo).getCode() != 200);
         verify(seatStateMapper, never()).insert(any(CsCallSeatState.class));
     }

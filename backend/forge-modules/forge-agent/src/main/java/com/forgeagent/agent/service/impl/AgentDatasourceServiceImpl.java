@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.forgeagent.agent.domain.AgentDatasource;
 import com.forgeagent.agent.domain.bo.AgentDatasourceBo;
+import com.forgeagent.agent.domain.vo.AgentDatasourceTableVo;
 import com.forgeagent.agent.domain.vo.AgentDatasourceVo;
 import com.forgeagent.agent.mapper.AgentDatasourceMapper;
 import com.forgeagent.agentcore.service.AuditLogHelper;
@@ -195,7 +196,7 @@ public class AgentDatasourceServiceImpl implements IAgentDatasourceService {
     }
 
     @Override
-    public List<Map<String, Object>> listTables(Long id) {
+    public List<AgentDatasourceTableVo> listTables(Long id) {
         AgentDatasource ds = datasourceMapper.selectById(id);
         if (ds == null) {
             throw new ServiceException("数据源不存在");
@@ -208,11 +209,11 @@ public class AgentDatasourceServiceImpl implements IAgentDatasourceService {
         if (tables == null) {
             return List.of();
         }
-        List<Map<String, Object>> result = new java.util.ArrayList<>(tables.size());
+        List<AgentDatasourceTableVo> result = new java.util.ArrayList<>(tables.size());
         for (SqlQueryService.TableSchema t : tables) {
-            Map<String, Object> item = new java.util.LinkedHashMap<>();
-            item.put("name", t.name());
-            item.put("comment", t.comment());
+            AgentDatasourceTableVo item = new AgentDatasourceTableVo();
+            item.setName(t.name());
+            item.setComment(t.comment());
             result.add(item);
         }
         return result;

@@ -141,6 +141,12 @@ public class AgentInfo extends BaseEntity {
     private Integer version;
 
     /**
+     * D1 灰度放量百分比(0-100, 命中=走快照版锁发布配置, 默认 100=全量锁版, 0=关闭全走现行版)。
+     * 仅客服域生效: 会话创建时 hash(visitorId)%100 < 该值 决定走快照版还是现行版。
+     */
+    private Integer rolloutPercent;
+
+    /**
      * 当前生效的发布版本号
      */
     private Integer publishedVersion;

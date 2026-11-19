@@ -21,5 +21,7 @@ public class CsConversation {
     private Integer sentimentStreak;
     /** B1:最近一轮访客情绪分([-1,1],负面为负)。 */
     private java.math.BigDecimal lastSentimentScore;
+    /** D1:灰度会话锁定的配置版本(agent_version.version_no),NULL=现行版;会话创建时判定一次不再变。 */
+    private Integer pinnedVersion;
     private Date lastVisitorAt, lastSeatAt, csatInvitedAt, createTime, updateTime;
 }

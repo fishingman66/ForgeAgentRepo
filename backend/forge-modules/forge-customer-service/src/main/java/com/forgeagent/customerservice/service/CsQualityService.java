@@ -76,17 +76,16 @@ public class CsQualityService {
         return content.contains(pattern);
     }
 
-    public List<CsQualityRule> rules(Long workspaceId) {
-        return ruleMapper.selectList(new LambdaQueryWrapper<CsQualityRule>()
+    public List<com.forgeagent.customerservice.domain.vo.CsQualityRuleVo> rules(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(ruleMapper.selectList(new LambdaQueryWrapper<CsQualityRule>()
             .and(w -> w.isNull(CsQualityRule::getWorkspaceId)
                 .or().eq(CsQualityRule::getWorkspaceId, workspaceId))
-            .orderByAsc(CsQualityRule::getId));
+            .orderByAsc(CsQualityRule::getId)), com.forgeagent.customerservice.domain.vo.CsQualityRuleVo.class);
     }
 
-    public CsQualityRule saveRule(CsQualityRule rule) {
-        if (rule.getPattern() == null || rule.getPattern().isBlank()) {
-            throw new ServiceException("规则内容不能为空");
-        }
+    public com.forgeagent.customerservice.domain.vo.CsQualityRuleVo saveRule(com.forgeagent.customerservice.domain.bo.CsQualityRuleSaveBo bo, Long workspaceId) {
+        CsQualityRule rule = com.forgeagent.common.core.utils.MapstructUtils.convert(bo, CsQualityRule.class);
+        rule.setWorkspaceId(workspaceId);
         rule.setEnabled(rule.getEnabled() == null ? "1" : rule.getEnabled());
         rule.setRuleType(rule.getRuleType() == null ? "KEYWORD" : rule.getRuleType());
         rule.setCreateTime(new Date());
@@ -95,22 +94,22 @@ public class CsQualityService {
         } else {
             ruleMapper.updateById(rule);
         }
-        return rule;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(rule, com.forgeagent.customerservice.domain.vo.CsQualityRuleVo.class);
     }
 
-    public List<CsQualityCheck> checks(Long workspaceId) {
-        return checkMapper.selectList(new LambdaQueryWrapper<CsQualityCheck>()
+    public List<com.forgeagent.customerservice.domain.vo.CsQualityCheckVo> checks(Long workspaceId) {
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(checkMapper.selectList(new LambdaQueryWrapper<CsQualityCheck>()
             .eq(CsQualityCheck::getWorkspaceId, workspaceId)
-            .orderByDesc(CsQualityCheck::getId).last("limit 200"));
+            .orderByDesc(CsQualityCheck::getId).last("limit 200")), com.forgeagent.customerservice.domain.vo.CsQualityCheckVo.class);
     }
 
-    public CsQualityCheck review(Long id, String status) {
+    public com.forgeagent.customerservice.domain.vo.CsQualityCheckVo review(Long id, String status) {
         CsQualityCheck check = checkMapper.selectById(id);
         if (check == null) {
             throw new ServiceException("质检记录不存在");
         }
         check.setReviewStatus(status);
         checkMapper.updateById(check);
-        return check;
+        return com.forgeagent.common.core.utils.MapstructUtils.convert(check, com.forgeagent.customerservice.domain.vo.CsQualityCheckVo.class);
     }
 }

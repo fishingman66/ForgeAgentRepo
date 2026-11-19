@@ -37,6 +37,16 @@ public interface CsChatFacade {
     boolean hasExecutableTools(Long agentId);
 
     /**
+     * D1 灰度:会话创建时判定该访客是否命中灰度,返回要锁定的配置版本号。
+     *
+     * <p>判定只做一次并由调用方写入 {@code agent_cs_conversation.pinned_version},
+     * 同会话后续轮次用同一版本(会话锁版本,ADR-03)。命中条件
+     * {@code hash(visitorId)%100 < rollout_percent};灰度关闭、无发布版本或查询异常
+     * 一律返回 null(走现行版),fail-safe 不阻断会话创建。</p>
+     */
+    Integer decidePinnedVersion(Long agentId, Long visitorId);
+
+    /**
      * 客服对话请求。
      *
      * @param sessionId          客服会话对应的 agent_session.id(新建时为空)
@@ -87,7 +97,14 @@ public interface CsChatFacade {
      * 未配置身份绑定的渠道 WRITE/HIGH_RISK 工具一律 deny(fail-closed)。</p>
      */
     record GuardContext(Long conversationId, Long visitorId, Long workspaceId,
-                        String channelCode, boolean identityBindingEnabled) {
+                        String channelCode, boolean identityBindingEnabled,
+                        Integer pinnedVersion) {
+
+        /** 兼容入口:不带灰度版本(存量会话/工具护栏单测)。 */
+        public GuardContext(Long conversationId, Long visitorId, Long workspaceId,
+                            String channelCode, boolean identityBindingEnabled) {
+            this(conversationId, visitorId, workspaceId, channelCode, identityBindingEnabled, null);
+        }
     }
 
     /**

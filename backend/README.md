@@ -147,10 +147,10 @@ java -Dserver.port=8080 -Dfile.encoding=UTF-8 -jar forge-admin/target/forge-admi
 
 ## 模块测试
 
-后端共 **817 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
+后端共 **828 用例**，分模块如下。根 pom 默认 `maven.test.skip=true`，**必须同时写 `-Dmaven.test.skip=false` 与 `-DskipTests=false`**（只写后者 test-compile 与执行都会被跳过）：
 
 ```bash
-# Agent 平台 206：32 个测试类（批次 A/B 增量 + 批次 C 工具护栏/审计 + 技能安装管理 + P1-B 技能版本/快照）（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
+# Agent 平台 218：34 个测试类（批次 A/B 增量 + 批次 C 工具护栏/审计 + 技能安装管理 + P1-B 技能版本/快照）（检索链路与引用门禁 / 表达式引擎 / 图校验器 / 资源域守卫 / 记忆预算 / MCP 空间归属 / 工作流执行体 / 问数标识校验等）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-agent -am
 # 知识库/RAG 204：32 个测试类（解析清洗 / 分块偏移 / 阈值回执 / 向量 gRPC 契约 13 + 真机闭环 2 / MCP / 评测门禁 / 可见性 / 图路 / SSRF / 参数覆盖 / 抽图 / 描述 / 密钥 / 模型解析）
 mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/forge-rag -am
@@ -158,7 +158,7 @@ mvn -Pdev test "-Dmaven.test.skip=false" "-DskipTests=false" -pl forge-modules/f
 mvn -Pdev test "-Dtest=CsModulePropertiesTest,CsTicketStatusTest,CsChannelGuardTest,CsKnowledgeAnswerServiceTest,WechatMpChannelAdapterTest,CsSecretCipherTest,CsLocalePolicyTest,SeatAssistServiceTest,SeatAssistVoiceTest,SeatAssistActionsTest,CsIntentServiceTest,CsAssistMetricServiceTest,CsHandoffKeywordsTest,CsSensitiveWordServiceTest,CsSemanticCacheServiceTest,CsSlotFillingServiceTest,CsKnowledgeGapServiceTest,CsCostServiceTest,CsAgentRouteServiceTest,CsKnowledgeGraphServiceTest,CsKgQueryExpanderTest,CsKgExpandMetricServiceTest,CsVisitorServiceZeroHitTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-customer-service -am
-# 契约层 13：事件常量 8 / 验签 3 / PII 脱敏 2
+# 契约层 19：事件常量 8 / 验签 3 / PII 脱敏 2 / 词表情绪 6（B1 上移）
 mvn -Pdev test "-Dtest=CsContractConstantsTest,CsChannelSignatureTest,CsPiiMaskerTest" \
   "-Dsurefire.failIfNoSpecifiedTests=false" "-Dmaven.test.skip=false" "-DskipTests=false" \
   -pl forge-modules/forge-callcenter-common -am

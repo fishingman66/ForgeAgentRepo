@@ -1,9 +1,8 @@
 package com.forgeagent.rag.service;
 
 import com.forgeagent.rag.domain.bo.KbVlmConfigBo;
+import com.forgeagent.rag.domain.vo.KbVlmConfigTestVo;
 import com.forgeagent.rag.domain.vo.KbVlmConfigVo;
-
-import java.util.Map;
 
 /**
  * 图片识别模型配置服务(按工作空间):保存/读取/连通性测试
@@ -24,7 +23,7 @@ public interface KbVlmConfigService {
     void save(KbVlmConfigBo bo);
 
     /**
-     * 连通性测试:用入参(或已存密文)发一次最小请求,返回 {ok, message, model}
+     * 连通性测试:用入参(或已存密文)发一次最小请求,返回 ok/message/model
      */
-    Map<String, Object> test(KbVlmConfigBo bo);
+    KbVlmConfigTestVo test(KbVlmConfigBo bo);
 }

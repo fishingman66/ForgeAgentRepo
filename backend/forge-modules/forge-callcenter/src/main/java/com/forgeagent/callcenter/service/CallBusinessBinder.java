@@ -61,12 +61,12 @@ public class CallBusinessBinder {
         try {
             String external = call.getCallerNumber() == null || call.getCallerNumber().isBlank()
                 ? call.getCallId() : call.getCallerNumber();
-            Map<String, Object> session = visitorService.createSession(channel, external);
-            Object conversationId = session.get("conversationId");
-            if (conversationId instanceof Long cid) {
-                call.setConversationId(cid);
+            com.forgeagent.customerservice.domain.vo.CsSendResultVo session =
+                visitorService.createSession(channel, external);
+            if (session != null && session.getConversationId() != null) {
+                call.setConversationId(session.getConversationId());
                 callMapper.updateById(call);
-                log.info("[CC] 通话 {} 已绑定会话 {}", call.getCallId(), cid);
+                log.info("[CC] 通话 {} 已绑定会话 {}", call.getCallId(), session.getConversationId());
             }
         } catch (Exception e) {
             log.error("[CC] 通话建会话失败 callId={}: {}", call.getCallId(), e.getMessage());

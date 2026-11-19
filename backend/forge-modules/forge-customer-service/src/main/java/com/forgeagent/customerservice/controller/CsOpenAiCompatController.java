@@ -98,8 +98,8 @@ public class CsOpenAiCompatController extends BaseController {
             writeStream(channel, cid, visitorId, content, model, completionId, created, fingerprint, response);
             return;
         }
-        Map<String, Object> result = visitorService.send(channel, cid, visitorId, null, content);
-        String reply = result.get("content") == null ? "" : String.valueOf(result.get("content"));
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result = visitorService.send(channel, cid, visitorId, null, content);
+        String reply = result == null || result.getContent() == null ? "" : result.getContent();
         writeJson(response, completion(model, completionId, created, fingerprint, reply));
     }
 
@@ -228,9 +228,8 @@ public class CsOpenAiCompatController extends BaseController {
         if (active != null) {
             return active.getId();
         }
-        Map<String, Object> session = visitorService.createSession(channel, "openai-" + visitorId);
-        Object cid = session.get("conversationId");
-        return cid == null ? null : Long.valueOf(String.valueOf(cid));
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo session = visitorService.createSession(channel, "openai-" + visitorId);
+        return session == null || session.getConversationId() == null ? null : session.getConversationId();
     }
 
     /** 取最后一条 user 消息的内容(兼容 content 为字符串或分段数组)。 */

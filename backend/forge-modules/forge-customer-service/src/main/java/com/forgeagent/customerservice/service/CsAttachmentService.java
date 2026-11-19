@@ -70,24 +70,24 @@ public class CsAttachmentService {
     }
 
     /** 坐席查看:按会话列附件(不含缩略图,避免列表响应过大)。 */
-    public List<Map<String, Object>> list(Long workspaceId, Long conversationId) {
+    public List<com.forgeagent.customerservice.domain.vo.CsAttachmentItemVo> list(Long workspaceId, Long conversationId) {
         CsConversation conv = requireConversation(workspaceId, conversationId);
         List<AgentChatAttachment> rows = attachmentMapper.selectList(
             new LambdaQueryWrapper<AgentChatAttachment>()
                 .eq(AgentChatAttachment::getSessionId, conv.getAgentSessionId())
                 .eq(AgentChatAttachment::getStatus, "0")
                 .orderByAsc(AgentChatAttachment::getId));
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<com.forgeagent.customerservice.domain.vo.CsAttachmentItemVo> result = new ArrayList<>();
         for (AgentChatAttachment row : rows) {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", row.getId());
-            item.put("name", row.getOriginalName());
-            item.put("mediaType", row.getMediaType());
-            item.put("kind", row.getKind());
-            item.put("fileExt", row.getFileExt());
-            item.put("fileSize", row.getFileSize());
-            item.put("parseStatus", row.getParseStatus());
-            item.put("summary", row.getSummary());
+            com.forgeagent.customerservice.domain.vo.CsAttachmentItemVo item = new com.forgeagent.customerservice.domain.vo.CsAttachmentItemVo();
+            item.setId(row.getId());
+            item.setName(row.getOriginalName());
+            item.setMediaType(row.getMediaType());
+            item.setKind(row.getKind());
+            item.setFileExt(row.getFileExt());
+            item.setFileSize(row.getFileSize());
+            item.setParseStatus(row.getParseStatus());
+            item.setSummary(row.getSummary());
             result.add(item);
         }
         return result;

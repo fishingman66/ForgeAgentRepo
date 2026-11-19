@@ -7,7 +7,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.forgeagent.agent.mapper.AgentEvalBaselineMapper;
+import com.forgeagent.agent.mapper.AgentEvalRunMapper;
+import com.forgeagent.agent.mapper.AgentRunMapper;
+import com.forgeagent.agent.mapper.AgentSkillMapper;
+import com.forgeagent.agent.mapper.ReleaseGateExecutionMapper;
+import com.forgeagent.agent.mapper.ReleaseGatePolicyMapper;
+import com.forgeagent.agent.mapper.ReleaseGateWaiverMapper;
 
 import java.util.List;
 
@@ -18,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -31,8 +38,13 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ReleaseGateServiceEvaluateTest {
 
-    @Mock
-    private JdbcTemplate jdbc;
+    @Mock private ReleaseGateExecutionMapper executionMapper;
+    @Mock private ReleaseGateWaiverMapper waiverMapper;
+    @Mock private ReleaseGatePolicyMapper policyMapper;
+    @Mock private AgentEvalRunMapper evalRunMapper;
+    @Mock private AgentEvalBaselineMapper baselineMapper;
+    @Mock private AgentRunMapper agentRunMapper;
+    @Mock private AgentSkillMapper skillMapper;
 
     @InjectMocks
     private ReleaseGateService service;
@@ -48,8 +60,12 @@ class ReleaseGateServiceEvaluateTest {
     }
 
     private void stubEmptySamples() {
-        when(jdbc.queryForList(anyString(), any(Object[].class))).thenReturn(List.of());
-        when(jdbc.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        lenient().when(policyMapper.selectApplicable(any())).thenReturn(List.of());
+        lenient().when(evalRunMapper.latestSuccess(any())).thenReturn(List.of());
+        lenient().when(baselineMapper.latestMetrics(any())).thenReturn(List.of());
+        lenient().when(agentRunMapper.recent7dMetrics(any())).thenReturn(List.of());
+        lenient().when(skillMapper.disabledSkillNames(any())).thenReturn(List.of());
+        lenient().when(waiverMapper.countApprovedActive(any())).thenReturn(0);
     }
 
     @Test
@@ -59,7 +75,7 @@ class ReleaseGateServiceEvaluateTest {
         assertTrue(result.passed());
         assertFalse(result.sampleAvailable());
         assertTrue(result.checks().containsKey("note"));
-        verify(jdbc, never()).update(anyString(), any(Object[].class));
+        verify(executionMapper, never()).insert(any(com.forgeagent.agent.domain.ReleaseGateExecution.class));
     }
 
     @Test
@@ -67,7 +83,7 @@ class ReleaseGateServiceEvaluateTest {
         stubEmptySamples();
         ReleaseGateService.GateResult result = service.preview(agent());
         assertTrue(result.passed());
-        verify(jdbc, times(1)).update(anyString(), any(Object[].class));
+        verify(executionMapper, times(1)).insert(any(com.forgeagent.agent.domain.ReleaseGateExecution.class));
     }
 
     @Test
@@ -91,8 +107,7 @@ class ReleaseGateServiceEvaluateTest {
     @Test
     void disabledInstalledSkillBlocksRelease() {
         stubEmptySamples();
-        // 更具体的 stub 放在后面,优先于 anyString 的全局空返回
-        when(jdbc.queryForList(contains("JOIN agent_skill s"), any(Object[].class)))
+        lenient().when(skillMapper.disabledSkillNames(any()))
             .thenReturn(List.of(java.util.Map.of("name", "退换货处理")));
 
         ReleaseGateService.GateResult result = service.evaluate(agent());

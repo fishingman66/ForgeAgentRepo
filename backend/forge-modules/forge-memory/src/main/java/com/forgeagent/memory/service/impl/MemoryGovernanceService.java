@@ -3,6 +3,7 @@ package com.forgeagent.memory.service.impl;
 import com.forgeagent.memory.config.MemoryGovernanceProperties;
 import com.forgeagent.memory.domain.AgentMemory;
 import com.forgeagent.memory.mapper.AgentMemoryMapper;
+import com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo;
 import com.forgeagent.memory.mapper.MemoryGovernanceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -55,14 +55,14 @@ public class MemoryGovernanceService {
     }
 
     /** 手动触发(运维/e2e 用);返回各步的处理量 */
-    public Map<String, Long> runOnce() {
-        Map<String, Long> result = new LinkedHashMap<>();
-        result.put("archivedMessages", runArchive());
-        result.put("ttlArchived", runTtlSweep());
-        result.put("quotaEvicted", runQuotaSweep());
+    public MemoryGovernanceResultVo runOnce() {
+        MemoryGovernanceResultVo result = new MemoryGovernanceResultVo();
+        result.setArchivedMessages(runArchive());
+        result.setTtlArchived(runTtlSweep());
+        result.setQuotaEvicted(runQuotaSweep());
         if (log.isInfoEnabled()) {
             log.info("[MemoryGovernance] 治理完成: 消息归档 {} 条 / TTL 归档 {} 条 / 配额淘汰 {} 条",
-                result.get("archivedMessages"), result.get("ttlArchived"), result.get("quotaEvicted"));
+                result.getArchivedMessages(), result.getTtlArchived(), result.getQuotaEvicted());
         }
         return result;
     }

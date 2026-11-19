@@ -15,6 +15,7 @@ import com.forgeagent.memory.domain.bo.AgentMemoryBo;
 import com.forgeagent.memory.config.MemoryVectorProperties;
 import com.forgeagent.callcenter.common.CsPiiMasker;
 import com.forgeagent.memory.domain.vo.AgentMemoryVo;
+import com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo;
 import com.forgeagent.memory.mapper.AgentMemoryMapper;
 import com.forgeagent.agentcore.mapper.AgentModelMapper;
 import com.forgeagent.agentcore.service.AgentConfigCacheService;
@@ -781,7 +782,7 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
     }
 
     @Override
-    public Map<String, Long> runGovernance() {
+    public MemoryGovernanceResultVo runGovernance() {
         checkGovernanceEnabled();
         return governanceService.runOnce();
     }

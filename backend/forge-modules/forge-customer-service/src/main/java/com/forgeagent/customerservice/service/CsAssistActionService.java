@@ -49,7 +49,7 @@ public class CsAssistActionService {
     private final CsComplianceService complianceService;
 
     /** 执行一条动作;重复执行同一动作直接返回已执行,不重复发消息/流转。 */
-    public Map<String, Object> execute(Long suggestionId, String code, Long workspaceId, Long seatUserId) {
+    public com.forgeagent.customerservice.domain.vo.CsActionExecuteVo execute(Long suggestionId, String code, Long workspaceId, Long seatUserId) {
         if (!SeatAssistActions.isAllowed(code)) {
             throw new ServiceException("不支持的动作类型");
         }
@@ -81,7 +81,7 @@ public class CsAssistActionService {
         }
         CsTicket ticket = requireAssignee(ticketId, workspaceId, seatUserId);
 
-        Map<String, Object> detail;
+        Object detail;
         switch (actionCode) {
             case SeatAssistActions.REPLY, SeatAssistActions.LINK -> {
                 String content = SeatAssistActions.contentOf(action);
@@ -147,15 +147,15 @@ public class CsAssistActionService {
         }
     }
 
-    private Map<String, Object> result(Long suggestionId, String code,
-                                       Map<String, Object> detail, String message) {
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("suggestionId", suggestionId);
-        data.put("code", code);
-        data.put("executed", true);
-        data.put("message", message);
+    private com.forgeagent.customerservice.domain.vo.CsActionExecuteVo result(Long suggestionId, String code,
+                                       Object detail, String message) {
+        com.forgeagent.customerservice.domain.vo.CsActionExecuteVo data = new com.forgeagent.customerservice.domain.vo.CsActionExecuteVo();
+        data.setSuggestionId(suggestionId);
+        data.setCode(code);
+        data.setExecuted(true);
+        data.setMessage(message);
         if (detail != null) {
-            data.put("detail", detail);
+            data.setDetail(String.valueOf(detail));
         }
         return data;
     }
