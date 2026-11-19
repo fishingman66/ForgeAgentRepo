@@ -5,7 +5,7 @@ import io.agentscope.core.tool.ToolCallParam;
 import io.agentscope.core.message.ToolResultBlock;
 import lombok.extern.slf4j.Slf4j;
 import com.forgeagent.agent.service.IAgentApprovalService;
-import com.forgeagent.common.json.utils.JsonUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -25,7 +25,8 @@ import java.util.Map;
 @Slf4j
 record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName,
                         String approvalMode, Integer approvalTimeout,
-                        ApprovalContext ctx, IAgentApprovalService approvalService) implements AgentTool {
+                        ApprovalContext ctx, IAgentApprovalService approvalService,
+                        PendingApprovalRegistry registry, Long actionLogId) implements AgentTool {
 
     /**
      * 审批上下文(创建审批单所需)
@@ -34,6 +35,8 @@ record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName
     }
 
     private static final long DEFAULT_TIMEOUT_SECONDS = 120;
+    /** 不用 JsonUtils:其 <clinit> 依赖 Spring 容器,纯 Mockito 单测类加载即炸 */
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Override
     public String getName() {
@@ -57,6 +60,7 @@ record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName
             case "deny" -> Mono.just(ToolResultBlock.error(
                 "工具 [" + getName() + "] 已被平台审批策略禁用,请勿再次尝试调用,请直接说明或改用其他方式。"));
             case "ask" -> callWithApproval(param);
+            case "ask_async" -> callWithApprovalAsync(param);
             default -> delegate.callAsync(param);
         };
     }
@@ -67,7 +71,7 @@ record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName
     private Mono<ToolResultBlock> callWithApproval(ToolCallParam param) {
         String callArgs;
         try {
-            callArgs = JsonUtils.toJsonString(param.getInput() == null ? Map.of() : param.getInput());
+            callArgs = MAPPER.writeValueAsString(param.getInput() == null ? Map.of() : param.getInput());
         } catch (Exception e) {
             callArgs = "{}";
         }
@@ -99,6 +103,38 @@ record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName
                 }
                 return Mono.just(rejectedBlock(status));
             });
+    }
+
+    /**
+     * C4 ask_async:创建审批单 → 登记待执行任务 → 立即回执「已提交,等待确认」。
+     * 真正的工具执行推迟到坐席在审批中心处理后由回调桥触发,不占用 SSE 连接。
+     */
+    private Mono<ToolResultBlock> callWithApprovalAsync(ToolCallParam param) {
+        String callArgs;
+        try {
+            callArgs = MAPPER.writeValueAsString(param.getInput() == null ? Map.of() : param.getInput());
+        } catch (Exception e) {
+            callArgs = "{}";
+        }
+        final Long approvalId;
+        try {
+            approvalId = approvalService.create(ctx.sessionId(), ctx.agentId(), ctx.roundId(),
+                getName(), toolSource, serverName, callArgs);
+        } catch (Exception e) {
+            log.error("[ApprovalGate] 创建审批单失败: {}", e.getMessage(), e);
+            return Mono.just(ToolResultBlock.error("审批系统异常,工具调用被中止: " + e.getMessage()));
+        }
+        String runId = ctx.roundId();
+        if (registry != null) {
+            registry.register(approvalId,
+                new PendingApprovalRegistry.PendingTask(delegate, param, runId, actionLogId));
+        } else {
+            log.warn("[ApprovalGate] 待执行注册表为空,approvalId={} 审批通过后无法回调执行", approvalId);
+        }
+        log.info("[ApprovalGate] 工具 [{}] 异步审批已提交, approvalId={}, runId={}",
+            getName(), approvalId, runId);
+        return Mono.just(ToolResultBlock.text(
+            "操作 [" + getName() + "] 已提交,等待人工确认。确认后将自动执行并通知你,无需在此等待。"));
     }
 
     private Mono<String> queryStatus(Long approvalId) {

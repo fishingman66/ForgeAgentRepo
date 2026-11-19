@@ -96,6 +96,8 @@ public class ToolAssembler {
     private final McpConnectionPool mcpPool;
     /** 08方案 / A3:平台工具 Provider 注册表(按 toolType 路由,新增类型零改本类) */
     private final Map<String, ToolProvider> toolProviders;
+    /** C4 异步 HITL:待执行工具注册表(旧构造器传 null,仅同步 ask 路径) */
+    private final PendingApprovalRegistry pendingApprovalRegistry;
 
     public ToolAssembler(IAgentApprovalService approvalService, SqlQueryService sqlQueryService,
                          AgentDatasourceMapper datasourceMapper,
@@ -117,6 +119,33 @@ public class ToolAssembler {
         this.mcpPool = mcpPool;
         this.toolProviders = providerList == null ? Map.of() : providerList.stream()
             .collect(java.util.stream.Collectors.toMap(ToolProvider::type, p -> p));
+        this.pendingApprovalRegistry = null;
+    }
+
+    /** C4:Spring 注入带待执行注册表的完整构造器(旧构造器保留供表征测试使用)。 */
+    @org.springframework.beans.factory.annotation.Autowired
+    public ToolAssembler(IAgentApprovalService approvalService, SqlQueryService sqlQueryService,
+                         AgentDatasourceMapper datasourceMapper,
+                         com.forgeagent.rag.mapper.AgentKbChunkMapper kbChunkMapper,
+                         com.forgeagent.rag.service.IAgentKnowledgeService knowledgeService,
+                         RunWorkingMemory workingMemory,
+                         com.forgeagent.agent.config.AgentChatProperties chatProperties,
+                         McpConnectionPool mcpPool,
+                         List<ToolProvider> providerList,
+                         com.forgeagent.agent.service.IAgentSkillService skillService,
+                         PendingApprovalRegistry pendingApprovalRegistry) {
+        this.approvalService = approvalService;
+        this.sqlQueryService = sqlQueryService;
+        this.skillService = skillService;
+        this.datasourceMapper = datasourceMapper;
+        this.kbChunkMapper = kbChunkMapper;
+        this.knowledgeService = knowledgeService;
+        this.workingMemory = workingMemory;
+        this.chatProperties = chatProperties;
+        this.mcpPool = mcpPool;
+        this.toolProviders = providerList == null ? Map.of() : providerList.stream()
+            .collect(java.util.stream.Collectors.toMap(ToolProvider::type, p -> p));
+        this.pendingApprovalRegistry = pendingApprovalRegistry;
     }
 
     /**
@@ -309,7 +338,8 @@ public class ToolAssembler {
 
     private AgentTool gate(AgentTool inner, String source, String serverName,
                            String mode, Integer timeout, ApprovalGateTool.ApprovalContext ctx) {
-        return new ApprovalGateTool(inner, source, serverName, mode, timeout, ctx, approvalService);
+        return new ApprovalGateTool(inner, source, serverName, mode, timeout, ctx,
+            approvalService, pendingApprovalRegistry, null);
     }
 
     /**

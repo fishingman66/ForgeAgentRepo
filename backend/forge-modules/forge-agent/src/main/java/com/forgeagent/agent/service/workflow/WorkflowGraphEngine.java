@@ -62,6 +62,7 @@ import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
 import com.forgeagent.common.redis.utils.RedisUtils;
 import com.forgeagent.common.satoken.utils.LoginHelper;
+import com.forgeagent.common.satoken.utils.SaTokenContextBridge;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.net.URI;
@@ -115,7 +116,7 @@ public class WorkflowGraphEngine {
     private final RunEventBuffer eventBuffer;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** W8:dryRun 桩输出覆盖的外部调用节点类型(节点级超时不覆盖 knowledge,避免脱离登录态线程) */
+    /** W8:dryRun 桩输出覆盖的外部调用节点类型(节点级超时经 SaTokenContextBridge 传递登录态) */
     private static final Set<String> EXTERNAL_NODE_TYPES = Set.of("llm", "tool", "http", "loop", "code", "knowledge");
 
     /** W7:并行分支执行池(固定有界,CallerRuns 兜底防拒绝) */
@@ -394,7 +395,7 @@ public class WorkflowGraphEngine {
         String selected = null;
         for (int attempt = 1; attempt <= retries + 1; attempt++) {
             try {
-                if (timeoutMs > 0 && external && !"knowledge".equals(type)) {
+                if (timeoutMs > 0 && external) {
                     runNodeWithTimeout(node, t, vars, ctx, timeoutMs);
                 } else {
                     selected = nodeExecutors.executeNode(node, t, vars, ctx);
@@ -443,11 +444,14 @@ public class WorkflowGraphEngine {
 
     /**
      * W5:节点级超时包装(独立线程池执行,future.cancel 中断阻塞调用)。
-     * knowledge 节点不包装,避免脱离登录态线程导致 Sa-Token 权限校验失败。
+     * 子线程经 {@link SaTokenContextBridge} 恢复主线程 token,避免脱离登录态导致权限校验失真。
      */
     private void runNodeWithTimeout(JsonNode node, WorkflowTrialRunVo.NodeTrace t,
                                     Map<String, String> vars, WorkflowRunContext ctx, long timeoutMs) {
-        Future<?> future = NODE_TIMEOUT_EXECUTOR.submit(() -> nodeExecutors.executeNode(node, t, vars, ctx));
+        String saToken = ctx.fromTrigger() ? null : SaTokenContextBridge.captureToken();
+        Future<?> future = NODE_TIMEOUT_EXECUTOR.submit(
+            () -> SaTokenContextBridge.callWithToken(saToken,
+                () -> nodeExecutors.executeNode(node, t, vars, ctx)));
         try {
             future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException te) {
@@ -498,10 +502,13 @@ public class WorkflowGraphEngine {
         }
         String joinId = joins.get(0);
         String joinName = nodeMap.get(joinId).path("name").asText("");
+        // 主线程快照登录态;fromTrigger=true 本就是免登录链路,保持空上下文语义
+        String saToken = ctx.fromTrigger() ? null : SaTokenContextBridge.captureToken();
         List<CompletableFuture<BranchResult>> futures = new ArrayList<>();
         for (OutEdge edge : outs) {
             futures.add(CompletableFuture.supplyAsync(
-                () -> runBranch(edge.target(), joinId, ctx, nodeMap, adjOut, vars), WORKFLOW_EXECUTOR));
+                () -> SaTokenContextBridge.callWithToken(saToken,
+                    () -> runBranch(edge.target(), joinId, ctx, nodeMap, adjOut, vars)), WORKFLOW_EXECUTOR));
         }
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         Map<String, String> summary = new LinkedHashMap<>();

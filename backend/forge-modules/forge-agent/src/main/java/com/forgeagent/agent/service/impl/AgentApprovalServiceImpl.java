@@ -44,6 +44,10 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
     private final AgentInfoMapper agentInfoMapper;
     private final AgentConfigCacheService agentConfigCache;
     private final WorkspacePermissionHelper permissionHelper;
+    /** C4 异步 HITL:待执行工具注册表 */
+    private final com.forgeagent.agent.service.runner.PendingApprovalRegistry pendingApprovalRegistry;
+    /** C4 异步 HITL:回执经 run 级 SSE 通道推送给访客 */
+    private final com.forgeagent.agent.service.run.RunEventBuffer eventBuffer;
 
     /**
      * 工作流恢复入口(@Lazy 解决与工作流服务的循环依赖)
@@ -136,7 +140,66 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
                 log.warn("[AgentApproval] 工作流运行实例 {} 恢复失败: {}", approval.getRoundId(), e.getMessage());
             }
         }
+        // C4:ask_async 工具审批单 —— 通过后取回暂存的 delegate+param 异步执行并推回执。
+        // 条件更新已确保同一审批单仅一次 handle 成功,故这里每个 approvalId 最多消费一次。
+        if (ok && !"workflow".equals(approval.getToolSource())) {
+            callbackAsyncTool(approval, approve, note);
+        }
         return ok;
+    }
+
+    /**
+     * C4 异步审批回调:取回待执行工具,异步执行后经 run SSE 推结果回执。
+     * 拒绝时无需执行工具,只推一条「已拒绝」回执。失败只记日志,不回滚审批状态
+     * (与 workflow.resumeRun 分支容错口径一致)。
+     */
+    private void callbackAsyncTool(AgentApproval approval, boolean approve, String note) {
+        com.forgeagent.agent.service.runner.PendingApprovalRegistry.PendingTask task =
+            pendingApprovalRegistry.remove(approval.getId());
+        if (task == null) {
+            // 同步 ask / 已消费 / 实例重启后无登记项 —— 属正常,不告警刷屏
+            return;
+        }
+        String runId = task.runId();
+        String toolName = approval.getToolName();
+        if (!approve) {
+            publishReceipt(runId, "rejected", toolName,
+                StringUtils.isBlank(note) ? "人工审批拒绝了该操作" : note);
+            return;
+        }
+        try {
+            java.util.concurrent.CompletableFuture
+                .supplyAsync(() -> task.delegate().callAsync(task.param()).block())
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.warn("[C4] 审批通过后工具 [{}] 执行失败: {}", toolName, ex.getMessage());
+                        publishReceipt(runId, "failed", toolName, "审批已通过,但工具执行失败: " + ex.getMessage());
+                    } else {
+                        // 只回执执行状态,不把工具原文推给访客(可能含内部/敏感数据)
+                        publishReceipt(runId, "approved", toolName, "人工审批已通过,操作已执行完成");
+                    }
+                });
+        } catch (Exception e) {
+            log.warn("[C4] 审批回调提交失败 tool={}: {}", toolName, e.getMessage());
+            publishReceipt(runId, "failed", toolName, "审批已通过,但回调执行异常: " + e.getMessage());
+        }
+    }
+
+    /** 推一条工具审批结果回执到 run 级 SSE 通道(未知事件前端可静默忽略)。 */
+    private void publishReceipt(String runId, String status, String toolName, String message) {
+        if (StringUtils.isBlank(runId) || eventBuffer == null) {
+            return;
+        }
+        try {
+            // 不用 JsonUtils:其 <clinit> 依赖 Spring 容器,纯 Mockito 单测类加载即炸
+            String payload = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
+                java.util.Map.of("eventType", "TOOL_APPROVAL_RESULT", "status", status,
+                    "toolName", toolName == null ? "" : toolName,
+                    "message", message == null ? "" : message));
+            eventBuffer.publish(runId, "cs_approval_result", payload);
+        } catch (Exception e) {
+            log.warn("[C4] 审批结果回执推送失败 runId={}: {}", runId, e.getMessage());
+        }
     }
 
     @Override
