@@ -22,6 +22,11 @@ public class ConfluenceExtSourceConnector implements ExtSourceConnector {
     }
 
     @Override
+    public boolean available() {
+        return false;
+    }
+
+    @Override
     public List<ExtDocument> fetch(String configJson) {
         throw new ServiceException("Confluence 来源尚未接入(SPI 已就绪:实现本类 fetch 即可启用)");
     }

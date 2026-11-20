@@ -259,7 +259,7 @@ onMounted(load);
 <template>
   <div class="cs-page">
     <el-row :gutter="12">
-      <el-col v-for="item in cards" :key="item.key" :span="4">
+      <el-col v-for="item in cards" :key="item.key" :xs="12" :sm="8" :md="4">
         <el-card shadow="never">
           <div class="cs-label">{{ item.label }}</div>
           <div class="cs-value">{{ total()?.[item.key] ?? 0 }}{{ item.suffix }}</div>
@@ -323,19 +323,19 @@ onMounted(load);
         </div>
       </template>
       <el-row :gutter="12">
-        <el-col :span="6">
+        <el-col :xs="12" :md="6">
           <div class="cs-label">总 token</div>
           <div class="cs-value">{{ cost?.total.totalTokens ?? 0 }}</div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :md="6">
           <div class="cs-label">每会话 token</div>
           <div class="cs-value">{{ cost?.total.tokensPerConversation ?? 0 }}</div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :md="6">
           <div class="cs-label">每次解决 token</div>
           <div class="cs-value">{{ cost?.total.tokensPerResolved ?? 0 }}</div>
         </el-col>
-        <el-col :span="6">
+        <el-col :xs="12" :md="6">
           <div class="cs-label">参考金额</div>
           <div class="cs-value">
             {{ cost?.total.amountAvailable ? `${cost?.total.costAmount} ${cost?.total.currency}` : '—' }}

@@ -24,6 +24,8 @@ export default {
     feedbackDone: 'Thanks for your feedback',
     back: 'Back to list',
     notFound: 'Article not found or unpublished',
+    fallbackNotice: 'No content in this language yet; showing default (Chinese) articles',
+    notTranslated: 'Not translated',
     lang: 'Language',
     poweredBy: 'Powered by ForgeAgent'
   },

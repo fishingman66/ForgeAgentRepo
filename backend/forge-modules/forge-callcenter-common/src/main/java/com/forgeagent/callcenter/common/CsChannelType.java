@@ -1,8 +1,8 @@
 package com.forgeagent.callcenter.common;
 
 /**
- * 渠道类型取值(V0.5)。前 5 项与 {@code agent_cs_channel.channel_type} 的
- * 已交付取值一致(widget/h5/wechat_mp/wecom/openapi),VOICE_INBOUND 为 V1 预留。
+ * 渠道类型取值(V0.5)。已交付取值:widget/h5/wechat_mp/wecom/openapi/email;
+ * VOICE_INBOUND 为 V1 预留。
  *
  * <p>扩展方向:外呼回访(V1 后)、视频客服、小程序客服加枚举值;
  * 新渠道接入 = 文本域加 ChannelAdapter 或语音域加 CsVoiceGateway 实现,取值约束在本类收口。</p>
@@ -14,6 +14,8 @@ public enum CsChannelType {
     WECHAT_MP("wechat_mp"),
     WECOM("wecom"),
     OPENAPI("openapi"),
+    /** P3/B5:邮件工单渠道,走 IMAP 轮询而非 HTTP 回调 */
+    EMAIL("email"),
     VOICE_INBOUND("voice_inbound");
 
     private final String code;

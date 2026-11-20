@@ -58,6 +58,15 @@ public class AgentMcpServer extends BaseEntity {
      */
     private String headers;
 
+    /** C2:stdio 可执行命令(仅 serverType=stdio) */
+    private String command;
+
+    /** C2:stdio 启动参数(JSON 数组原文) */
+    private String args;
+
+    /** C2:stdio 环境变量(JSON 对象原文,可能含密钥,管理端不回显) */
+    private String env;
+
     /**
      * 请求超时(秒)
      */

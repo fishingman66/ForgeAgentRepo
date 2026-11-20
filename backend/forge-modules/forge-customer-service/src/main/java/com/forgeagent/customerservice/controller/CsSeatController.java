@@ -73,6 +73,18 @@ public class CsSeatController extends BaseController {
         return R.ok(true);
     }
 
+    /**
+     * A3:当前坐席收到的 @提及增量(游标 sinceId,首次传 0)。
+     * 坐席端定时拉取并弹提醒;空间过滤在 SQL 里做,不跨空间泄漏。
+     */
+    @GetMapping("/mentions")
+    public R<List<com.forgeagent.customerservice.domain.vo.CsTicketEventVo>> mentions(
+        @RequestParam(required = false) Long sinceId) {
+        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(
+            ticketService.mentions(currentWorkspaceId(), LoginHelper.getUserId(), sinceId),
+            com.forgeagent.customerservice.domain.vo.CsTicketEventVo.class));
+    }
+
     @PostMapping("/tickets/{id}/hold")
     public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> hold(@PathVariable Long id) {
         return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "ON_HOLD", "HOLD", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
@@ -143,7 +155,20 @@ public class CsSeatController extends BaseController {
             .eq(CsChannel::getWorkspaceId, currentWorkspaceId()).orderByDesc(CsChannel::getId));
         // C4:密钥不回显到管理端
         list.forEach(item -> item.setChannelSecret(null));
-        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(list, com.forgeagent.customerservice.domain.vo.CsChannelVo.class));
+        List<com.forgeagent.customerservice.domain.vo.CsChannelVo> vos =
+            com.forgeagent.common.core.utils.MapstructUtils.convert(list, com.forgeagent.customerservice.domain.vo.CsChannelVo.class);
+        if (vos != null) {
+            for (int i = 0; i < vos.size(); i++) {
+                // B5:EncodingAESKey 与密钥同级别,只回"是否已启用加密模式"
+                boolean encrypted = list.get(i).getEncodingAesKey() != null
+                    && !list.get(i).getEncodingAesKey().isBlank();
+                vos.get(i).setWecomEncrypted(encrypted);
+                boolean mailConfigured = list.get(i).getChannelConfig() != null
+                    && !list.get(i).getChannelConfig().isBlank();
+                vos.get(i).setChannelConfigured(mailConfigured);
+            }
+        }
+        return R.ok(vos);
     }
 
     @PostMapping("/channels")
@@ -159,13 +184,35 @@ public class CsSeatController extends BaseController {
         } else if (secretCipher != null) {
             channel.setChannelSecret(secretCipher.encrypt(secret));
         }
+        // B5:邮件渠道配置(含 IMAP/SMTP 密码)整段加密;留空表示不改动既有值
+        String mailConfig = channel.getChannelConfig();
+        if (mailConfig == null || mailConfig.isBlank()) {
+            channel.setChannelConfig(null);
+        } else if (secretCipher != null) {
+            channel.setChannelConfig(secretCipher.encrypt(mailConfig));
+        }
+        // B5:EncodingAESKey 与 channelSecret 同级别加密;留空表示不改动既有值
+        String aesKey = channel.getEncodingAesKey();
+        if (aesKey == null || aesKey.isBlank()) {
+            channel.setEncodingAesKey(null);
+        } else if (secretCipher != null) {
+            channel.setEncodingAesKey(secretCipher.encrypt(aesKey));
+        }
         if (channel.getId() == null) {
             channelMapper.insert(channel);
         } else {
             channelMapper.updateById(channel);
         }
         channel.setChannelSecret(null);
-        return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(channel, com.forgeagent.customerservice.domain.vo.CsChannelVo.class));
+        com.forgeagent.customerservice.domain.vo.CsChannelVo saved =
+            com.forgeagent.common.core.utils.MapstructUtils.convert(channel, com.forgeagent.customerservice.domain.vo.CsChannelVo.class);
+        if (saved != null) {
+            saved.setWecomEncrypted(aesKey != null && !aesKey.isBlank());
+            saved.setChannelConfigured(mailConfig != null && !mailConfig.isBlank());
+            // 实体上已改成密文,别让前端拿到
+            saved.setCorpId(channel.getCorpId());
+        }
+        return R.ok(saved);
     }
 
     @GetMapping("/seats")

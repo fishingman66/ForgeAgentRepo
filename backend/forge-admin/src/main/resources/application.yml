@@ -427,6 +427,12 @@ spring.ai.mcp:
 
 # 语音与呼叫中心(V1):dev 默认 AICC_MOCK;prod 由 CallcenterProductionReadinessValidator 拒绝 Mock 与默认密钥
 agent:
+  # P3 / C2:MCP STDIO 传输。默认 allowed-commands 为空 = 完全禁用(stdio 会以 JVM 身份拉起本机子进程)。
+  # 启用示例:allowed-commands: [node, npx, uvx];生产请配合绝对路径与最小权限账号。
+  mcp:
+    stdio:
+      allowed-commands: []
+      allow-inline-code: false
   callcenter:
     enabled: true
     provider: AICC_MOCK

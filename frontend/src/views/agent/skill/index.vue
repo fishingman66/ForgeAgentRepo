@@ -26,6 +26,7 @@
             <span class="heading-tip">声明式技能包:操作手册 + 工具/知识库引用;Agent 只加载一行摘要目录,模型经 load_skill 按需取全文</span>
           </div>
           <div class="toolbar-actions">
+            <el-button icon="Shop" @click="openMarket">技能市场</el-button>
             <el-button v-hasPermi="['agent:skill:add']" type="primary" plain icon="Plus" @click="handleAdd">新增技能</el-button>
           </div>
         </div>
@@ -168,6 +169,7 @@
         <el-button @click="installDialog.visible = false">关闭</el-button>
       </template>
     </el-dialog>
+    <SkillMarketDrawer ref="marketRef" />
   </div>
 </template>
 
@@ -175,6 +177,7 @@
 import { addSkill, changeSkillStatus, delSkill, installSkill, listInstallTargets, listSkill, uninstallSkill, updateSkill } from '@/api/agent/skill';
 import type { SkillForm, SkillInstallTargetVO, SkillQuery, SkillVO } from '@/api/agent/skill/types';
 import ResourceScopeFields from '@/views/agent/components/ResourceScopeFields.vue';
+import SkillMarketDrawer from './components/SkillMarketDrawer.vue';
 import { checkPermi } from '@/utils/permission';
 
 const { proxy } = getCurrentInstance() as ComponentInternalInstance;
@@ -183,6 +186,10 @@ const loading = ref(false);
 const skillList = ref<SkillVO[]>([]);
 const total = ref(0);
 const hasEditPerm = checkPermi(['agent:skill:edit']);
+
+// C5:技能市场抽屉(只读发现平台共享技能 + 一键绑定到 Agent)
+const marketRef = ref<InstanceType<typeof SkillMarketDrawer>>();
+const openMarket = () => marketRef.value?.open();
 
 const queryParam = ref<SkillQuery>({ pageNum: 1, pageSize: 10, keyword: '', status: '' });
 

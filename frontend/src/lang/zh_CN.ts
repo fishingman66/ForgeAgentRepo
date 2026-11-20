@@ -24,6 +24,8 @@ export default {
     feedbackDone: '感谢你的反馈',
     back: '返回列表',
     notFound: '文章不存在或已下线',
+    fallbackNotice: '该语言下暂无内容,以下为默认语言(中文)文章',
+    notTranslated: '未翻译',
     lang: '语言',
     poweredBy: '由 ForgeAgent 提供支持'
   },

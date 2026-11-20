@@ -427,9 +427,12 @@ CREATE TABLE IF NOT EXISTS `agent_mcp_server` (
   `workspace_id` bigint DEFAULT NULL COMMENT '归属工作空间(NULL=平台共享,非空=空间私有)',
   `name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'MCP服务器名称(同一空间内唯一)',
   `description` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT '描述',
-  `server_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'streamable_http' COMMENT '传输类型(sse/streamable_http)',
-  `url` varchar(300) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'MCP服务端地址',
+  `server_type` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'streamable_http' COMMENT '传输类型(sse/streamable_http/stdio)',
+  `url` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'MCP服务端地址(sse/streamable_http 必填,stdio 为空)',
   `headers` text COLLATE utf8mb4_unicode_ci COMMENT '自定义请求头(JSON)',
+  `command` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'C2:stdio 可执行命令(须在 agent.mcp.stdio.allowed-commands 白名单内)',
+  `args` text COLLATE utf8mb4_unicode_ci COMMENT 'C2:stdio 启动参数(JSON 数组)',
+  `env` text COLLATE utf8mb4_unicode_ci COMMENT 'C2:stdio 环境变量(JSON 对象,值含密钥,管理端不回显)',
   `timeout_seconds` int DEFAULT '30' COMMENT '请求超时(秒)',
   `approval_mode` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT 'auto' COMMENT '工具审批模式(auto自动执行/ask需人工审批/deny拒绝)',
   `approval_timeout` int DEFAULT '120' COMMENT 'ask模式审批等待超时(秒)',
@@ -1962,6 +1965,9 @@ CREATE TABLE IF NOT EXISTS `agent_cs_channel` (
   `create_time` DATETIME NULL,
   `update_time` DATETIME NULL,
   `channel_secret` VARCHAR(128) NULL COMMENT '渠道回调验签密钥',
+  `encoding_aes_key` VARCHAR(128) NULL COMMENT 'B5:企微安全模式 EncodingAESKey(43位,AES-GCM 加密存储);非空即强制加密模式',
+  `corp_id` VARCHAR(64) NULL COMMENT 'B5:企微 CorpID,用于密文 receiveid 校验',
+  `channel_config` TEXT NULL COMMENT 'B5:邮件渠道配置 JSON(IMAP/SMTP),AES-GCM 整体加密存储',
   `fallback_reply_en` VARCHAR(500) NULL COMMENT '英文兜底话术',
   `handoff_keywords` VARCHAR(500) NULL COMMENT '转人工关键词(逗号分隔),空则用平台默认',
   `handoff_rules` TEXT NULL COMMENT '转人工规则链 JSON([{type,enabled,...}]),空用内置默认',
@@ -1970,6 +1976,7 @@ CREATE TABLE IF NOT EXISTS `agent_cs_channel` (
   `widget_mode` VARCHAR(16) DEFAULT 'bubble' COMMENT 'A2:挂件形态 bubble/sidebar',
   `widget_welcome` VARCHAR(200) NULL COMMENT 'A2:开场主动消息,空不展示',
   `widget_config` TEXT NULL COMMENT 'A2:挂件扩展配置 JSON(logo/position/size 等)',
+  `widget_lang` VARCHAR(10) DEFAULT 'zh_CN' COMMENT 'D2:挂件默认语言 zh_CN/en_US,访客可用 ?lang= 覆盖',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csc_code` (`channel_code`),
   KEY `idx_csc_ws` (`workspace_id`, `status`)
@@ -1995,6 +2002,8 @@ CREATE TABLE IF NOT EXISTS `agent_cs_conversation` (
   `sentiment_streak` INT NOT NULL DEFAULT 0 COMMENT '访客负面情绪连续轮数(得分不超阈值递增,超阈值清零)',
   `last_sentiment_score` DECIMAL(5,4) NULL COMMENT '最近一轮访客情绪分([-1,1],负面为负)',
   `pinned_version` INT NULL COMMENT 'D1灰度会话锁定的配置版本(agent_version.version_no),NULL=现行版;会话创建时判定一次不再变',
+  `source_url` VARCHAR(500) NULL COMMENT 'A2宿主页面地址(仅http/https,已去query/hash)',
+  `order_id` VARCHAR(64) NULL COMMENT 'A2宿主订单号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csc_session` (`agent_session_id`),
   KEY `idx_csc_visitor` (`visitor_id`, `status`),
@@ -2371,11 +2380,13 @@ CREATE TABLE IF NOT EXISTS `agent_cs_ticket_event` (
   `to_status` VARCHAR(24) NULL,
   `actor_type` VARCHAR(16) NOT NULL COMMENT 'VISITOR/SEAT/BOT/SYSTEM',
   `actor_id` VARCHAR(64) NULL,
+  `target_user_id` BIGINT NULL COMMENT 'A3 @提及的目标坐席用户ID;非MENTION事件为NULL',
   `note` VARCHAR(1000) NULL,
   `trace_id` VARCHAR(64) NULL,
   `create_time` DATETIME NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_cste_ticket` (`ticket_id`, `id`)
+  KEY `idx_cste_ticket` (`ticket_id`, `id`),
+  KEY `idx_cste_target` (`target_user_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工单事件轨迹';
 
 -- agent_cs_investigation  (source: docs/13 B4 AI 工单根因调查)

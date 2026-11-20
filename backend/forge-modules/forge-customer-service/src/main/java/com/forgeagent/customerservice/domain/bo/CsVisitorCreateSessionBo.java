@@ -24,4 +24,10 @@ public class CsVisitorCreateSessionBo implements Serializable {
 
     /** 访客外部标识(渠道回调链路;为空则从 token 解析) */
     private String externalUserId;
+
+    /** A2 宿主上下文:发起会话的页面地址(只存 http/https,去 query/hash) */
+    private String pageUrl;
+
+    /** A2 宿主上下文:订单号(最长 64,超长丢弃) */
+    private String orderId;
 }

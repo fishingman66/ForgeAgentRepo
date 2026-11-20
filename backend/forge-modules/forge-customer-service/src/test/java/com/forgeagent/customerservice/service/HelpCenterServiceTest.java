@@ -128,5 +128,59 @@ class HelpCenterServiceTest {
         assertEquals("d55", list.get(0).getSlug());
         assertEquals("退款流程", list.get(0).getTitle());
         assertEquals("zh_CN", list.get(0).getLocale());
+        assertFalse(list.get(0).isFallback());
+    }
+
+    /** F3:英文无内容时必须回退默认语言,而不是返回空列表。 */
+    @Test
+    void listFallsBackToDefaultLocaleWhenTargetEmpty() {
+        CsChannelMapper cm = mock(CsChannelMapper.class);
+        when(cm.selectOne(any())).thenReturn(channel());
+        CsChannelGuard g = new CsChannelGuard(cm, new CsModuleProperties(), null);
+        HelpCenterService svc = new HelpCenterService(mapper, g, null);
+        when(mapper.listPublishedDocs(eq(7L), any(), eq("en_US"))).thenReturn(List.of());
+        when(mapper.listPublishedDocs(eq(7L), any(), eq("zh_CN"))).thenReturn(List.of(
+            Map.of("id", 66L, "title", "退款流程", "summary", "在订单页申请", "locale", "zh_CN", "source", "doc")));
+        when(mapper.listActiveFaqs(7L)).thenReturn(List.of());
+
+        List<HelpArticleVo> list = svc.list("web", "en_US");
+        assertEquals(1, list.size(), "英文无内容应回退中文,不能空列表");
+        assertEquals("zh_CN", list.get(0).getLocale());
+        assertTrue(list.get(0).isFallback(), "回退文章必须带 fallback 标记");
+    }
+
+    /** F3:即使没有文档,只有默认语言 FAQ 也要作为兜底返回。 */
+    @Test
+    void listFallsBackToFaqWhenNoDocsAtAll() {
+        CsChannelMapper cm = mock(CsChannelMapper.class);
+        when(cm.selectOne(any())).thenReturn(channel());
+        CsChannelGuard g = new CsChannelGuard(cm, new CsModuleProperties(), null);
+        HelpCenterService svc = new HelpCenterService(mapper, g, null);
+        when(mapper.listPublishedDocs(eq(7L), any(), any())).thenReturn(List.of());
+        when(mapper.listActiveFaqs(7L)).thenReturn(List.of(
+            Map.of("title", "怎么退货", "summary", "在订单页申请", "source", "faq")));
+
+        List<HelpArticleVo> list = svc.list("web", "en_US");
+        assertEquals(1, list.size());
+        assertTrue(list.get(0).isFallback());
+        assertEquals("zh_CN", list.get(0).getLocale());
+    }
+
+    /** F3:sitemap 必须是绝对 URL,并输出 xhtml:link hreflang 互链。 */
+    @Test
+    void sitemapXmlContainsAbsoluteLocAndHreflang() {
+        CsChannelMapper cm = mock(CsChannelMapper.class);
+        when(cm.selectOne(any())).thenReturn(channel());
+        CsChannelGuard g = new CsChannelGuard(cm, new CsModuleProperties(), null);
+        HelpCenterService svc = new HelpCenterService(mapper, g, null);
+        when(mapper.listPublishedDocs(eq(7L), any(), eq(null))).thenReturn(List.of(
+            Map.of("id", 77L, "title", "退款流程", "summary", "x", "locale", "en_US")));
+
+        String xml = svc.sitemapXml("web", "https://help.example.com/");
+        assertTrue(xml.contains("<loc>https://help.example.com/help/zh_CN</loc>"));
+        assertTrue(xml.contains("hreflang=\"en\""));
+        assertTrue(xml.contains("hreflang=\"x-default\""));
+        assertTrue(xml.contains("<loc>https://help.example.com/help/en_US/d77</loc>"));
+        assertFalse(xml.contains("https://help.example.com//"), "baseUrl 末尾斜杠必须收敛");
     }
 }

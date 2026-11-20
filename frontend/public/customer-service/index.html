@@ -54,17 +54,44 @@
       <button id="rateToggle" type="button">评价</button>
       <button class="send" id="send" type="button">发送</button>
     </div>
-    <div class="rate" id="rateBox"><span>本次服务评分</span><span id="stars"></span></div>
+    <div class="rate" id="rateBox"><span id="rateLabel">本次服务评分</span><span id="stars"></span></div>
   </div>
 </div>
 <script>
 (function () {
   'use strict';
   var qs = new URLSearchParams(location.search);
+  // D2 访客端 i18n:public/ 下不走 Vite 构建,不能 import vue-i18n,用内联字典 + ?lang= 运行时切换
+  var lang = qs.get('lang') === 'en_US' ? 'en_US' : 'zh_CN';
+  var I18N = {
+    zh_CN: {
+      title: '在线客服', newSession: '新会话', connecting: '正在连接…', inputPlaceholder: '输入你的问题',
+      handoff: '转人工', rate: '评价', send: '发送', rateLabel: '本次服务评分',
+      replying: '正在回复…', connected: '已连接', restored: '已恢复上次会话',
+      connectFailed: '连接失败: ', requestFailed: '请求失败', noAnswer: '未找到答案，已记录知识缺口',
+      genFailed: '生成失败', handoffDone: '已为你转接人工客服', queuing: '正在排队等待坐席接入',
+      noReply: '（无回复）', retrying: '网络不稳定，正在重试…', sendFailed: '发送失败: ',
+      handoffSubmitted: '已提交转人工请求', handoffFailed: '转人工失败: ',
+      rateThanks: '谢谢你的评价', rateFailed: '评价失败: ', scoreUnit: '分'
+    },
+    en_US: {
+      title: 'Online Support', newSession: 'New chat', connecting: 'Connecting…', inputPlaceholder: 'Type your question',
+      handoff: 'Talk to a human', rate: 'Rate', send: 'Send', rateLabel: 'Rate this service',
+      replying: 'Replying…', connected: 'Connected', restored: 'Previous session restored',
+      connectFailed: 'Connection failed: ', requestFailed: 'Request failed', noAnswer: 'No answer found; gap recorded',
+      genFailed: 'Generation failed', handoffDone: 'Transferred to a human agent', queuing: 'Waiting for an agent',
+      noReply: '(no reply)', retrying: 'Network unstable, retrying…', sendFailed: 'Send failed: ',
+      handoffSubmitted: 'Handoff requested', handoffFailed: 'Handoff failed: ',
+      rateThanks: 'Thanks for your rating', rateFailed: 'Rating failed: ', scoreUnit: ' pts'
+    }
+  };
+  var T = I18N[lang];
+  document.documentElement.lang = lang === 'en_US' ? 'en' : 'zh-CN';
+  document.title = T.title;
   var channel = qs.get('channel') || 'default';
   var base = qs.get('base') || '';
   var apiBase = base.replace(/\/$/, '');
-  document.getElementById('title').textContent = qs.get('title') || '在线客服';
+  document.getElementById('title').textContent = qs.get('title') || T.title;
 
   var log = document.getElementById('log');
   var statusEl = document.getElementById('status');
@@ -76,6 +103,60 @@
     visitorId = 'web-' + (window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
     localStorage.setItem(visitorKey, visitorId);
   }
+  // A2 宿主上下文:挂件通过 postMessage 下发 externalUserId/pageUrl/orderId。
+  // 宿主给的 externalUserId 只存内存不落 localStorage,避免共用设备串号。
+  var hostCtx = { externalUserId: '', pageUrl: '', orderId: '' };
+  var allowedOrigins = [];
+  var panelOpen = false;
+  var sessionStarted = false;
+  var ctxReady = false;
+  function applyHostCtx(d) {
+    if (!d || sessionStarted) return;
+    if (typeof d.externalUserId === 'string' && d.externalUserId.length <= 128) {
+      hostCtx.externalUserId = d.externalUserId;
+    }
+    if (typeof d.pageUrl === 'string' && d.pageUrl.length <= 500) {
+      hostCtx.pageUrl = d.pageUrl;
+    }
+    if (typeof d.orderId === 'string' && d.orderId.length <= 64) {
+      hostCtx.orderId = d.orderId;
+    }
+    if (!ctxReady) { ctxReady = true; openSession(); }
+  }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.__forgeWidget !== true) return;
+    if (allowedOrigins.length && allowedOrigins.indexOf(e.origin) === -1) return;
+    if (d.type === 'panel') { panelOpen = !!d.open; return; }
+    if (d.__forgeWidgetContext === true) applyHostCtx(d);
+  });
+  // 通知挂件 iframe 已就绪,请把宿主上下文发过来(挂件会缓存最近一次宿主消息)
+  if (window.parent !== window) {
+    try { window.parent.postMessage({ __forgeWidget: true, type: 'ready' }, '*'); } catch (e) { /* 跨域失败忽略 */ }
+  }
+  // 挂件配置里的 allowedOrigins 用于校验消息来源;拉不到就沿用"空=不校验"的既有语义
+  function loadWidgetGuard() {
+    try {
+      fetch(apiBase + '/chat-api/' + encodeURIComponent(channel) + '/widget-config')
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          var raw = r && r.code === 200 && r.data ? r.data.config : '';
+          var cfg = raw ? JSON.parse(raw) : {};
+          if (cfg && Array.isArray(cfg.allowedOrigins)) allowedOrigins = cfg.allowedOrigins;
+        })
+        .catch(function () { /* 配置不可用时不阻断 */ });
+    } catch (e) { /* 老浏览器无 fetch 时跳过 */ }
+  }
+  loadWidgetGuard();
+  // 静态控件文案(HTML 里保留中文作为无 JS 兜底,这里按 lang 覆盖)
+  document.getElementById('reset').textContent = T.newSession;
+  document.getElementById('handoff').textContent = T.handoff;
+  document.getElementById('rateToggle').textContent = T.rate;
+  document.getElementById('rateLabel').textContent = T.rateLabel;
+  input.placeholder = T.inputPlaceholder;
+  sendBtn.textContent = T.send;
+  statusEl.textContent = T.connecting;
+
   var token = '';
   var conversationId = 0;
   var cursor = 0;
@@ -154,7 +235,26 @@
   function setBusy(v) {
     busy = v;
     sendBtn.disabled = v;
-    statusEl.textContent = v ? '正在回复…' : '已连接';
+    statusEl.textContent = v ? T.replying : T.connected;
+  }
+  // A2 未读徽标:仅当自己被挂在宿主页里、且面板收起时上报,避免面板开着还弹红点
+  function notifyUnread() {
+    if (window.parent === window || panelOpen) return;
+    try { window.parent.postMessage({ __forgeWidget: true, type: 'unread' }, '*'); } catch (e) { /* 忽略 */ }
+  }
+  // A1 引用上屏:只渲染标题文本,不拼 HTML;挂在气泡内部,随气泡一起滚动
+  function renderCitations(bubble, citations) {
+    if (!bubble || !citations || !citations.length) return;
+    var titles = [];
+    for (var i = 0; i < citations.length && titles.length < 3; i++) {
+      var title = citations[i] && citations[i].title;
+      if (typeof title === 'string' && title.trim()) titles.push(title.trim());
+    }
+    if (!titles.length) return;
+    var box = document.createElement('div');
+    box.className = 'src';
+    box.textContent = (lang === 'en_US' ? 'Sources: ' : '参考: ') + titles.join(' · ');
+    bubble.appendChild(box);
   }
   function request(path, method, body, withToken) {
     var headers = { 'Content-Type': 'application/json' };
@@ -162,20 +262,27 @@
     return fetch(apiBase + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.json(); })
       .then(function (r) {
-        if (r.code !== 200) throw new Error(r.msg || '请求失败');
+        if (r.code !== 200) throw new Error(r.msg || T.requestFailed);
         return r.data;
       });
   }
   function openSession() {
-    statusEl.textContent = '正在连接…';
-    return request('/chat-api/' + encodeURIComponent(channel) + '/sessions', 'POST', { externalUserId: visitorId })
+    if (sessionStarted) return;
+    sessionStarted = true;
+    statusEl.textContent = T.connecting;
+    var payload = {
+      externalUserId: hostCtx.externalUserId || visitorId,
+      pageUrl: hostCtx.pageUrl || location.href,
+      orderId: hostCtx.orderId || ''
+    };
+    return request('/chat-api/' + encodeURIComponent(channel) + '/sessions', 'POST', payload)
       .then(function (data) {
         token = data.visitorToken;
         conversationId = data.conversationId;
-        statusEl.textContent = data.reused ? '已恢复上次会话' : '已连接';
+        statusEl.textContent = data.reused ? T.restored : T.connected;
         cursor = 0;
       })
-      .catch(function (e) { statusEl.textContent = '连接失败: ' + e.message; });
+      .catch(function (e) { statusEl.textContent = T.connectFailed + e.message; });
   }
   function handleEvent(ev, ctx) {
     var id = Number(ev.id) || 0;
@@ -189,16 +296,18 @@
       if (chunk) { ctx.buf += chunk; ctx.bubble.innerHTML = renderMd(ctx.buf) + '<span class="cursor-blink"></span>'; }
     } else if (name === 'chat_done') {
       ctx.doneText = typeof data.content === 'string' ? data.content : ctx.buf;
-      if (data.fallback) tip('未找到答案，已记录知识缺口');
+      ctx.citations = Array.isArray(data.citations) ? data.citations : [];
+      if (data.fallback) tip(T.noAnswer);
       ctx.done = true;
+      notifyUnread();
     } else if (name === 'done') {
       // 平台内核终帧;客服权威终态以 chat_done 为准,忽略此帧的 content 避免重复渲染
     } else if (name === 'error') {
-      ctx.error = data.message || '生成失败';
+      ctx.error = data.message || T.genFailed;
     } else if (name === 'cs_ticket_new' || name === 'cs_handoff') {
-      tip('已为你转接人工客服');
+      tip(T.handoffDone);
     } else if (name === 'cs_queue_position') {
-      tip('正在排队等待坐席接入');
+      tip(T.queuing);
     } else if (name === 'cs_csat_invite') {
       document.getElementById('rateBox').style.display = 'flex';
     }
@@ -256,7 +365,8 @@
       .then(function () {
         if (ctx.error) throw new Error(ctx.error);
         var finalText = ctx.doneText != null ? ctx.doneText : ctx.buf;
-        ctx.bubble.innerHTML = renderMd(finalText || '（无回复）');
+        ctx.bubble.innerHTML = renderMd(finalText || T.noReply);
+        renderCitations(ctx.bubble, ctx.citations);
       })
       .catch(function (e) {
         if (!STREAM) throw e;
@@ -269,27 +379,27 @@
     return request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/messages',
       'POST', { clientMsgId: clientMsgId, content: text }, true)
       .then(function (data) {
-        if (!data.reused) ctx.bubble.innerHTML = renderMd(data.content || '（无回复）');
-        if (data.fallback) tip('未找到答案，已记录知识缺口');
-        if (data.handoff) tip('已为你转接人工客服');
+        if (!data.reused) ctx.bubble.innerHTML = renderMd(data.content || T.noReply);
+        if (data.fallback) tip(T.noAnswer);
+        if (data.handoff) tip(T.handoffDone);
       });
   }
   function send(text, clientMsgId, attempt) {
-    var ctx = { bubble: null, buf: '', doneText: null, done: false, error: '' };
+    var ctx = { bubble: null, buf: '', doneText: null, done: false, error: '', citations: [] };
     // 打字提示先占位;首帧 delta 到达后移除
     var bubble = bubbleRow('bot', true);
     bubble.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
     ctx.bubble = bubble;
     return (STREAM ? sendStream(text, clientMsgId, ctx) : sendPlain(text, clientMsgId, ctx))
-      .then(function () { statusEl.textContent = '已连接'; })
+      .then(function () { statusEl.textContent = T.connected; })
       .catch(function (e) {
         if (attempt < 3) {
-          statusEl.textContent = '网络不稳定，正在重试…';
+          statusEl.textContent = T.retrying;
           return new Promise(function (resolve) { setTimeout(resolve, 500 * (attempt + 1)); })
             .then(function () { return send(text, clientMsgId, attempt + 1); });
         }
         bubble.innerHTML = '';
-        statusEl.textContent = '发送失败: ' + e.message;
+        statusEl.textContent = T.sendFailed + e.message;
       });
   }
   function poll() {
@@ -301,9 +411,18 @@
           // 聊天增量由流式通道处理;轮询只负责控制面事件,避免重复上屏
           var id = Number(ev.id) || 0;
           if (id > cursor) cursor = id;
-          if (ev.event === 'cs_ticket_new' || ev.event === 'cs_handoff') tip('已为你转接人工客服');
-          if (ev.event === 'cs_queue_position') tip('正在排队等待坐席接入');
+          if (ev.event === 'cs_ticket_new' || ev.event === 'cs_handoff') tip(T.handoffDone);
+          if (ev.event === 'cs_queue_position') tip(T.queuing);
           if (ev.event === 'cs_csat_invite') { document.getElementById('rateBox').style.display = 'flex'; }
+          // A2:坐席人工消息走 chat 事件;面板收起时同时累计未读
+          if (ev.event === 'chat') {
+            var chatData = {};
+            try { chatData = JSON.parse(ev.data || '{}'); } catch (e2) { chatData = {}; }
+            if (chatData.senderType === 'seat' && typeof chatData.content === 'string' && chatData.content) {
+              add('bot', chatData.content, true);
+              notifyUnread();
+            }
+          }
         });
       })
       .catch(function () { /* 轮询失败不影响聊天,下次继续 */ });
@@ -320,12 +439,13 @@
     if (!conversationId) return;
     request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/handoff',
       'POST', { reason: 'visitor_request' }, true)
-      .then(function () { tip('已提交转人工请求'); })
-      .catch(function (e) { tip('转人工失败: ' + e.message); });
+      .then(function () { tip(T.handoffSubmitted); })
+      .catch(function (e) { tip(T.handoffFailed + e.message); });
   });
   document.getElementById('reset').addEventListener('click', function () {
     log.innerHTML = '';
     cursor = 0;
+    sessionStarted = false;
     openSession();
   });
   document.getElementById('rateToggle').addEventListener('click', function () {
@@ -337,18 +457,30 @@
     (function (score) {
       var btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = score + '分';
+      btn.textContent = score + T.scoreUnit;
       btn.addEventListener('click', function () {
         request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/csat',
           'POST', { score: score, tags: 'web' }, true)
-          .then(function () { tip('谢谢你的评价'); })
-          .catch(function (e) { tip('评价失败: ' + e.message); });
+          .then(function () { tip(T.rateThanks); })
+          .catch(function (e) { tip(T.rateFailed + e.message); });
       });
       stars.appendChild(btn);
     })(i);
   }
   setInterval(poll, 5000);
-  openSession();
+  if (window.parent !== window) {
+    // 挂件内:给宿主 800ms 回传上下文,超时用本地标识开会话,避免宿主脚本异常时白屏
+    setTimeout(function () { if (!sessionStarted) openSession(); }, 800);
+  } else {
+    openSession();
+  }
+
+  // D3:访客页同样注册 SW(与主站同一 scope),离线时至少能打开壳并提示
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function () { /* 忽略 */ });
+  }
+  window.addEventListener('offline', function () { statusEl.textContent = lang === 'en_US' ? 'Offline' : '当前离线'; });
+  window.addEventListener('online', function () { statusEl.textContent = T.connected; });
 })();
 </script>
 </body>

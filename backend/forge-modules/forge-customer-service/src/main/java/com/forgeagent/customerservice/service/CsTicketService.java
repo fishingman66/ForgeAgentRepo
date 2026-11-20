@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -473,6 +474,9 @@ public class CsTicketService {
     /**
      * A3 内部备注:只写工单事件轨迹,不进 agent_message、不推访客 SSE 通道。
      * 供坐席协作留痕,访客侧不可见(与对客 reply 严格隔离)。
+     *
+     * <p>正文中的 {@code @123} 会额外生成一条 MENTION 事件(target_user_id=123),
+     * 被提及坐席通过增量接口收到提醒;提及自己不生成提醒,单条备注最多 5 个目标。</p>
      */
     public void addNote(Long ticketId, Long seatUserId, String content) {
         CsTicket ticket = ticketMapper.selectById(ticketId);
@@ -480,10 +484,48 @@ public class CsTicketService {
             throw new ServiceException("工单不存在");
         }
         event(ticket, "NOTE", ticket.getStatus(), ticket.getStatus(), "SEAT", seatUserId, content);
+        for (Long target : parseMentions(content, seatUserId)) {
+            event(ticket, "MENTION", ticket.getStatus(), ticket.getStatus(), "SEAT", seatUserId, content, target);
+        }
+    }
+
+    /**
+     * A3:增量拉取当前坐席收到的 @提及。sinceId 由前端游标维护,首次传 0。
+     */
+    public List<CsTicketEvent> mentions(Long workspaceId, Long userId, Long sinceId) {
+        if (workspaceId == null || userId == null) {
+            return List.of();
+        }
+        return eventMapper.selectMentions(workspaceId, userId, sinceId == null ? 0L : sinceId, 20);
+    }
+
+    /** 从备注正文解析 @用户ID:去重、去自己、最多 5 个,非法数字忽略。 */
+    static List<Long> parseMentions(String content, Long selfUserId) {
+        List<Long> targets = new ArrayList<>();
+        if (content == null || content.isBlank()) {
+            return targets;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("@(\\d{1,19})").matcher(content);
+        while (m.find() && targets.size() < 5) {
+            try {
+                long id = Long.parseLong(m.group(1));
+                if (id > 0 && (selfUserId == null || id != selfUserId) && !targets.contains(id)) {
+                    targets.add(id);
+                }
+            } catch (NumberFormatException ignored) {
+                // 超长数字串直接跳过
+            }
+        }
+        return targets;
     }
 
     private void event(CsTicket ticket, String type, String from, String to,
                        String actorType, Object actorId, String note) {
+        event(ticket, type, from, to, actorType, actorId, note, null);
+    }
+
+    private void event(CsTicket ticket, String type, String from, String to,
+                       String actorType, Object actorId, String note, Long targetUserId) {
         CsTicketEvent e = new CsTicketEvent();
         e.setTicketId(ticket.getId());
         e.setEventType(type);
@@ -491,6 +533,7 @@ public class CsTicketService {
         e.setToStatus(to);
         e.setActorType(actorType);
         e.setActorId(actorId == null ? null : String.valueOf(actorId));
+        e.setTargetUserId(targetUserId);
         e.setNote(note);
         e.setCreateTime(new Date());
         eventMapper.insert(e);

@@ -71,19 +71,38 @@ public class McpConnectionPool {
     }
 
     /**
-     * 服务器指纹:serverType|url|timeout|排序后 headers(headers JSON 键序不稳定,先排序)
+     * 服务器指纹:serverType|url|timeout|headers|stdio(command/args/env 摘要)。
+     *
+     * <p>C2:stdio 没有 url,若指纹不含 command/args/env,两个不同的 stdio 服务器会撞同一个键
+     * ——拿到别人的连接并在其上调用工具,是最隐蔽的线上故障。env 含密钥,只进摘要不进明文。</p>
      */
     public String fingerprint(ToolAssembler.McpDef def) {
         StringBuilder sb = new StringBuilder()
             .append(def.serverType() == null ? "streamable_http" : def.serverType())
             .append('|').append(def.url())
             .append('|').append(def.timeoutSeconds() == null ? 30 : def.timeoutSeconds())
+            .append('|').append(digest(def.command() + '\u0001' + def.args() + '\u0001' + def.env()))
             .append('|');
         Map<String, Object> headers = parseHeaders(def.headers());
         for (Map.Entry<String, Object> entry : new TreeMap<>(headers).entrySet()) {
             sb.append(entry.getKey()).append('=').append(entry.getValue()).append('&');
         }
         return sb.toString();
+    }
+
+    /** 配置摘要:SHA-256 前 16 位,避免 env 明文进入日志/指标 */
+    private static String digest(String raw) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] bytes = md.digest((raw == null ? "" : raw).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++) {
+                hex.append(String.format("%02x", bytes[i]));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            return "na";
+        }
     }
 
     /**

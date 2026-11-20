@@ -50,7 +50,15 @@ public class ToolAssembler {
      * MCP 服务器定义快照
      */
     public record McpDef(Long id, String name, String serverType, String url, String headers,
-                         Integer timeoutSeconds, String approvalMode, Integer approvalTimeout) {
+                         Integer timeoutSeconds, String approvalMode, Integer approvalTimeout,
+                         String command, String args, String env) {
+
+        /** 兼容旧构造:http 系传输无 stdio 三字段 */
+        public McpDef(Long id, String name, String serverType, String url, String headers,
+                      Integer timeoutSeconds, String approvalMode, Integer approvalTimeout) {
+            this(id, name, serverType, url, headers, timeoutSeconds, approvalMode, approvalTimeout,
+                null, null, null);
+        }
     }
 
     /**
@@ -80,6 +88,18 @@ public class ToolAssembler {
                 }
             }
         }
+    }
+
+    /**
+     * P3 / C2:stdio 准入配置。由 Spring setter 注入;
+     * 单测不注入时为 null,{@code McpStdioCommandValidator} 会按"未启用"拒绝所有 stdio。
+     */
+    private static volatile com.forgeagent.agent.config.McpStdioProperties stdioProperties;
+
+    /** 供 Spring 注入静态配置(构造器保持原签名,不影响既有单测装配) */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setStdioProperties(com.forgeagent.agent.config.McpStdioProperties props) {
+        ToolAssembler.stdioProperties = props;
     }
 
     private final IAgentApprovalService approvalService;
@@ -353,16 +373,30 @@ public class ToolAssembler {
     }
 
     /**
-     * 按 MCP 定义构建 AgentScope 客户端(sse / streamable_http)
+     * 按 MCP 定义构建 AgentScope 客户端(sse / streamable_http / stdio)。
+     *
+     * <p>C2 起传输类型改为<b>显式三分支 + 未知类型拒绝</b>:旧实现是 {@code if sse else http},
+     * 任何非法值都会被静默降级成 http 并拿 url 建连,这是最危险的隐性行为。</p>
+     *
+     * <p>stdio 分支在<b>运行期</b>复验命令白名单(不只依赖保存期校验),防止直改 DB 或历史脏数据绕过。</p>
      */
     public static McpClientWrapper buildMcpWrapper(McpDef def) {
         McpClientBuilder builder = McpClientBuilder.create(def.name())
             .timeout(Duration.ofSeconds(def.timeoutSeconds() == null ? 30 : def.timeoutSeconds()))
             .initializationTimeout(Duration.ofSeconds(30));
-        if ("sse".equals(def.serverType())) {
-            builder.sseTransport(def.url());
+        String type = def.serverType() == null ? "" : def.serverType();
+        if ("sse".equals(type)) {
+            builder.sseTransport(requireUrl(def));
+        } else if ("streamable_http".equals(type)) {
+            builder.streamableHttpTransport(requireUrl(def));
+        } else if ("stdio".equals(type)) {
+            List<String> argv = parseStdioArgs(def.args());
+            Map<String, String> env = parseStdioEnv(def.env());
+            McpStdioCommandValidator.validate(def.command(), argv, stdioProperties);
+            builder.stdioTransport(def.command(), argv, env);
         } else {
-            builder.streamableHttpTransport(def.url());
+            throw new com.forgeagent.common.core.exception.ServiceException(
+                "不支持的 MCP 传输类型:" + def.serverType());
         }
         if (StringUtils.isNotBlank(def.headers())) {
             Map<String, Object> headers = JsonUtils.parseMap(def.headers());
@@ -371,6 +405,59 @@ public class ToolAssembler {
             }
         }
         return builder.buildSync();
+    }
+
+    private static String requireUrl(McpDef def) {
+        if (StringUtils.isBlank(def.url())) {
+            throw new com.forgeagent.common.core.exception.ServiceException(
+                "MCP 传输类型 " + def.serverType() + " 缺少服务端地址");
+        }
+        return def.url();
+    }
+
+    /**
+     * stdio 配置解析用的 JsonMapper。
+     *
+     * <p>刻意不用 {@code JsonUtils}:它的静态初始化依赖 Spring 环境,纯 Mockito 单测里会抛
+     * {@code ExceptionInInitializerError};这里用无状态的 jackson3 Mapper,行为一致且可单测。</p>
+     */
+    private static final tools.jackson.databind.json.JsonMapper STDIO_MAPPER =
+        tools.jackson.databind.json.JsonMapper.builder().build();
+
+    /** args 是 JSON 数组原文;空/非法一律按空参数处理(命令本身仍要过白名单) */
+    public static List<String> parseStdioArgs(String argsJson) {
+        if (StringUtils.isBlank(argsJson)) {
+            return List.of();
+        }
+        try {
+            List<String> list = STDIO_MAPPER.readValue(argsJson,
+                new tools.jackson.core.type.TypeReference<List<String>>() {
+                });
+            return list == null ? List.of() : list;
+        } catch (Exception e) {
+            // 脏配置不应让整轮对话崩:按空参数处理,命令仍会被白名单拦下
+            log.warn("[ToolAssembler] stdio args 不是合法 JSON 数组,按空参数处理");
+            return List.of();
+        }
+    }
+
+    /** env 是 JSON 对象原文;值统一转字符串,空/非法按无环境变量处理 */
+    public static Map<String, String> parseStdioEnv(String envJson) {
+        Map<String, String> env = new java.util.LinkedHashMap<>();
+        if (StringUtils.isBlank(envJson)) {
+            return env;
+        }
+        try {
+            Map<String, Object> map = STDIO_MAPPER.readValue(envJson,
+                new tools.jackson.core.type.TypeReference<Map<String, Object>>() {
+                });
+            if (map != null) {
+                map.forEach((k, v) -> env.put(String.valueOf(k), v == null ? "" : String.valueOf(v)));
+            }
+        } catch (Exception e) {
+            log.warn("[ToolAssembler] stdio env 不是合法 JSON 对象,按空环境变量处理");
+        }
+        return env;
     }
 
     private String rootMessage(Throwable e) {

@@ -9,7 +9,13 @@
   })();
   var channel = script.getAttribute('data-channel') || 'default';
   var base = (script.getAttribute('data-api-base') || '').replace(/\/$/, '');
-  var title = script.getAttribute('data-title') || '在线客服';
+  var lang = script.getAttribute('data-lang') === 'en_US' ? 'en_US' : 'zh_CN';
+  var WIDGET_I18N = {
+    zh_CN: { title: '在线客服', open: '打开', close: '收起' },
+    en_US: { title: 'Online Support', open: 'Open', close: 'Close' }
+  };
+  var WT = WIDGET_I18N[lang];
+  var title = script.getAttribute('data-title') || WT.title;
   var cfgUrl = base + '/chat-api/' + encodeURIComponent(channel) + '/widget-config';
 
   // 默认配置:后端未返回/拉取失败时 fail-safe,行为与 C3 旧挂件一致
@@ -20,7 +26,8 @@
 
   function pageUrl() {
     return base + '/customer-service/index.html?channel=' + encodeURIComponent(channel)
-      + '&base=' + encodeURIComponent(base) + '&title=' + encodeURIComponent(title);
+      + '&base=' + encodeURIComponent(base) + '&title=' + encodeURIComponent(title)
+      + '&lang=' + encodeURIComponent(lang);
   }
 
   var launcher, panel, frame, badge;
@@ -38,6 +45,23 @@
   function clearUnread() { unread = 0; saveUnread(); paintBadge(); }
 
   // 宿主上下文桥:只接受白名单 origin 的消息,白名单来自渠道 corsAllowlist(经 widget-config 下发 config.allowedOrigins)
+  var lastCtx = null;
+  function defaultCtx() {
+    return {
+      __forgeWidgetContext: true,
+      externalUserId: '',
+      pageUrl: location.href,
+      orderId: ''
+    };
+  }
+  function postCtx(ctx) {
+    if (!frame || !frame.contentWindow) return;
+    try { frame.contentWindow.postMessage(ctx, '*'); } catch (e) { /* iframe 未就绪时等下次 */ }
+  }
+  function postPanelState() {
+    if (!frame || !frame.contentWindow) return;
+    try { frame.contentWindow.postMessage({ __forgeWidget: true, type: 'panel', open: opened }, '*'); } catch (e) { /* 忽略 */ }
+  }
   function onHostMessage(e) {
     if (!frame || !frame.contentWindow) return;
     if (e.source !== window && e.source !== frame.contentWindow) return;
@@ -53,7 +77,8 @@
       pageUrl: typeof d.pageUrl === 'string' ? d.pageUrl : location.href,
       orderId: typeof d.orderId === 'string' ? d.orderId : ''
     };
-    frame.contentWindow.postMessage(ctx, '*');
+    lastCtx = ctx;
+    postCtx(ctx);
   }
 
   function mount() {
@@ -68,7 +93,7 @@
 
     launcher = document.createElement('button');
     launcher.type = 'button';
-    launcher.setAttribute('aria-label', '打开' + title);
+    launcher.setAttribute('aria-label', WT.open + ' ' + title);
     launcher.textContent = '';
     launcher.style.cssText = 'position:fixed;' + side + ':' + bottom + 'px;bottom:' + bottom + 'px;z-index:2147483000;'
       + 'width:52px;height:52px;border:0;border-radius:26px;background:' + theme + ';color:#fff;cursor:pointer;'
@@ -99,8 +124,14 @@
     launcher.addEventListener('click', function () {
       opened = !opened;
       panel.style.display = opened ? (isSidebar ? 'flex' : 'block') : 'none';
-      launcher.setAttribute('aria-label', opened ? '收起' + title : '打开' + title);
+      launcher.setAttribute('aria-label', opened ? WT.close + ' ' + title : WT.open + ' ' + title);
       if (opened) clearUnread();
+      postPanelState();
+    });
+    // iframe 就绪后主动补发一次上下文与面板状态,避免握手消息早于监听注册
+    frame.addEventListener('load', function () {
+      postCtx(lastCtx || defaultCtx());
+      postPanelState();
     });
 
     // 欢迎语:首次访问(本地标记不存在)时显示一次性气泡提示,不阻塞挂件
@@ -129,8 +160,14 @@
   // 挂件 ↔ iframe 的未读计数:iframe 内客服页通过 postMessage 通知新消息
   window.addEventListener('message', function (e) {
     var d = e.data;
-    if (!d || d.__forgeWidget !== true || d.type !== 'unread') return;
-    if (frame && e.source === frame.contentWindow && !opened) {
+    if (!d || d.__forgeWidget !== true) return;
+    if (!frame || e.source !== frame.contentWindow) return;
+    if (d.type === 'ready') {
+      postCtx(lastCtx || defaultCtx());
+      postPanelState();
+      return;
+    }
+    if (d.type === 'unread' && !opened) {
       unread += 1; saveUnread(); paintBadge();
     }
   });
@@ -151,6 +188,10 @@
                 cfg.welcome = r.data.welcome || '';
                 cfg.config = r.data.config || '';
                 cfg.enabled = r.data.enabled !== false;
+                if (r.data.lang === 'en_US' && !script.getAttribute('data-lang')) {
+                  lang = 'en_US'; WT = WIDGET_I18N.en_US;
+                  title = script.getAttribute('data-title') || WT.title;
+                }
               }
             }
           } catch (e) { /* 配置解析失败用默认 */ }
@@ -169,6 +210,10 @@
             cfg.welcome = r.data.welcome || '';
             cfg.config = r.data.config || '';
             cfg.enabled = r.data.enabled !== false;
+            if (r.data.lang === 'en_US' && !script.getAttribute('data-lang')) {
+              lang = 'en_US'; WT = WIDGET_I18N.en_US;
+              title = script.getAttribute('data-title') || WT.title;
+            }
           }
           if (cfg.enabled) mount();
         }).catch(function () { mount(); });

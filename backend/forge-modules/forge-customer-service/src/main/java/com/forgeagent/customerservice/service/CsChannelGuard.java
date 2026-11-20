@@ -51,6 +51,14 @@ public class CsChannelGuard {
         if (secretCipher != null && channel.getChannelSecret() != null) {
             channel.setChannelSecret(secretCipher.decrypt(channel.getChannelSecret()));
         }
+        // B5:加密模式的 EncodingAESKey 同样以密文入库,这里解密供适配器使用
+        if (secretCipher != null && channel.getEncodingAesKey() != null) {
+            channel.setEncodingAesKey(secretCipher.decrypt(channel.getEncodingAesKey()));
+        }
+        // B5:邮件渠道配置含 IMAP/SMTP 密码,整段加密;这里解密供轮询任务使用
+        if (secretCipher != null && channel.getChannelConfig() != null) {
+            channel.setChannelConfig(secretCipher.decrypt(channel.getChannelConfig()));
+        }
         return channel;
     }
 

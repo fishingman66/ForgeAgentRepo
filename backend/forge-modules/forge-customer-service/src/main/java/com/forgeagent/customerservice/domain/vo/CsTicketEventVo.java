@@ -25,6 +25,8 @@ public class CsTicketEventVo implements Serializable {
     private String toStatus;
     private String actorType;
     private String actorId;
+    /** A3:@提及的目标坐席。 */
+    private Long targetUserId;
     private String note;
     private String traceId;
     private Long ticketId;

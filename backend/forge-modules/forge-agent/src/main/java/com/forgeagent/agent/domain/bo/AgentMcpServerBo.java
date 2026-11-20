@@ -59,13 +59,13 @@ public class AgentMcpServerBo implements Serializable {
      * 传输类型
      */
     @NotBlank(message = "传输类型不能为空", groups = {AddGroup.class, EditGroup.class})
-    @Pattern(regexp = "^(sse|streamable_http)$", message = "传输类型非法", groups = {AddGroup.class, EditGroup.class})
+    @Pattern(regexp = "^(sse|streamable_http|stdio)$", message = "传输类型非法", groups = {AddGroup.class, EditGroup.class})
     private String serverType;
 
     /**
      * MCP服务端地址
      */
-    @NotBlank(message = "服务端地址不能为空", groups = {AddGroup.class, EditGroup.class})
+    /** C2:stdio 类型不需要地址,必填性改由 Service 按 serverType 校验 */
     @Size(max = 300, message = "地址不能超过 300 字符", groups = {AddGroup.class, EditGroup.class})
     private String url;
 
@@ -74,6 +74,18 @@ public class AgentMcpServerBo implements Serializable {
      */
     @Size(max = 5000, message = "请求头过长", groups = {AddGroup.class, EditGroup.class})
     private String headers;
+
+    /** C2:stdio 可执行命令(命令名或绝对路径,须命中白名单) */
+    @Size(max = 200, message = "命令不能超过 200 字符", groups = {AddGroup.class, EditGroup.class})
+    private String command;
+
+    /** C2:stdio 启动参数(JSON 数组) */
+    @Size(max = 5000, message = "启动参数过长", groups = {AddGroup.class, EditGroup.class})
+    private String args;
+
+    /** C2:stdio 环境变量(JSON 对象),编辑时留空表示不修改既有值 */
+    @Size(max = 5000, message = "环境变量过长", groups = {AddGroup.class, EditGroup.class})
+    private String env;
 
     /**
      * 请求超时(秒)

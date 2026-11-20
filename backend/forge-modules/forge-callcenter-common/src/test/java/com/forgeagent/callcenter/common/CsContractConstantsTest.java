@@ -84,8 +84,9 @@ class CsContractConstantsTest {
 
     @Test
     void channelTypeCodesMatchSqlEnum() {
-        assertEquals(6, CsChannelType.values().length);
+        assertEquals(7, CsChannelType.values().length);
         assertEquals("wechat_mp", CsChannelType.WECHAT_MP.code());
+        assertEquals(CsChannelType.EMAIL, CsChannelType.fromCode("email"));
         assertEquals(CsChannelType.WIDGET, CsChannelType.fromCode("widget"));
         assertEquals(CsChannelType.VOICE_INBOUND, CsChannelType.fromCode("VOICE_INBOUND"));
         assertNull(CsChannelType.fromCode(null));

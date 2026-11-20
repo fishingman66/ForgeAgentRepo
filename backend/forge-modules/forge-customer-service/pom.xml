@@ -41,6 +41,16 @@
             <artifactId>forge-kg</artifactId>
         </dependency>
 
+        <!-- P3/B5:邮件渠道(IMAP 收信 + SMTP 回信);版本由 Spring Boot BOM 管理 -->
+        <dependency>
+            <groupId>jakarta.mail</groupId>
+            <artifactId>jakarta.mail-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>jakarta.mail</artifactId>
+        </dependency>
+
         <!-- 单元测试 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

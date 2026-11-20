@@ -5,6 +5,8 @@ import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -18,8 +20,12 @@ import java.util.regex.Pattern;
 /**
  * R5-4 URL 抓取的 SSRF 守护 + 正文抽取(纯静态,复用工作流 http 节点的防护语义)。
  *
- * <p>仅允许 http/https;DNS 解析后拒绝回环/私网/链路本地/通配/组播地址;
+ * <p>仅允许 http/https;DNS 解析后拒绝回环/私网/链路本地/通配/组播地址,并补齐
+ * <b>CGNAT 100.64/10</b> 与 <b>IPv6 ULA fc00::/7</b>(旧实现只看 IPv4 私有段,这两类可绕过);
  * <b>禁用重定向</b>(302 后二次解析是已知绕过面);响应体大小与超时硬上限。</p>
+ *
+ * <p>已知边界:DNS 只解析一次,发请求时 JDK 会再解析一次,理论上存在 DNS rebinding 窗口
+ * (与工作流 http 节点同口径,已在 docs 记录;需连接级 pin IP 才能根治)。</p>
  *
  * @author ForgeAgent
  */
@@ -41,7 +47,10 @@ public final class SsrfGuard {
     }
 
     /**
-     * 校验目标地址;不通过直接抛业务异常
+     * 校验目标地址;不通过直接抛业务异常。
+     *
+     * <p>遍历该主机的<b>全部 A/AAAA 记录</b>:只要有一条落在禁网段就拒绝,
+     * 避免"多记录里混一条内网"的绕过。</p>
      */
     public static void verify(String url) {
         URI uri;
@@ -58,36 +67,90 @@ public final class SsrfGuard {
         if (!StringUtils.hasText(host)) {
             throw new ServiceException("请求地址缺少主机名");
         }
-        InetAddress address;
+        InetAddress[] addresses;
         try {
-            address = InetAddress.getByName(host);
+            addresses = InetAddress.getAllByName(host);
         } catch (Exception e) {
             throw new ServiceException("目标主机无法解析:" + host);
         }
-        if (address.isLoopbackAddress() || address.isAnyLocalAddress() || address.isLinkLocalAddress()
-            || address.isSiteLocalAddress() || address.isMulticastAddress()) {
-            throw new ServiceException("禁止访问内网或保留地址");
+        if (addresses == null || addresses.length == 0) {
+            throw new ServiceException("目标主机无法解析:" + host);
+        }
+        for (InetAddress address : addresses) {
+            if (isBlocked(address)) {
+                throw new ServiceException("禁止访问内网或保留地址:" + host);
+            }
         }
     }
 
     /**
-     * 抓取并抽取正文(HTML 去脚本/样式/标签;纯文本原样)
+     * 判断地址是否属于本机/内网/保留网段。
+     *
+     * <p>{@code isSiteLocalAddress} 只覆盖 10/8、172.16/12、192.168/16,
+     * 不覆盖 CGNAT 与 IPv6 ULA,故单独判定。</p>
+     */
+    public static boolean isBlocked(InetAddress addr) {
+        if (addr.isAnyLocalAddress() || addr.isLoopbackAddress() || addr.isLinkLocalAddress()
+            || addr.isSiteLocalAddress() || addr.isMulticastAddress()) {
+            return true;
+        }
+        byte[] bytes = addr.getAddress();
+        if (addr instanceof Inet4Address) {
+            // 100.64.0.0/10 运营商级 NAT 网段
+            return (bytes[0] & 0xff) == 100 && (bytes[1] & 0xc0) == 64;
+        }
+        if (addr instanceof Inet6Address) {
+            // fc00::/7 唯一本地地址
+            return (bytes[0] & 0xfe) == 0xfc;
+        }
+        return false;
+    }
+
+    /**
+     * 发起一次 GET,返回<b>原始响应</b>(不校验状态码)。
+     *
+     * <p>给需要区分 404 的调用方用(如 robots.txt:404 表示"无限制",而不是抓取失败)。
+     * 仍然执行 {@link #verify(String)}、禁用重定向、限制 5MB。</p>
+     */
+    public static RawPage get(String url) {
+        verify(url);
+        try {
+            HttpResponse<InputStream> response = send(url);
+            byte[] bytes = readLimited(response.body());
+            return new RawPage(response.statusCode(),
+                response.headers().firstValue("content-type").orElse(""), bytes);
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceException("抓取失败:" + e.getMessage());
+        }
+    }
+
+    private static HttpResponse<InputStream> send(String url) throws Exception {
+        HttpClient client = HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+            .timeout(Duration.ofSeconds(20))
+            .header("User-Agent", "ForgeAgent-KB/1.0")
+            .GET()
+            .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    }
+
+    /**
+     * 抓取并抽取正文(HTML 去脚本/样式/标签;纯文本原样)。
+     *
+     * <p>3xx 与 非 200 一律失败:重定向会引入"校验过的地址 ≠ 实际访问的地址"。</p>
      */
     public static FetchedPage fetch(String url) {
         verify(url);
         try {
-            HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(Duration.ofSeconds(10))
-                .build();
-            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(Duration.ofSeconds(20))
-                .header("User-Agent", "ForgeAgent-KB/1.0")
-                .GET()
-                .build();
-            HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            HttpResponse<InputStream> response = send(url);
             if (response.statusCode() >= 300 && response.statusCode() < 400) {
-                throw new ServiceException("目标地址发生重定向(" + response.statusCode() + "),出于安全已禁用重定向,请直接填写最终地址");
+                throw new ServiceException("目标地址发生重定向(" + response.statusCode()
+                    + "),出于安全已禁用重定向,请直接填写最终地址");
             }
             if (response.statusCode() != 200) {
                 throw new ServiceException("抓取失败,HTTP " + response.statusCode());
@@ -152,5 +215,16 @@ public final class SsrfGuard {
      * 抓取结果
      */
     public record FetchedPage(String title, String text) {
+    }
+
+    /**
+     * 原始响应(不解析正文、不校验状态码)
+     */
+    public record RawPage(int status, String contentType, byte[] body) {
+
+        /** 按 UTF-8 解成文本(项目内既有页面的既定口径) */
+        public String text() {
+            return new String(body == null ? new byte[0] : body, StandardCharsets.UTF_8);
+        }
     }
 }

@@ -43,8 +43,12 @@
         </el-table-column>
         <el-table-column label="传输类型" width="130" align="center">
           <template #default="scope">
-            <el-tag size="small" :type="scope.row.serverType === 'sse' ? 'warning' : 'success'" effect="plain">
-              {{ scope.row.serverType === 'sse' ? 'SSE' : 'Streamable HTTP' }}
+            <el-tag
+              size="small"
+              :type="scope.row.serverType === 'sse' ? 'warning' : scope.row.serverType === 'stdio' ? 'info' : 'success'"
+              effect="plain"
+            >
+              {{ scope.row.serverType === 'sse' ? 'SSE' : scope.row.serverType === 'stdio' ? 'STDIO' : 'Streamable HTTP' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -94,12 +98,26 @@
           <el-select v-model="form.serverType" style="width: 100%">
             <el-option label="Streamable HTTP" value="streamable_http" />
             <el-option label="SSE" value="sse" />
+            <el-option label="STDIO(本机子进程)" value="stdio" />
           </el-select>
         </el-form-item>
-        <el-form-item label="服务地址" prop="url">
+        <el-form-item v-if="form.serverType !== 'stdio'" label="服务地址" prop="url">
           <el-input v-model="form.url" placeholder="如 http://127.0.0.1:3001/mcp" maxlength="300" />
         </el-form-item>
-        <el-form-item label="自定义请求头" prop="headers">
+        <template v-else>
+          <el-form-item label="启动命令" prop="command">
+            <el-input v-model="form.command" placeholder="如 npx 或 /usr/local/bin/node" maxlength="200" />
+            <div class="form-tip">必须在服务端 agent.mcp.stdio.allowed-commands 白名单内;默认白名单为空 = stdio 未启用</div>
+          </el-form-item>
+          <el-form-item label="启动参数" prop="args">
+            <el-input v-model="form.args" type="textarea" :rows="2" placeholder='JSON 数组,如 ["-y","@modelcontextprotocol/server-filesystem","/data"]' maxlength="5000" />
+          </el-form-item>
+          <el-form-item label="环境变量" prop="env">
+            <el-input v-model="form.env" type="textarea" :rows="2" :placeholder="envPlaceholder" maxlength="5000" />
+            <div class="form-tip">值不会回显(可能含密钥);编辑时留空表示沿用库内既有值,要改就整体重填</div>
+          </el-form-item>
+        </template>
+        <el-form-item v-if="form.serverType !== 'stdio'" label="自定义请求头" prop="headers">
           <el-input v-model="form.headers" type="textarea" :rows="3" placeholder='可选,JSON 格式,如 {"Authorization":"Bearer xxx"}' maxlength="5000" />
         </el-form-item>
         <el-row :gutter="12">
@@ -161,17 +179,44 @@ const isEdit = ref(false);
 const formRef = ref();
 const initForm: McpServerForm = {
   id: undefined, workspaceId: undefined, shared: false,
-  name: '', serverType: 'streamable_http', url: '', headers: '',
+  name: '', serverType: 'streamable_http', url: '', headers: '', command: '', args: '', env: '',
   timeoutSeconds: 30, approvalMode: 'auto', approvalTimeout: 300, description: ''
 };
 const form = ref<McpServerForm>({ ...initForm });
+
+/** C2:env 值不回显,编辑时提示"已配置 N 项",避免运营以为配置丢了 */
+const envPlaceholder = computed(() => {
+  const keys = form.value.envKeys;
+  if (isEdit.value && keys && keys.length) {
+    return `已配置 ${keys.length} 项:${keys.join(', ')}(留空不修改)`;
+  }
+  return 'JSON 对象,如 {"API_KEY":"xxx"}';
+});
 
 const rules = {
   name: [{ required: true, message: '请输入服务器名称', trigger: 'blur' }, { min: 2, max: 50, message: '长度须在 2-50 字符', trigger: 'blur' }],
   serverType: [{ required: true, message: '请选择传输类型', trigger: 'change' }],
   url: [
-    { required: true, message: '请输入服务地址', trigger: 'blur' },
-    { pattern: /^https?:\/\//, message: '地址须以 http:// 或 https:// 开头', trigger: 'blur' }
+    {
+      // C2:stdio 不需要服务地址,按传输类型动态校验
+      validator: (_rule: any, value: string, callback: (err?: Error) => void) => {
+        if (form.value.serverType === 'stdio') return callback();
+        if (!value) return callback(new Error('请输入服务地址'));
+        if (!/^https?:\/\//.test(value)) return callback(new Error('地址须以 http:// 或 https:// 开头'));
+        return callback();
+      },
+      trigger: 'blur'
+    }
+  ],
+  command: [
+    {
+      validator: (_rule: any, value: string, callback: (err?: Error) => void) => {
+        if (form.value.serverType !== 'stdio') return callback();
+        if (!value) return callback(new Error('请输入启动命令'));
+        return callback();
+      },
+      trigger: 'blur'
+    }
   ],
   headers: [
     {
@@ -230,11 +275,14 @@ const submitForm = () => {
     if (!valid) return;
     dialog.value.saving = true;
     try {
+      // envKeys 是后端回显的只读字段,不能回传
+      const payload: McpServerForm = { ...form.value };
+      delete payload.envKeys;
       if (isEdit.value) {
-        await updateMcpServer(form.value);
+        await updateMcpServer(payload);
         proxy?.$modal.msgSuccess('修改成功');
       } else {
-        await addMcpServer(form.value);
+        await addMcpServer(payload);
         proxy?.$modal.msgSuccess('新增成功');
       }
       dialog.value.visible = false;

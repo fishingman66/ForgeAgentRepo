@@ -134,4 +134,28 @@ public class CsChannelSaveBo implements Serializable {
      */
     @Size(max = 10, message = "语言不能超过 10 字符", groups = {AddGroup.class, EditGroup.class})
     private String locale;
+
+    /** B5:企微安全模式 EncodingAESKey(留空表示不修改;填写即启用加密模式) */
+    private String encodingAesKey;
+
+    /** B5:企微 CorpID */
+    private String corpId;
+
+    /** B5:邮件渠道配置 JSON(留空表示不修改) */
+    private String channelConfig;
+
+    /** A2:挂件主题色(#RRGGBB) */
+    private String widgetTheme;
+
+    /** A2:挂件形态 bubble/sidebar */
+    private String widgetMode;
+
+    /** A2:开场主动消息 */
+    private String widgetWelcome;
+
+    /** A2:挂件扩展配置 JSON */
+    private String widgetConfig;
+
+    /** D2:挂件默认语言 zh_CN/en_US */
+    private String widgetLang;
 }

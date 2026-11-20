@@ -46,6 +46,12 @@ public class CsModuleProperties {
     /** 渠道回调验签密钥的加密主密钥;生产环境必须覆盖。 */
     private String channelSecretKey = "dev-only-cs-secret-key-change-me";
 
+    /**
+     * P3 / B5:邮件渠道轮询开关。默认关闭——没有邮件渠道的部署不该去连 IMAP,
+     * 且 IMAP 凭据属于渠道级配置,启用前需先在渠道页填好。
+     */
+    private Boolean emailIngestEnabled = false;
+
     /** 渠道回调时间窗(秒),超出直接拒绝,防重放。 */
     private Integer channelCallbackToleranceSeconds = 300;
 

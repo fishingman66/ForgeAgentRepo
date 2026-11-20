@@ -35,6 +35,9 @@ export interface CsTicketEvent {
   fromStatus: string | null;
   toStatus: string | null;
   actorType: string;
+  actorId?: string | null;
+  targetUserId?: number | null;
+  ticketId?: number;
   note: string | null;
   createTime: string | null;
 }
@@ -51,6 +54,12 @@ export interface CsChannel {
   handoffPolicy: string;
   sessionMode: string;
   channelSecret: string;
+  /** B5:企微 EncodingAESKey(留空不改;填写即启用加密模式) */
+  encodingAesKey?: string;
+  /** B5:企微 CorpID */
+  corpId?: string;
+  /** B5:邮件渠道配置 JSON(留空不改;含密码,不回显) */
+  channelConfig?: string;
   corsAllowlist: string;
   rateLimit: number;
   status: string;
@@ -62,6 +71,8 @@ export interface CsChannel {
   widgetWelcome?: string;
   /** A2:扩展配置 JSON */
   widgetConfig?: string;
+  /** D2:挂件默认语言 zh_CN/en_US */
+  widgetLang?: string;
 }
 
 export const listTickets = (status?: string): AxiosPromise<CsTicket[]> =>
@@ -102,6 +113,10 @@ export const listSeats = () =>
 /** A3 内部备注:NOTE 事件,仅坐席可见,不进访客消息通道。 */
 export const addTicketNote = (id: number, note: string) =>
   request({ url: `/agent/customerservice/tickets/${id}/note`, method: 'post', data: { note } });
+
+/** A3 @提及增量:只返回当前登录坐席被提及的事件(sinceId 为游标)。 */
+export const listMentions = (sinceId = 0): AxiosPromise<CsTicketEvent[]> =>
+  request({ url: '/agent/customerservice/mentions', method: 'get', params: { sinceId } });
 
 /** A3 坐席 Copilot 文本改写:polish / translate_en / translate_zh。 */
 export const rewriteText = (conversationId: number, text: string, mode: string) =>

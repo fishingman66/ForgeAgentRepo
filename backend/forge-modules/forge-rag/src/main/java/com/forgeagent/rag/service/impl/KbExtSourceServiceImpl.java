@@ -55,9 +55,17 @@ public class KbExtSourceServiceImpl implements KbExtSourceService {
             throw new ServiceException("不支持的外部源类型:" + sourceType + ",可选 "
                 + connectorMap().keySet());
         }
+        // B2:骨架连接器在登记阶段就拒绝,不留"可保存但同步必失败"的入口
+        if (!connector.available()) {
+            throw new ServiceException(sourceType + " 来源尚未接入(SPI 已就绪,当前为占位实现)");
+        }
         if ("URL".equals(type)) {
             // 登记即校验:地址非法/内网地址不应等到同步才暴露
             com.forgeagent.rag.service.ext.SsrfGuard.verify(UrlExtSourceConnector.urlOf(configJson));
+        } else if ("SITEMAP".equals(type)) {
+            // 同上:sitemap 入口同样做 SSRF 预校验
+            com.forgeagent.rag.service.ext.SsrfGuard.verify(
+                com.forgeagent.rag.service.ext.SitemapCrawlerConnector.sitemapUrlOf(configJson));
         }
         AgentKbExtSource source = new AgentKbExtSource();
         source.setKnowledgeId(knowledgeId);

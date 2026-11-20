@@ -518,7 +518,8 @@ public class ChatContextAssembler {
             .filter(s -> resourceGuard.readableBy(s.getWorkspaceId(), callerWorkspaceId))
             .map(s -> new ToolAssembler.McpDef(
                 s.getId(), s.getName(), s.getServerType(), s.getUrl(), s.getHeaders(),
-                s.getTimeoutSeconds(), s.getApprovalMode(), s.getApprovalTimeout()))
+                s.getTimeoutSeconds(), s.getApprovalMode(), s.getApprovalTimeout(),
+                s.getCommand(), s.getArgs(), s.getEnv()))
             .toList();
     }
 }

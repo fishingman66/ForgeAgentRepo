@@ -5,9 +5,17 @@ export interface McpServerVO {
   workspaceId?: number | string;
   name: string;
   description?: string;
-  /** 传输类型(sse/streamable_http) */
+  /** 传输类型(sse/streamable_http/stdio) */
   serverType: string;
   url: string;
+  /** C2:stdio 可执行命令 */
+  command?: string;
+  /** C2:stdio 启动参数(JSON 数组) */
+  args?: string;
+  /** C2:环境变量值后端不回显,恒为 null */
+  env?: string;
+  /** C2:环境变量键名列表(仅键名) */
+  envKeys?: string[];
   /** 自定义请求头(JSON) */
   headers?: string;
   timeoutSeconds?: number;
@@ -34,6 +42,14 @@ export interface McpServerForm {
   serverType: string;
   url: string;
   headers?: string;
+  /** C2:stdio 可执行命令(须在服务端白名单内) */
+  command?: string;
+  /** C2:stdio 启动参数(JSON 数组) */
+  args?: string;
+  /** C2:stdio 环境变量(JSON 对象);编辑时留空表示沿用库内既有值 */
+  env?: string;
+  /** C2:环境变量键名(后端回显,仅用于占位提示,提交时剔除) */
+  envKeys?: string[];
   timeoutSeconds?: number;
   approvalMode?: string;
   approvalTimeout?: number;

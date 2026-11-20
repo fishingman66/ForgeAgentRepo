@@ -55,6 +55,21 @@ public class AgentMcpServerVo implements Serializable {
      */
     private String headers;
 
+    /** C2:stdio 可执行命令 */
+    private String command;
+
+    /** C2:stdio 启动参数(JSON 数组) */
+    private String args;
+
+    /**
+     * C2:stdio 环境变量 —— 值一律不回显(可能含 API Key)。
+     * 前端只展示 {@link #envKeys} 的个数,编辑时留空表示沿用库内既有值。
+     */
+    private String env;
+
+    /** C2:环境变量键名列表(仅键名,供管理端展示"已配置 N 项") */
+    private java.util.List<String> envKeys;
+
     /**
      * 请求超时(秒)
      */

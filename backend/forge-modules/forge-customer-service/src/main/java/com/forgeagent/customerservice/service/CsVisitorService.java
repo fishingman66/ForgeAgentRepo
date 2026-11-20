@@ -94,8 +94,22 @@ public class CsVisitorService {
 
     /** 建立或复用活跃会话;返回 conversationId / visitorToken / reused。 */
     public com.forgeagent.customerservice.domain.vo.CsSendResultVo createSession(CsChannel channel, String externalUserId) {
+        return createSession(channel, externalUserId, null, null);
+    }
+
+    /**
+     * A2 宿主上下文桥:externalUserId 绑定访客身份,pageUrl/orderId 落到会话上,
+     * 供会话详情/排障/坐席侧扩展读取(当前列表页未展示,字段已持久化)。三者都做长度与协议校验。
+     */
+    public com.forgeagent.customerservice.domain.vo.CsSendResultVo createSession(CsChannel channel, String externalUserId,
+                                                                                String sourceUrl, String orderId) {
         if (externalUserId == null || externalUserId.isBlank() || externalUserId.length() > 128) {
             throw new ServiceException("访客标识无效");
+        }
+        String safeUrl = safeSourceUrl(sourceUrl);
+        String safeOrderId = orderId == null ? null : orderId.trim();
+        if (safeOrderId != null && (safeOrderId.isEmpty() || safeOrderId.length() > 64)) {
+            safeOrderId = null;
         }
         CsVisitor visitor = visitorMapper.selectOne(new LambdaQueryWrapper<CsVisitor>()
             .eq(CsVisitor::getChannelCode, channel.getChannelCode())
@@ -141,6 +155,8 @@ public class CsVisitorService {
         conv.setStatus("ACTIVE");
         conv.setLastVisitorAt(new Date());
         conv.setCreateTime(new Date());
+        conv.setSourceUrl(safeUrl);
+        conv.setOrderId(safeOrderId);
         // D1:会话创建时判定一次灰度版本并锁进会话,同会话后续轮次沿用(ADR-03)
         conv.setPinnedVersion(chatFacade.decidePinnedVersion(channel.getAgentId(), visitor.getId()));
         conversationMapper.insert(conv);
@@ -592,6 +608,37 @@ public class CsVisitorService {
     /** C4:供流式端点复用同一套脱敏与幂等口径。 */
     public String maskContent(String content) {
         return Boolean.FALSE.equals(properties.getPiiMaskEnabled()) ? content : CsPiiMasker.mask(content);
+    }
+
+    /**
+     * A2:宿主页面 URL 只接受 http/https,去 query/hash 防把 token 写进库,超长截断到列宽。
+     */
+    static String safeSourceUrl(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            java.net.URI uri = java.net.URI.create(raw.trim());
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                return null;
+            }
+            if (uri.getHost() == null || uri.getHost().isBlank()) {
+                return null;
+            }
+            StringBuilder normalized = new StringBuilder();
+            normalized.append(scheme.toLowerCase()).append("://").append(uri.getHost());
+            if (uri.getPort() > 0) {
+                normalized.append(':').append(uri.getPort());
+            }
+            if (uri.getPath() != null) {
+                normalized.append(uri.getPath());
+            }
+            String value = normalized.toString();
+            return value.length() > 500 ? value.substring(0, 500) : value;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public long dedupKey(CsConversation conv, Long conversationId) {

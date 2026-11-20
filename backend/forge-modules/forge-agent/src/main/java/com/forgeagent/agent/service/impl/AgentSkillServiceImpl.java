@@ -156,6 +156,13 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
         if (!"0".equals(skill.getStatus())) {
             throw new ServiceException("技能已停用,不能安装");
         }
+        // C5 修正:此前只校验了技能可见性,没校验 Agent 归属 —— 任意登录用户可把技能
+        // 绑到别人空间的 Agent 上。绑定是"改 Agent 配置"的写操作,必须走写校验。
+        AgentInfo agent = agentMapper.selectById(agentId);
+        if (agent == null) {
+            throw new ServiceException("Agent 不存在");
+        }
+        resourceGuard.assertWritable(agent.getWorkspaceId());
         Long existsCount = installMapper.selectCount(new LambdaQueryWrapper<AgentSkillInstall>()
             .eq(AgentSkillInstall::getSkillId, skillId)
             .eq(AgentSkillInstall::getAgentId, agentId));
@@ -175,6 +182,12 @@ public class AgentSkillServiceImpl implements IAgentSkillService {
 
     @Override
     public Boolean uninstallFromAgent(Long skillId, Long agentId) {
+        // C5 修正:与安装对称,解绑同样是改 Agent 配置,必须校验 Agent 归属
+        AgentInfo agent = agentMapper.selectById(agentId);
+        if (agent == null) {
+            return false;
+        }
+        resourceGuard.assertWritable(agent.getWorkspaceId());
         // 关联表语义:卸载即断关系,物理删除
         return installMapper.physicalUnbind(skillId, agentId) > 0;
     }

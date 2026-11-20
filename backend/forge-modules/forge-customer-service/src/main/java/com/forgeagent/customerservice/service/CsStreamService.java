@@ -21,7 +21,10 @@ import com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -81,7 +84,8 @@ public class CsStreamService {
             .eq(CsMessageReceipt::getClientMsgId, clientMsgId).last("limit 1"));
         if (old != null) {
             emitter.send("chat_done", Map.of("content",
-                old.getReplyContent() == null ? "" : old.getReplyContent(), "reused", true));
+                old.getReplyContent() == null ? "" : old.getReplyContent(), "reused", true,
+                "citations", List.of()));
             return;
         }
 
@@ -93,8 +97,12 @@ public class CsStreamService {
         Long messageId = null;
         boolean fallback = false;
         boolean cachedHit = false;
+        // A1:引用来源随终帧下发,前端在气泡下方展示;最多 3 条,只给标题不给内部 ID
+        List<Map<String, Object>> citations = new ArrayList<>();
+        LinkedHashSet<String> citationKeys = new LinkedHashSet<>();
         if (faq != null) {
             reply = faq.getAnswer();
+            addCitation(citations, citationKeys, faq.getQuestion(), "faq");
             emitter.send("chat_chunk", Map.of("content", reply));
         } else {
             // P1:语义缓存命中则不走检索与模型,切片下发让观感与流式一致(不掺人为延迟)
@@ -113,6 +121,12 @@ public class CsStreamService {
                 CsKnowledgeGateway.RetrievalOutcome outcome = knowledgeGateway.retrieve(
                     channel.getWorkspaceId(), knowledgeIds, expansion.query());
                 List<KnowledgeSearchHitVo> hits = outcome.hits();
+                for (KnowledgeSearchHitVo hit : hits) {
+                    if (citations.size() >= 3) {
+                        break;
+                    }
+                    addCitation(citations, citationKeys, hit.getFileName(), "doc");
+                }
                 // M4 后续:检索扩展效果埋点
                 kgExpandMetricService.record(channel.getWorkspaceId(),
                     !expansion.terms().isEmpty(), hits.isEmpty());
@@ -168,9 +182,25 @@ public class CsStreamService {
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         emitter.send("chat_done", Map.of("content", reply, "clientMsgId", clientMsgId,
-            "fallback", fallback, "cached", cachedHit));
+            "fallback", fallback, "cached", cachedHit, "citations", citations));
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), conv.getTicketId(),
-            Map.of("content", reply, "clientMsgId", clientMsgId, "fallback", fallback)));
+            Map.of("content", reply, "clientMsgId", clientMsgId, "fallback", fallback, "citations", citations)));
+    }
+
+    /** 引用只保留标题+类型,空标题跳过;按标题去重,防止同一文档多 chunk 重复。 */
+    private static void addCitation(List<Map<String, Object>> target, LinkedHashSet<String> seen,
+                                    String title, String type) {
+        if (title == null || title.isBlank() || target.size() >= 3) {
+            return;
+        }
+        String normalized = title.trim();
+        if (!seen.add(normalized)) {
+            return;
+        }
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("title", normalized.length() > 120 ? normalized.substring(0, 120) : normalized);
+        item.put("type", type);
+        target.add(item);
     }
 
     /** P3:会话首条消息判定一次并锁定接待 Agent(判定口径同 CsVisitorService)。 */

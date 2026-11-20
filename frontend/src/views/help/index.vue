@@ -17,9 +17,11 @@ interface HelpArticle {
   source: string;
   updateTime?: string;
   segments?: Array<{ text: string; hit: boolean }>;
+  /** F3:当前语言无内容,后端用默认语言兜底 */
+  fallback?: boolean;
 }
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -33,8 +35,42 @@ const searched = ref(false);
 const feedbackSent = ref(false);
 
 const apiBase = '/help-api';
+/** 当前语言下是否出现了默认语言兜底文章 */
+const hasFallback = computed(() => articles.value.some((a) => a.fallback));
 
 const helpHref = (targetLang: string) => `/help/${targetLang}`;
+
+/**
+ * F3 SEO:SPA 没有 SSR,head 里的 hreflang 必须由路由变化时动态维护。
+ * 只声明语言入口页的互链;文章详情按自身 locale 只给 canonical(一篇文章只有一种语言)。
+ */
+const SEO_ATTR = 'data-help-seo';
+const clearSeoLinks = () => {
+  document.head.querySelectorAll(`link[${SEO_ATTR}]`).forEach((n) => n.remove());
+};
+const addSeoLink = (rel: string, href: string, hreflang?: string) => {
+  const link = document.createElement('link');
+  link.setAttribute('rel', rel);
+  link.setAttribute('href', href);
+  link.setAttribute(SEO_ATTR, '1');
+  if (hreflang) {
+    link.setAttribute('hreflang', hreflang);
+  }
+  document.head.appendChild(link);
+};
+const applySeoLinks = () => {
+  clearSeoLinks();
+  const origin = window.location.origin;
+  const query = `?channel=${encodeURIComponent(channelCode.value)}`;
+  const path = current.value ? `${helpHref(lang.value)}/${current.value.slug}` : helpHref(lang.value);
+  addSeoLink('canonical', origin + path + query);
+  if (!current.value) {
+    for (const l of ['zh_CN', 'en_US']) {
+      addSeoLink('alternate', origin + helpHref(l) + query, l === 'en_US' ? 'en' : 'zh-CN');
+    }
+    addSeoLink('alternate', origin + helpHref('zh_CN') + query, 'x-default');
+  }
+};
 
 const parseRoute = () => {
   const p = route.params;
@@ -46,6 +82,11 @@ const parseRoute = () => {
   if (typeof q === 'string' && q) {
     channelCode.value = q;
   }
+  // D2:UI 语言必须随 URL 前缀切换,否则 /help/en_US 会出现"英文文章 + 中文界面"
+  locale.value = lang.value;
+  document.documentElement.lang = lang.value === 'en_US' ? 'en' : 'zh-CN';
+  document.title = t('help.title');
+  applySeoLinks();
 };
 
 const apiFetch = async (path: string) => {
@@ -96,8 +137,14 @@ const loadDetail = async () => {
   }
   loading.value = true;
   try {
-    const data = await apiFetch(`/${channelCode.value}/articles/${current.value.slug}`);
+    const data = await apiFetch(`/${channelCode.value}/articles/${current.value.slug}?locale=${lang.value}`);
     current.value = data || null;
+    if (data?.title) {
+      document.title = `${data.title} - ${t('help.title')}`;
+    }
+    if (data?.fallback) {
+      ElMessage.info(t('help.fallbackNotice'));
+    }
     if (!data) {
       ElMessage.warning(t('help.notFound'));
     }
@@ -176,6 +223,7 @@ onMounted(() => {
 
         <section class="hc-list">
           <h2>{{ searched ? t('help.searchButton') : t('help.allArticles') }} · {{ articles.length }}</h2>
+          <div v-if="hasFallback" class="hc-fallback">{{ t('help.fallbackNotice') }}</div>
           <div v-if="loading" class="hc-empty">{{ t('help.searching') }}</div>
           <div v-else-if="!articles.length" class="hc-empty">
             <p>{{ t('help.empty') }}</p>
@@ -190,6 +238,7 @@ onMounted(() => {
             <div class="hc-card-meta">
               <span class="hc-tag">{{ a.source === 'faq' ? t('help.faq') : t('help.latest') }}</span>
               <span v-if="a.locale !== lang" class="hc-tag hc-tag-muted">{{ a.locale }}</span>
+              <span v-if="a.fallback" class="hc-tag hc-tag-muted">{{ t('help.notTranslated') }}</span>
               <span class="hc-time">{{ formatTime(a.updateTime) }}</span>
             </div>
           </div>
@@ -199,6 +248,7 @@ onMounted(() => {
       <template v-else>
         <section class="hc-article">
           <button class="hc-back" type="button" @click="backToList">← {{ t('help.back') }}</button>
+          <div v-if="current.fallback" class="hc-fallback">{{ t('help.fallbackNotice') }}</div>
           <h1>{{ current.title || t('help.latest') }}</h1>
           <div class="hc-article-body">{{ current.summary }}</div>
           <div class="hc-feedback">
@@ -242,6 +292,7 @@ onMounted(() => {
 .hc-tag-muted { background: var(--el-fill-color); color: var(--el-text-color-secondary); }
 .hc-time { font-size: 12px; color: var(--el-text-color-placeholder); margin-left: auto; }
 .hc-empty { padding: 32px; text-align: center; color: var(--el-text-color-secondary); }
+.hc-fallback { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px; background: var(--el-color-warning-light-9); color: var(--el-color-warning-dark-2); }
 .hc-empty-hint { font-size: 13px; color: var(--el-text-color-placeholder); }
 .hc-back { border: none; background: none; color: var(--el-color-primary); cursor: pointer; padding: 0 0 12px; font-size: 14px; }
 .hc-article h1 { font-size: 26px; margin: 8px 0 20px; }

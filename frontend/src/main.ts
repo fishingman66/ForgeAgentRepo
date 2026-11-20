@@ -39,3 +39,12 @@ app.use(plugins);
 directive(app);
 
 app.mount('#app');
+
+// D3 PWA:仅生产注册,失败静默(离线能力是增强项,不能影响首屏可用性)
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* 注册失败(非 HTTPS / 隐私模式)不提示用户 */
+    });
+  });
+}

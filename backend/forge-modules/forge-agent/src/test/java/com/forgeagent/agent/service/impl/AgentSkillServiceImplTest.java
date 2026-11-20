@@ -76,6 +76,11 @@ class AgentSkillServiceImplTest {
     void setUp() {
         service = new AgentSkillServiceImpl(skillMapper, installMapper, agentMapper, resourceGuard,
             skillVersionService);
+        // C5 起安装/卸载要校验 Agent 归属:统一给一个属于当前空间的 Agent
+        AgentInfo agent = new AgentInfo();
+        agent.setId(2L);
+        agent.setWorkspaceId(10L);
+        org.mockito.Mockito.lenient().when(agentMapper.selectById(2L)).thenReturn(agent);
     }
 
     private static AgentSkill skill(Long id, String status) {
@@ -197,7 +202,8 @@ class AgentSkillServiceImplTest {
         when(installMapper.physicalUnbind(1L, 2L)).thenReturn(1);
         assertTrue(service.uninstallFromAgent(1L, 2L));
 
-        when(installMapper.physicalUnbind(1L, 3L)).thenReturn(0);
+        // C5 起 Agent 归属校验先于解绑:不存在的 Agent 在校验处即返回 false,physicalUnbind 不会被调用
+        org.mockito.Mockito.lenient().when(installMapper.physicalUnbind(1L, 3L)).thenReturn(0);
         assertFalse(service.uninstallFromAgent(1L, 3L));
     }
 

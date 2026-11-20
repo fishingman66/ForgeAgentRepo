@@ -108,7 +108,7 @@ onMounted(load);
 <template>
   <div class="cs-page">
     <el-row :gutter="12">
-      <el-col :span="8">
+      <el-col :xs="24" :md="8">
         <el-card shadow="never">
           <template #header>数据保护</template>
           <ul class="cs-list">
@@ -119,7 +119,7 @@ onMounted(load);
           </ul>
         </el-card>
       </el-col>
-      <el-col :span="16">
+      <el-col :xs="24" :md="16">
         <el-card shadow="never">
           <template #header>
             <div class="cs-header"><span>客服模板</span><el-button size="small" @click="load">刷新</el-button></div>

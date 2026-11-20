@@ -43,11 +43,12 @@ public class CsChannelCallbackController {
     @GetMapping(value = "/{type}/{code}", produces = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<String> verify(@PathVariable String type, @PathVariable String code,
                                          @RequestParam Map<String, String> params) {
-        if (!verified(type, code, params)) {
+        CsChannel channel = verified(type, code, params, null);
+        if (channel == null) {
             return ResponseEntity.status(403).body("fail");
         }
         CsChannelAdapter adapter = adapter(type);
-        String echo = adapter == null ? null : adapter.echo(params);
+        String echo = adapter == null ? null : adapter.echo(params, channel);
         return ResponseEntity.ok(echo == null ? "" : echo);
     }
 
@@ -55,40 +56,51 @@ public class CsChannelCallbackController {
     public ResponseEntity<String> receive(@PathVariable String type, @PathVariable String code,
                                           @RequestParam Map<String, String> params,
                                           @RequestBody(required = false) String body) {
-        if (!verified(type, code, params)) {
+        CsChannel channel = verified(type, code, params, body);
+        if (channel == null) {
             return ResponseEntity.status(403).body("fail");
         }
         CsChannelAdapter adapter = adapter(type);
         if (adapter == null) {
             return ResponseEntity.status(403).body("fail");
         }
-        CsInboundMessage inbound = adapter.parse(body, params);
+        CsInboundMessage inbound;
         try {
-            String reply = dispatch.handle(guard.require(code), inbound);
-            return ResponseEntity.ok(adapter.formatReply(inbound, reply));
+            inbound = adapter.parse(body, params, channel);
+        } catch (Exception e) {
+            // B5:加密模式解密/结构校验失败,不能当"暂不支持的消息"静默吞掉
+            log.warn("[CS] 渠道报文解析失败 type={} code={}: {}", type, code, e.getMessage());
+            return ResponseEntity.status(403).body("fail");
+        }
+        try {
+            String reply = dispatch.handle(channel, inbound);
+            return ResponseEntity.ok(adapter.formatReply(inbound, reply, channel));
         } catch (Exception e) {
             // 对外只回通用文案,细节留在服务端日志,避免渠道侧探测内部错误
             log.warn("[CS] 渠道消息处理失败 type={} code={}: {}", type, code, e.getMessage());
-            return ResponseEntity.ok(adapter.formatReply(inbound, "服务暂时不可用,请稍后再试"));
+            return ResponseEntity.ok(adapter.formatReply(inbound, "服务暂时不可用,请稍后再试", channel));
         }
     }
 
-    private boolean verified(String type, String code, Map<String, String> params) {
+    /**
+     * 验签 + 时间窗 + nonce 去重;通过返回渠道,失败返回 null(调用方统一 403)。
+     */
+    private CsChannel verified(String type, String code, Map<String, String> params, String body) {
         CsChannelAdapter adapter = adapter(type);
         if (adapter == null) {
-            return false;
+            return null;
         }
         try {
             CsChannel channel = guard.require(code);
-            if (!adapter.verify(channel, params, properties)) {
-                return false;
+            if (!adapter.verify(channel, params, body, properties)) {
+                return null;
             }
             // C4:nonce 短期去重,防止同一验签参数被重放(消息级幂等由 MsgId 兜底)
             guard.checkNonce(code, params.get("nonce"));
-            return true;
+            return channel;
         } catch (Exception e) {
             log.warn("[CS] 渠道验签异常 type={} code={}: {}", type, code, e.getMessage());
-            return false;
+            return null;
         }
     }
 

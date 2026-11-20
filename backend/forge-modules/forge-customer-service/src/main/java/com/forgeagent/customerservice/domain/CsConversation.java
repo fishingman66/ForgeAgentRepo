@@ -23,5 +23,9 @@ public class CsConversation {
     private java.math.BigDecimal lastSentimentScore;
     /** D1:灰度会话锁定的配置版本(agent_version.version_no),NULL=现行版;会话创建时判定一次不再变。 */
     private Integer pinnedVersion;
+    /** A2:宿主页面地址(只存 http/https,去 query/hash)。 */
+    private String sourceUrl;
+    /** A2:宿主订单号(最长 64)。 */
+    private String orderId;
     private Date lastVisitorAt, lastSeatAt, csatInvitedAt, createTime, updateTime;
 }

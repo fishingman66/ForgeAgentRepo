@@ -54,7 +54,9 @@ public class CsVisitorController extends BaseController {
         guard.checkRateLimit(channel, clientIp(request));
         guard.checkOrigin(channel, request.getHeader("Origin"));
         return R.ok(visitorService.createSession(channel,
-            bo == null || bo.getExternalUserId() == null ? "" : bo.getExternalUserId()));
+            bo == null || bo.getExternalUserId() == null ? "" : bo.getExternalUserId(),
+            bo == null ? null : bo.getPageUrl(),
+            bo == null ? null : bo.getOrderId()));
     }
 
     @PostMapping("/sessions/{cid}/messages")
@@ -173,6 +175,9 @@ public class CsVisitorController extends BaseController {
         }
         vo.setWelcome(channel.getWidgetWelcome());
         vo.setConfig(channel.getWidgetConfig());
+        if (org.springframework.util.StringUtils.hasText(channel.getWidgetLang())) {
+            vo.setLang(channel.getWidgetLang());
+        }
         vo.setEnabled("0".equals(channel.getStatus()));
         return R.data(vo);
     }

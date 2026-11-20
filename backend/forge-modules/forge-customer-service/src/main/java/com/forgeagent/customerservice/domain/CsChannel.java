@@ -14,6 +14,15 @@ public class CsChannel {
     private String channelCode, channelType, knowledgeIds, corsAllowlist;
     private String sessionMode, fallbackReply, handoffPolicy, locale, status, channelSecret;
     private String fallbackReplyEn;
+
+    /** B5:企微安全模式 EncodingAESKey(加密存储;非空即强制加密模式) */
+    private String encodingAesKey;
+
+    /** B5:企微 CorpID(receiveid 校验) */
+    private String corpId;
+
+    /** B5:邮件渠道配置 JSON(IMAP/SMTP,整体加密存储,不回显) */
+    private String channelConfig;
     /** 转人工关键词(P0):逗号分隔,空则用平台默认。 */
     private String handoffKeywords;
     /** B2:转人工规则链 JSON([{type,enabled,...}]),空用内置默认。 */
@@ -28,6 +37,9 @@ public class CsChannel {
     private String widgetWelcome;
     /** A2:挂件扩展配置 JSON(logo/position/size 等)。 */
     private String widgetConfig;
+
+    /** D2:挂件默认语言 zh_CN/en_US */
+    private String widgetLang;
     private Long workspaceId, agentId, ownerUserId, apiKeyId;
     private Integer rateLimit;
     private Date createTime, updateTime;

@@ -40,7 +40,7 @@ onMounted(load);
 <template>
   <div class="cs-page">
     <el-row :gutter="12">
-      <el-col v-for="item in cards" :key="item.key" :span="6">
+      <el-col v-for="item in cards" :key="item.key" :xs="12" :sm="8" :md="6">
         <el-card shadow="never">
           <div class="cs-label">{{ item.label }}</div>
           <div class="cs-value">{{ stats[item.key] ?? 0 }}{{ item.suffix }}</div>

@@ -6,7 +6,7 @@
  * 扩展点:语音通话弹屏(CALL_* 事件)、坐席状态切换、会话转接。
  */
 import { onMounted, onUnmounted, ref } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus';
 import {
   assignQueue,
   claimTicket,
@@ -16,6 +16,7 @@ import {
   getTicket,
   investigateTicket,
   listInvestigations,
+  listMentions,
   listTickets,
   transferTicket,
   transitionTicket
@@ -31,6 +32,39 @@ const summary = ref<CsHandoffSummary | null>(null);
 const events = ref<CsTicketEvent[]>([]);
 const statusFilter = ref('');
 const loading = ref(false);
+
+/* A3 @提及提醒:游标增量拉取,只提示新事件;失败下一轮重试,不推进游标。 */
+let mentionCursor = 0;
+let mentionPrimed = false;
+let mentionTimer: ReturnType<typeof setInterval> | null = null;
+const pollMentions = async () => {
+  try {
+    const res = await listMentions(mentionCursor);
+    const rows = res.data ?? [];
+    if (!mentionPrimed) {
+      // 首次只对齐游标,不把历史提及一次性弹出来
+      mentionPrimed = true;
+      for (const m of rows) {
+        mentionCursor = Math.max(mentionCursor, m.id);
+      }
+      return;
+    }
+    for (const m of rows) {
+      mentionCursor = Math.max(mentionCursor, m.id);
+      ElNotification({
+        title: '有人在备注中 @ 你',
+        message: m.note || '查看工单协作备注',
+        type: 'warning',
+        duration: 8000
+      });
+      if (current.value && m.ticketId === current.value.id) {
+        events.value.push(m);
+      }
+    }
+  } catch {
+    // 下一轮重试;游标未推进不丢提醒
+  }
+};
 
 const statusOptions = [
   { value: '', label: '全部' },
@@ -249,17 +283,27 @@ const decideInvestigation = async (approved: boolean) => {
   }
 };
 
-onUnmounted(stopPolling);
+onUnmounted(() => {
+  stopPolling();
+  if (mentionTimer) {
+    clearInterval(mentionTimer);
+    mentionTimer = null;
+  }
+});
 
 const canReply = () => current.value?.status === 'PROCESSING';
 
-onMounted(load);
+onMounted(() => {
+  load();
+  pollMentions();
+  mentionTimer = setInterval(pollMentions, 20000);
+});
 </script>
 
 <template>
   <div class="cs-workbench">
     <el-row :gutter="16">
-      <el-col :span="9">
+      <el-col :xs="24" :md="9">
         <el-card shadow="never">
           <template #header>
             <div class="cs-header">
@@ -280,7 +324,7 @@ onMounted(load);
         </el-card>
       </el-col>
 
-      <el-col :span="15">
+      <el-col :xs="24" :md="15">
         <el-card shadow="never">
           <template #header>
             <div class="cs-header">

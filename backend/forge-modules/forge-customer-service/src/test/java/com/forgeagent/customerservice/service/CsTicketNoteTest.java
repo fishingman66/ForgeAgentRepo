@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -88,5 +90,30 @@ class CsTicketNoteTest {
         when(ticketMapper.selectById(3L)).thenReturn(null);
         assertThrows(ServiceException.class, () -> service.addNote(3L, 1L, "x"));
         verifyNoInteractions(eventMapper);
+    }
+
+    /** A3:@提及要生成指向目标坐席的 MENTION 事件,且排除自己。 */
+    @Test
+    void noteWithMentionCreatesTargetedEvent() {
+        when(ticketMapper.selectById(4L)).thenReturn(ticket(4L));
+        service.addNote(4L, 42L, "请 @7 跟进,我自己 @42 不用提醒");
+
+        ArgumentCaptor<CsTicketEvent> cap = ArgumentCaptor.forClass(CsTicketEvent.class);
+        verify(eventMapper, times(2)).insert(cap.capture());
+        CsTicketEvent note = cap.getAllValues().get(0);
+        CsTicketEvent mention = cap.getAllValues().get(1);
+        assertEquals("NOTE", note.getEventType());
+        assertEquals("MENTION", mention.getEventType());
+        assertEquals(7L, mention.getTargetUserId());
+        assertEquals("42", mention.getActorId());
+        // 提及自己不再生成第二条 MENTION
+        assertEquals(1, cap.getAllValues().stream().filter(e -> "MENTION".equals(e.getEventType())).count());
+    }
+
+    @Test
+    void parseMentionsDedupesAndCaps() {
+        assertEquals(List.of(7L, 8L), CsTicketService.parseMentions("@7 @8 @7", 42L));
+        assertEquals(List.of(), CsTicketService.parseMentions("@42", 42L));
+        assertEquals(5, CsTicketService.parseMentions("@1 @2 @3 @4 @5 @6", 99L).size());
     }
 }

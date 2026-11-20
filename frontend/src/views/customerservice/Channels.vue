@@ -28,6 +28,9 @@ const routeForm = reactive({ channelCode: '', intentCode: '', agentId: undefined
 const form = reactive<CsChannel>({
   channelCode: '',
   channelType: 'widget',
+  encodingAesKey: '',
+  corpId: '',
+  channelConfig: '',
   agentId: 1,
   ownerUserId: 1,
   knowledgeIds: '',
@@ -41,13 +44,17 @@ const form = reactive<CsChannel>({
   widgetTheme: '#2563eb',
   widgetMode: 'bubble',
   widgetWelcome: '',
-  widgetConfig: ''
+  widgetConfig: '',
+  widgetLang: 'zh_CN'
 });
 
 const reset = () => {
   form.id = undefined;
   form.channelCode = '';
   form.channelType = 'widget';
+  form.encodingAesKey = '';
+  form.corpId = '';
+  form.channelConfig = '';
   form.agentId = 1;
   form.ownerUserId = 1;
   form.knowledgeIds = '';
@@ -62,6 +69,7 @@ const reset = () => {
   form.widgetMode = 'bubble';
   form.widgetWelcome = '';
   form.widgetConfig = '';
+  form.widgetLang = 'zh_CN';
 };
 
 const load = async () => {
@@ -161,7 +169,9 @@ onMounted(load);
         <el-table-column prop="sessionMode" label="会话模式" width="130" />
         <el-table-column prop="status" label="状态" width="90" />
         <el-table-column label="回调地址" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">{{ callbackUrl((row as CsChannel)) }}</template>
+          <template #default="{ row }">
+            {{ (row as CsChannel).channelType === 'email' ? 'IMAP 轮询(无回调地址)' : callbackUrl(row as CsChannel) }}
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }"><el-button link type="primary" size="small" @click="openEdit((row as CsChannel))">编辑</el-button></template>
@@ -222,6 +232,7 @@ onMounted(load);
             <el-option label="企业微信" value="wecom" />
             <el-option label="独立 H5" value="h5" />
             <el-option label="开放 API" value="openapi" />
+            <el-option label="邮件工单" value="email" />
           </el-select>
         </el-form-item>
         <el-form-item label="客服 Agent ID"><el-input-number v-model="form.agentId" :min="1" /></el-form-item>
@@ -242,6 +253,24 @@ onMounted(load);
           </el-select>
         </el-form-item>
         <el-form-item label="回调验签密钥"><el-input v-model="form.channelSecret" placeholder="公众号/企微回调 token" /></el-form-item>
+        <template v-if="form.channelType === 'wecom'">
+          <el-form-item label="EncodingAESKey">
+            <el-input v-model="form.encodingAesKey" placeholder="43 位;填写后强制走加密模式,留空表示不修改" />
+            <div class="cs-tip">加密模式:企微后台「接收消息」选择安全模式后必填;配了即强制加密,不会回退明文</div>
+          </el-form-item>
+          <el-form-item label="CorpID">
+            <el-input v-model="form.corpId" placeholder="ww 开头的企业 ID,用于密文 receiveid 校验" />
+          </el-form-item>
+        </template>
+        <el-form-item v-if="form.channelType === 'email'" label="邮件配置JSON">
+          <el-input
+            v-model="form.channelConfig"
+            type="textarea"
+            :rows="5"
+            placeholder='{"imapHost":"imap.example.com","imapPort":993,"imapUser":"support@example.com","imapPassword":"***","imapFolder":"INBOX","smtpHost":"smtp.example.com","smtpPort":465,"smtpUser":"support@example.com","smtpPassword":"***","fromAddress":"support@example.com","replyEnabled":true}'
+          />
+          <div class="cs-tip">含密码,整段加密存储且不回显;编辑时留空表示沿用原配置。轮询需在服务端开启 agent.customer-service.email-ingest-enabled</div>
+        </el-form-item>
         <el-form-item label="限流(次/分)"><el-input-number v-model="form.rateLimit" :min="1" :max="1000" /></el-form-item>
         <el-form-item label="挂件主题色"><el-input v-model="form.widgetTheme" placeholder="#2563eb" /></el-form-item>
         <el-form-item label="挂件形态">
@@ -252,6 +281,12 @@ onMounted(load);
         </el-form-item>
         <el-form-item label="开场消息"><el-input v-model="form.widgetWelcome" placeholder="留空则不展示" /></el-form-item>
         <el-form-item label="扩展配置JSON"><el-input v-model="form.widgetConfig" type="textarea" :rows="2" placeholder='{"position":"right","size":{"width":360,"height":520}}' /></el-form-item>
+        <el-form-item label="挂件默认语言">
+          <el-select v-model="form.widgetLang" style="width: 100%">
+            <el-option label="简体中文" value="zh_CN" />
+            <el-option label="English" value="en_US" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="form.status" style="width: 100%">
             <el-option label="启用" value="0" />

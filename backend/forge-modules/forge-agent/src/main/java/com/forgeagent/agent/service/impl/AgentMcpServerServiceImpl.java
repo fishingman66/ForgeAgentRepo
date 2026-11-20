@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.forgeagent.rag.service.ext.SsrfGuard;
 import com.forgeagent.agent.config.AgentRuntimeProperties;
+import com.forgeagent.agent.service.runner.McpStdioCommandValidator;
+import com.forgeagent.agent.service.runner.ToolAssembler;
 import com.forgeagent.agent.domain.AgentMcpServer;
 import com.forgeagent.agent.domain.bo.AgentMcpServerBo;
 import com.forgeagent.agent.domain.vo.AgentMcpServerVo;
@@ -38,11 +40,19 @@ import java.util.Set;
 @Service
 public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
 
-    private static final Set<String> SERVER_TYPES = Set.of("sse", "streamable_http");
+    private static final Set<String> SERVER_TYPES = Set.of("sse", "streamable_http", "stdio");
 
     private final AgentMcpServerMapper serverMapper;
     private final ResourceAccessGuard resourceGuard;
     private final AgentRuntimeProperties runtimeProperties;
+
+    /** P3 / C2:stdio 准入配置(setter 注入,不进构造器;未注入时按"未启用"拒绝标准输入传输) */
+    private com.forgeagent.agent.config.McpStdioProperties stdioProperties;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setStdioProperties(com.forgeagent.agent.config.McpStdioProperties props) {
+        this.stdioProperties = props;
+    }
 
     @Override
     public PageResult<AgentMcpServerVo> queryPageList(AgentMcpServerBo bo, PageQuery pageQuery) {
@@ -52,6 +62,7 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
             .orderByDesc(AgentMcpServer::getId);
         resourceGuard.applyVisible(wrapper, AgentMcpServer::getWorkspaceId);
         Page<AgentMcpServerVo> page = serverMapper.selectVoPage(pageQuery.build(), wrapper);
+        maskStdioSecrets(page.getRecords());
         return PageResult.build(page.getRecords(), page.getTotal());
     }
 
@@ -65,6 +76,7 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
         if (vo == null) {
             throw new ServiceException("MCP 服务器不存在");
         }
+        maskStdioSecrets(java.util.List.of(vo));
         return vo;
     }
 
@@ -151,24 +163,16 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
     }
 
     /**
-     * 按传输类型构建 AgentScope MCP 客户端(sse / streamable_http)
+     * 按传输类型构建 AgentScope MCP 客户端 —— 委托 {@link ToolAssembler#buildMcpWrapper}。
+     *
+     * <p>C2 起不再保留第二份传输分支:两处各写一遍分支是"改一处漏一处"的经典来源
+     * (对话链路支持 stdio、连接测试却不支持,运营点测试永远失败)。</p>
      */
     public static McpClientWrapper buildWrapper(AgentMcpServer server) {
-        McpClientBuilder builder = McpClientBuilder.create(server.getName())
-            .timeout(Duration.ofSeconds(server.getTimeoutSeconds() == null ? 30 : server.getTimeoutSeconds()))
-            .initializationTimeout(Duration.ofSeconds(30));
-        if ("sse".equals(server.getServerType())) {
-            builder.sseTransport(server.getUrl());
-        } else {
-            builder.streamableHttpTransport(server.getUrl());
-        }
-        if (StringUtils.isNotBlank(server.getHeaders())) {
-            Map<String, Object> headers = JsonUtils.parseMap(server.getHeaders());
-            if (headers != null) {
-                headers.forEach((k, v) -> builder.header(k, String.valueOf(v)));
-            }
-        }
-        return builder.buildSync();
+        return ToolAssembler.buildMcpWrapper(new ToolAssembler.McpDef(
+            server.getId(), server.getName(), server.getServerType(), server.getUrl(), server.getHeaders(),
+            server.getTimeoutSeconds(), server.getApprovalMode(), server.getApprovalTimeout(),
+            server.getCommand(), server.getArgs(), server.getEnv()));
     }
 
     private void closeQuietly(McpClientWrapper wrapper) {
@@ -203,10 +207,17 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
 
     private void validateConfig(AgentMcpServerBo bo) {
         if (!SERVER_TYPES.contains(bo.getServerType())) {
-            throw new ServiceException("传输类型必须为 sse 或 streamable_http");
+            throw new ServiceException("传输类型必须为 sse / streamable_http / stdio");
         }
         if (StringUtils.isNotBlank(bo.getHeaders()) && !JsonUtils.isJson(bo.getHeaders())) {
             throw new ServiceException("自定义请求头不是合法的 JSON");
+        }
+        if ("stdio".equals(bo.getServerType())) {
+            validateStdioConfig(bo);
+            return;
+        }
+        if (StringUtils.isBlank(bo.getUrl())) {
+            throw new ServiceException("服务端地址不能为空");
         }
         // 仅做协议白名单:内网/回环地址是 MCP 服务器的常见合法部署方式,不在此一刀切拦截
         URI uri;
@@ -226,6 +237,50 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
         // 开启后拒绝回环/私网/链路本地/组播,与工作流 http 节点同口径。
         if (runtimeProperties.isMcpSsrfGuardEnabled()) {
             SsrfGuard.verify(bo.getUrl());
+        }
+    }
+
+    /**
+     * C2:stdio 配置校验 —— 命令白名单 + 参数注入 + JSON 结构 + url 互斥。
+     *
+     * <p>白名单为空即"未启用 stdio"(fail-closed),不是"不校验"。</p>
+     */
+    private void validateStdioConfig(AgentMcpServerBo bo) {
+        if (StringUtils.isNotBlank(bo.getUrl())) {
+            throw new ServiceException("stdio 传输不使用服务端地址,请清空 url 后再保存");
+        }
+        if (StringUtils.isNotBlank(bo.getArgs()) && !JsonUtils.isJsonArray(bo.getArgs())) {
+            throw new ServiceException("启动参数必须是 JSON 数组,例如 [\"--stdio\"]");
+        }
+        if (StringUtils.isNotBlank(bo.getEnv()) && !JsonUtils.isJsonObject(bo.getEnv())) {
+            throw new ServiceException("环境变量必须是 JSON 对象,例如 {\"API_KEY\":\"xxx\"}");
+        }
+        java.util.List<String> argv = ToolAssembler.parseStdioArgs(bo.getArgs());
+        McpStdioCommandValidator.validate(bo.getCommand(), argv, stdioProperties);
+    }
+
+    /**
+     * C2:env 值一律不回显(可能含 API Key),只回键名。
+     *
+     * <p>编辑时前端看到"已配置 N 项"即可;要改值就整体重填,留空表示沿用库内既有值
+     * (MyBatis-Plus 的 updateById 会忽略 null 字段)。</p>
+     */
+    private void maskStdioSecrets(java.util.List<AgentMcpServerVo> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        for (AgentMcpServerVo vo : records) {
+            String env = vo.getEnv();
+            vo.setEnv(null);
+            if (StringUtils.isBlank(env)) {
+                continue;
+            }
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            var dict = JsonUtils.parseMap(env);
+            if (dict != null) {
+                keys.addAll(dict.keySet());
+            }
+            vo.setEnvKeys(keys);
         }
     }
 

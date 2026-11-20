@@ -12,6 +12,8 @@ import java.util.Date;
 public class CsTicketEvent {
     @TableId private Long id;
     private String eventType, fromStatus, toStatus, actorType, actorId, note, traceId;
+    /** A3:@提及的目标坐席(仅 MENTION 事件有值)。 */
+    private Long targetUserId;
     private Long ticketId;
     private Date createTime;
 }

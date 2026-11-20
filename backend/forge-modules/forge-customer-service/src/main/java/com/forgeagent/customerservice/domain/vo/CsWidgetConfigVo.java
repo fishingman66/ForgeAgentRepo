@@ -24,6 +24,9 @@ public class CsWidgetConfigVo {
     /** 扩展配置 JSON 原文(logo/position/size 等),前端自行解析 */
     private String config;
 
+    /** D2:挂件默认语言 zh_CN/en_US */
+    private String lang = "zh_CN";
+
     /** 是否启用挂件(渠道停用置 false) */
     private boolean enabled = true;
 }
