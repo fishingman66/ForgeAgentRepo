@@ -79,5 +79,9 @@ public class AgentWorkspaceVo implements Serializable {
      * 更新时间
      */
     private Date updateTime;
+  /** F2 品牌外观。 */
+  private String logoUrl;
+  private String themeColor;
+  private String helpCenterDomain;
 
 }

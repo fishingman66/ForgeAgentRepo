@@ -287,30 +287,69 @@
               <el-alert type="info" :closable="false" show-icon title="非 2xx 状态码视为执行失败;响应体注册为节点输出" />
             </template>
 
+            <!-- C1 表单收集节点 -->
+            <template v-if="selectedNode.type === 'form'">
+              <el-form-item label="表单标题">
+                <el-input v-model="selectedNode.config.formTitle" :disabled="readonly" maxlength="100" placeholder="请补充以下信息" />
+              </el-form-item>
+              <el-form-item label="字段">
+                <div v-for="(field, idx) in selectedNode.config.fields" :key="idx" class="branch-item">
+                  <el-input v-model="field.name" :disabled="readonly" placeholder="键名" size="small" style="width: 110px" />
+                  <el-input v-model="field.label" :disabled="readonly" placeholder="显示名" size="small" style="width: 110px" />
+                  <el-checkbox v-model="field.required" :disabled="readonly" size="small">必填</el-checkbox>
+                  <el-button v-if="!readonly" icon="Delete" size="small" circle @click="removeFormField(idx)" />
+                </div>
+                <el-button v-if="!readonly" icon="Plus" size="small" @click="addFormField">添加字段</el-button>
+              </el-form-item>
+              <el-alert type="info" :closable="false" show-icon
+                title="执行到该节点会暂停,字段随运行快照下发;填写后经 run/{id}/signal 回填,下游用 {{节点名.output.键名}} 取值" />
+            </template>
+
+            <!-- C1 等待事件节点 -->
+            <template v-if="selectedNode.type === 'wait'">
+              <el-form-item label="事件标识">
+                <el-input v-model="selectedNode.config.eventKey" :disabled="readonly" maxlength="64" placeholder="如 order_paid" />
+              </el-form-item>
+              <el-form-item label="超时(分)">
+                <el-input-number v-model="selectedNode.config.timeoutMinutes" :disabled="readonly" :min="0" :max="10080" style="width: 100%" />
+                <div class="field-hint">0 表示不超时;超时后节点失败,走失败策略</div>
+              </el-form-item>
+              <el-alert type="info" :closable="false" show-icon title="执行到该节点会暂停,外部事件到达后经 run/{id}/signal 携带 payload 唤醒" />
+            </template>
+
+            <!-- C1 转人工节点 -->
+            <template v-if="selectedNode.type === 'human_transfer'">
+              <el-form-item label="转人工原因">
+                <el-input v-model="selectedNode.config.reason" :disabled="readonly" maxlength="200" placeholder="工作流触发转人工" />
+              </el-form-item>
+              <el-alert type="info" :closable="false" show-icon
+                title="按运行输入里的 conversationId 建工单;缺少会话或客服模块未启用时节点直接失败(不会产出假工单)" />
+            </template>
+
             <!-- 通用:失败处理与重试(W5) -->
-            <el-form-item v-if="selectedNode.type !== 'start' && selectedNode.type !== 'end' && selectedNode.type !== 'parallel'" label="失败处理">
+            <el-form-item v-if="!policyExcluded(selectedNode.type)" label="失败处理">
               <el-select v-model="selectedNode.config.failStrategy" :disabled="readonly" style="width: 100%">
                 <el-option label="终止工作流并透出错误" value="terminate" />
                 <el-option label="继续执行并输出兜底值" value="continue" />
                 <el-option label="跳转到指定节点" value="goto" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="selectedNode.config.failStrategy === 'continue' && selectedNode.type !== 'start' && selectedNode.type !== 'end'" label="兜底输出">
+            <el-form-item v-if="selectedNode.config.failStrategy === 'continue' && !policyExcluded(selectedNode.type)" label="兜底输出">
               <el-input v-model="selectedNode.config.fallbackOutput" :disabled="readonly" type="textarea" :rows="2" placeholder="失败时注册为节点输出的内容,支持 {{变量}} 引用" />
             </el-form-item>
-            <el-form-item v-if="selectedNode.config.failStrategy === 'goto' && selectedNode.type !== 'start' && selectedNode.type !== 'end'" label="跳转目标">
+            <el-form-item v-if="selectedNode.config.failStrategy === 'goto' && !policyExcluded(selectedNode.type)" label="跳转目标">
               <el-select v-model="selectedNode.config.failureTargetNodeKey" :disabled="readonly" style="width: 100%">
                 <el-option v-for="n in nodes" :key="n.id" :label="`${n.name} (${getNodeTypeLabel(n.type)})`" :value="n.id" />
               </el-select>
             </el-form-item>
-            <el-form-item v-if="selectedNode.type !== 'start' && selectedNode.type !== 'end' && selectedNode.type !== 'parallel'" label="重试次数">
+            <el-form-item v-if="!policyExcluded(selectedNode.type)" label="重试次数">
               <el-input-number v-model="selectedNode.config.retryCount" :disabled="readonly" :min="0" :max="3" style="width: 100%" />
             </el-form-item>
-            <el-form-item v-if="selectedNode.config.retryCount && selectedNode.config.retryCount > 0 && selectedNode.type !== 'start' && selectedNode.type !== 'end'" label="重试间隔">
+            <el-form-item v-if="selectedNode.config.retryCount && selectedNode.config.retryCount > 0 && !policyExcluded(selectedNode.type)" label="重试间隔">
               <el-input-number v-model="selectedNode.config.retryIntervalMs" :disabled="readonly" :min="0" :max="5000" :step="100" style="width: 100%" />
               <div class="field-hint" v-pre>毫秒,上限 5000ms</div>
             </el-form-item>
-            <el-form-item v-if="selectedNode.type !== 'start' && selectedNode.type !== 'end' && selectedNode.type !== 'parallel'" label="执行超时">
+            <el-form-item v-if="!policyExcluded(selectedNode.type)" label="执行超时">
               <el-input-number v-model="selectedNode.config.timeoutMs" :disabled="readonly" :min="0" :max="600000" :step="1000" style="width: 100%" />
               <div class="field-hint" v-pre>毫秒,0 为不限;超时的节点不重试、不跳转,防止重复副作用</div>
             </el-form-item>
@@ -479,9 +518,11 @@
         <el-table-column label="时间" width="150">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="70" fixed="right">
+        <el-table-column label="操作" width="110" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="startReplay((row as WorkflowRunVO))">回放</el-button>
+            <el-button v-if="row.status === 'pending_approval'" link type="warning" size="small"
+              @click="wakeRun((row as WorkflowRunVO))">唤醒</el-button>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无运行记录,试运行后自动生成" :image-size="60" /></template>
@@ -511,7 +552,7 @@ import {
   saveWorkflow, validateWorkflow, trialRunWorkflowAsync,
   consumeWorkflowRunEvents,
   listWorkflowVersion, getWorkflowVersion, rollbackWorkflowVersion,
-  listWorkflowRun, getWorkflowRun
+  listWorkflowRun, getWorkflowRun, signalWorkflowRun
 } from '@/api/agent/workflow';
 import type {
   WorkflowValidateResult, WorkflowIssue,
@@ -575,6 +616,16 @@ interface NodeConfig {
   fallbackOutput?: string;
   /** W5:失败策略 goto 时的跳转目标节点 ID */
   failureTargetNodeKey?: string;
+  /** C1 表单节点:待收集字段(name 为写入上下文的键) */
+  fields?: Array<{ name: string; label?: string; required?: boolean; pattern?: string }>;
+  /** C1 表单节点:表单说明 */
+  formTitle?: string;
+  /** C1 等待节点:外部事件标识 */
+  eventKey?: string;
+  /** C1 等待节点:超时分钟(0 表示不超时) */
+  timeoutMinutes?: number;
+  /** C1 转人工节点:转人工原因(支持 {{变量}} 引用) */
+  reason?: string;
 }
 
 interface WorkflowNode {
@@ -704,13 +755,16 @@ const nodeGroups = [
     title: '调用',
     items: [
       { type: 'tool', name: '工具调用', desc: '调用已配置的工具', icon: 'Tools', color: '#909399' },
-      { type: 'http', name: 'HTTP 请求', desc: '调用外部 HTTP 接口', icon: 'Link', color: '#13c2c2' }
+      { type: 'http', name: 'HTTP 请求', desc: '调用外部 HTTP 接口', icon: 'Link', color: '#13c2c2' },
+      { type: 'human_transfer', name: '转人工', desc: '按会话建工单转接坐席', icon: 'Service', color: '#ff7a45' }
     ]
   },
   {
     title: '控制',
     items: [
       { type: 'approval', name: '人工审批', desc: '暂停等待人工审批后继续', icon: 'Stamp', color: '#9254de' },
+      { type: 'form', name: '表单收集', desc: '暂停收集结构化字段后继续', icon: 'EditPen', color: '#2f54eb' },
+      { type: 'wait', name: '等待事件', desc: '暂停等待外部事件唤醒', icon: 'Clock', color: '#8c8c8c' },
       { type: 'condition', name: '条件分支', desc: '按条件分流执行路径', icon: 'Branch', color: '#f56c6c' },
       { type: 'loop', name: '循环迭代', desc: '遍历集合逐项执行提示词', icon: 'Refresh', color: '#fa8c16' },
       { type: 'parallel', name: '并行分支', desc: '多分支并发执行后汇聚', icon: 'Share', color: '#eb2f96' },
@@ -733,7 +787,10 @@ const getNodeIcon = (type: string) => {
     http: 'Link',
     parallel: 'Share',
     join: 'Connection',
-    end: 'CircleCheck'
+    end: 'CircleCheck',
+    form: 'EditPen',
+    wait: 'Clock',
+    human_transfer: 'Service'
   };
   return map[type] || 'Box';
 };
@@ -751,7 +808,10 @@ const getNodeColor = (type: string) => {
     http: '#13c2c2',
     parallel: '#eb2f96',
     join: '#fa541c',
-    end: '#67c23a'
+    end: '#67c23a',
+    form: '#2f54eb',
+    wait: '#8c8c8c',
+    human_transfer: '#ff7a45'
   };
   return map[type] || '#909399';
 };
@@ -769,9 +829,25 @@ const getNodeTypeLabel = (type: string) => {
     http: 'HTTP 请求',
     parallel: '并行分支',
     join: '汇聚',
-    end: '结束'
+    end: '结束',
+    form: '表单收集',
+    wait: '等待事件',
+    human_transfer: '转人工'
   };
   return map[type] || type;
+};
+
+/** 暂停类节点(等待/表单/转人工)不接受重试与失败跳转:重试会重复产生副作用 */
+const policyExcluded = (type: string) => ['start', 'end', 'parallel', 'wait', 'form', 'human_transfer'].includes(type);
+
+const addFormField = () => {
+  if (!selectedNode.value) return;
+  const fields = selectedNode.value.config.fields || (selectedNode.value.config.fields = []);
+  fields.push({ name: 'field' + (fields.length + 1), label: '字段' + (fields.length + 1), required: false });
+};
+
+const removeFormField = (idx: number) => {
+  selectedNode.value?.config.fields?.splice(idx, 1);
 };
 
 const traceStatusText = (status: string) => {
@@ -929,6 +1005,24 @@ const loadRunList = async () => {
   }
 };
 
+/** C1:唤醒等待类节点(表单答案 / 外部事件 payload 作为节点输出) */
+const wakeRun = async (row: WorkflowRunVO) => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '填写表单答案或事件 payload(JSON)。审批类暂停请在审批中心处理。',
+      '唤醒等待节点',
+      { inputType: 'textarea', inputValue: '{}', confirmButtonText: '唤醒', cancelButtonText: '取消' }
+    );
+    await signalWorkflowRun(row.id, value || '{}');
+    ElMessage.success('已提交,工作流继续执行');
+    await loadRunList();
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e?.message || '唤醒失败');
+    }
+  }
+};
+
 /** 回放运行实例:画布加载执行时刻图快照,节点按轨迹状态着色 */
 const startReplay = async (row: WorkflowRunVO) => {
   const res = await getWorkflowRun(row.id);
@@ -1039,6 +1133,17 @@ const addNode = (type: string, x?: number, y?: number) => {
     defaultConfig.headers = '{}';
     defaultConfig.body = '';
     defaultConfig.timeoutSeconds = 30;
+  }
+  if (type === 'form') {
+    defaultConfig.formTitle = '请补充以下信息';
+    defaultConfig.fields = [{ name: 'field1', label: '字段1', required: true }];
+  }
+  if (type === 'wait') {
+    defaultConfig.eventKey = 'event';
+    defaultConfig.timeoutMinutes = 0;
+  }
+  if (type === 'human_transfer') {
+    defaultConfig.reason = '工作流触发转人工';
   }
   const newNode: WorkflowNode = {
     id,

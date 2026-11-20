@@ -54,6 +54,14 @@ export interface CsChannel {
   corsAllowlist: string;
   rateLimit: number;
   status: string;
+  /** A2:挂件主题色(#RRGGBB) */
+  widgetTheme?: string;
+  /** A2:挂件形态 bubble/sidebar */
+  widgetMode?: string;
+  /** A2:开场主动消息 */
+  widgetWelcome?: string;
+  /** A2:扩展配置 JSON */
+  widgetConfig?: string;
 }
 
 export const listTickets = (status?: string): AxiosPromise<CsTicket[]> =>
@@ -90,6 +98,15 @@ export const saveChannel = (data: CsChannel) =>
 
 export const listSeats = () =>
   request({ url: '/agent/customerservice/seats', method: 'get' });
+
+/** A3 内部备注:NOTE 事件,仅坐席可见,不进访客消息通道。 */
+export const addTicketNote = (id: number, note: string) =>
+  request({ url: `/agent/customerservice/tickets/${id}/note`, method: 'post', data: { note } });
+
+/** A3 坐席 Copilot 文本改写:polish / translate_en / translate_zh。 */
+export const rewriteText = (conversationId: number, text: string, mode: string) =>
+  request({ url: '/agent/customerservice/assist/rewrite', method: 'post',
+    data: text, params: { conversationId, mode } });
 
 /* ---------------- C2 运营 ---------------- */
 
@@ -130,6 +147,10 @@ export interface CsKnowledgeAnswer {
   status: string;
   effectiveFrom: string | null;
   effectiveTo: string | null;
+  /** B3 AI 候选元数据 */
+  citations?: string | null;
+  confidence?: number | string | null;
+  auditNote?: string | null;
 }
 
 export interface CsMetricDaily {
@@ -170,6 +191,14 @@ export const reviewQuality = (id: number, status: string) =>
 
 export const listAnswers = (status?: string): AxiosPromise<CsKnowledgeAnswer[]> =>
   request({ url: '/agent/customerservice/knowledge-answers', method: 'get', params: { status } });
+
+/** B3 FAQ 答案自动生成:对待审空答案生成候选+引用,仍 PENDING。 */
+export const generateFaqAnswers = (limit = 20) =>
+  request({ url: '/agent/customerservice/knowledge-answers/generate', method: 'post', params: { limit } });
+
+/** B3 成本估算:不实际生成。 */
+export const estimateFaqAnswers = (limit = 20) =>
+  request({ url: '/agent/customerservice/knowledge-answers/generate/estimate', method: 'get', params: { limit } });
 
 export const saveAnswer = (data: CsKnowledgeAnswer) =>
   request({ url: '/agent/customerservice/knowledge-answers', method: 'post', data });
@@ -942,6 +971,55 @@ export interface CsEvalCaseRow {
   review_status: string;
   create_time?: string;
 }
+
+/** ============ B4 AI 工单根因调查(RCA) ============ */
+export interface CsInvestigationEvidence {
+  seq: number;
+  evidenceType: string;
+  hypothesisTitle?: string;
+  queryText?: string;
+  resultDigest?: string;
+  rowCount?: number;
+  elapsedMs?: number;
+  success: boolean;
+  errorMessage?: string;
+}
+
+export interface CsInvestigation {
+  id: number;
+  ticketId: number;
+  status: string;
+  reportMd?: string;
+  errorMessage?: string;
+  hypotheses?: Array<Record<string, any>>;
+  evidences?: CsInvestigationEvidence[];
+  createTime?: string;
+  confirmedAt?: string;
+}
+
+/** 发起 AI 根因调查(异步,返回调查 ID) */
+export const investigateTicket = (ticketId: number, datasourceId: number | string) =>
+  request({
+    url: `/agent/customerservice/tickets/${ticketId}/investigate`,
+    method: 'post',
+    params: { datasourceId }
+  });
+
+/** 某工单的历史调查列表 */
+export const listInvestigations = (ticketId: number) =>
+  request({ url: `/agent/customerservice/tickets/${ticketId}/investigations`, method: 'get' });
+
+/** 调查详情(含证据链) */
+export const getInvestigation = (id: number) =>
+  request({ url: `/agent/customerservice/investigations/${id}`, method: 'get' });
+
+/** 坐席确认/驳回调查结论 */
+export const confirmInvestigation = (id: number, approved: boolean, note?: string) =>
+  request({
+    url: `/agent/customerservice/investigations/${id}/confirm`,
+    method: 'post',
+    data: { approved, note }
+  });
 
 /** D2:回流用例列表(默认待确认) */
 export const listEvalCases = (reviewStatus = '0', limit = 50) =>

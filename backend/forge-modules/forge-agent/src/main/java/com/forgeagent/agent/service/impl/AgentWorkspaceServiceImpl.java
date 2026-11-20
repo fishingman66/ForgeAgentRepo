@@ -65,6 +65,44 @@ public class AgentWorkspaceServiceImpl implements IAgentWorkspaceService {
         return vo;
     }
 
+    /** F2 SaaS:注册后自动建空间,显式指定 owner,不读登录态。失败返回 null 不抛。 */
+    @Override
+    public Long createForUser(Long userId, String userName) {
+        if (userId == null || userName == null || userName.isBlank()) {
+            return null;
+        }
+        try {
+            String name = "个人空间-" + userName;
+            // 名称全局唯一:冲突时加用户 ID 后缀再试一次
+            if (workspaceMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentWorkspace>()
+                .eq(AgentWorkspace::getName, name)) != null) {
+                name = name + "-" + userId;
+            }
+            AgentWorkspace entity = new AgentWorkspace();
+            entity.setName(name);
+            entity.setDescription("注册自动创建");
+            entity.setStatus("0");
+            entity.setOwnerId(userId);
+            if (workspaceMapper.insert(entity) <= 0) {
+                return null;
+            }
+            com.forgeagent.agentcore.domain.AgentWorkspaceMember member = new com.forgeagent.agentcore.domain.AgentWorkspaceMember();
+            member.setWorkspaceId(entity.getId());
+            member.setUserId(userId);
+            member.setRole(WorkspaceRole.ADMIN.getCode());
+            memberMapper.insert(member);
+            auditLogHelper.record(entity.getId(), "workspace.auto_create", "workspace", String.valueOf(entity.getId()),
+                "注册自动创建空间[" + name + "]", null,
+                java.util.Map.of("name", name, "ownerId", userId), "0", "RISK");
+            return entity.getId();
+        } catch (Exception e) {
+            // fail-safe:建空间失败不影响注册成功,日志告警可追溯
+            org.slf4j.LoggerFactory.getLogger(AgentWorkspaceServiceImpl.class)
+                .warn("[F2] 注册自动建空间失败 userId={}: {}", userId, e.getMessage());
+            return null;
+        }
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Boolean insertByBo(AgentWorkspaceBo bo) {

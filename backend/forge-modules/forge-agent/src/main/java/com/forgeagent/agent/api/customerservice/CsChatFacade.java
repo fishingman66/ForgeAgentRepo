@@ -47,6 +47,23 @@ public interface CsChatFacade {
     Integer decidePinnedVersion(Long agentId, Long visitorId);
 
     /**
+     * A3 坐席 Copilot:一次性短文本改写(润色/翻译),不进对话链路、不落消息。
+     *
+     * <p>复用该空间客服 Agent 绑定的模型,走 UtilityAgents 一次性调用;
+     * 模型缺失/调用失败一律返回 null,由调用方 fail-safe 保留原文。
+     * mode 白名单:polish / translate_en / translate_zh。</p>
+     */
+    String rewrite(Long agentId, String text, String mode);
+
+    /**
+     * B3 FAQ 答案自动生成:基于问题与参考片段,一次性生成候选答案(JSON 文本)。
+     *
+     * <p>返回 JSON 字符串含 answer / citations / confidence;模型不可用或解析失败返回 null。
+     * 生成结果一律由客服侧写 PENDING,不自动生效——人工审核是把关闭环。</p>
+     */
+    String draftAnswer(Long agentId, String question, String reference);
+
+    /**
      * 客服对话请求。
      *
      * @param sessionId          客服会话对应的 agent_session.id(新建时为空)

@@ -4,6 +4,29 @@ export default {
     dashboard: '首页',
     document: '项目文档'
   },
+  // 帮助中心(B1/F3):客户-facing 文案
+  help: {
+    title: '帮助中心',
+    subtitle: '查找答案,快速自助解决问题',
+    searchPlaceholder: '搜索问题、关键词...',
+    searchButton: '搜索',
+    searching: '搜索中...',
+    allArticles: '全部文章',
+    latest: '最新更新',
+    faq: '常见问题',
+    empty: '没有找到相关内容',
+    emptyHint: '试试换个关键词,或直接向 AI 提问',
+    askAi: '向 AI 提问',
+    turnHuman: '转人工',
+    wasHelpful: '这篇文章对你有帮助吗?',
+    helpful: '有帮助',
+    notHelpful: '没帮助',
+    feedbackDone: '感谢你的反馈',
+    back: '返回列表',
+    notFound: '文章不存在或已下线',
+    lang: '语言',
+    poweredBy: '由 ForgeAgent 提供支持'
+  },
   // 登录页面国际化
   login: {
     username: '用户名',

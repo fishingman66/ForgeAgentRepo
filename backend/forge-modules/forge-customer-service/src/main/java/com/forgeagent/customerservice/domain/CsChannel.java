@@ -20,6 +20,14 @@ public class CsChannel {
     private String handoffRules;
     /** C2:访客身份绑定方式(external_token/phone_claim 等),空=未配置(WRITE/HIGH_RISK 工具 deny)。 */
     private String identityBinding;
+    /** A2:挂件主题色(#RRGGBB),空用默认。 */
+    private String widgetTheme;
+    /** A2:挂件形态 bubble/sidebar。 */
+    private String widgetMode;
+    /** A2:开场主动消息。 */
+    private String widgetWelcome;
+    /** A2:挂件扩展配置 JSON(logo/position/size 等)。 */
+    private String widgetConfig;
     private Long workspaceId, agentId, ownerUserId, apiKeyId;
     private Integer rateLimit;
     private Date createTime, updateTime;

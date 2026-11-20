@@ -9,8 +9,10 @@ import { ElMessage } from 'element-plus';
 import {
   auditAnswer,
   createGapAnswer,
+  estimateFaqAnswers,
   expireAnswers,
   fromZeroHit,
+  generateFaqAnswers,
   ignoreGap,
   listAnswers,
   listKnowledgeGaps,
@@ -23,6 +25,7 @@ const gaps = ref<CsKnowledgeGapRow[]>([]);
 const statusFilter = ref('');
 const dialog = ref(false);
 const loading = ref(false);
+const generating = ref(false);
 const form = reactive({ question: '', answer: '' });
 
 const load = async () => {
@@ -99,6 +102,37 @@ const generate = async () => {
   }
 };
 
+/** B3 AI 生成候选答案:仍 PENDING,需人工审核;低置信度自动跳过。 */
+const aiGenerate = async () => {
+  generating.value = true;
+  try {
+    const res = await generateFaqAnswers(20);
+    const data = (res as unknown as { data?: { candidates: number; generated: number; skipped: number; estimatedCost: string | null } })?.data;
+    if (data) {
+      ElMessage.success(`候选 ${data.candidates} 条,已生成 ${data.generated} 条,低分跳过 ${data.skipped} 条(均待审核)`);
+    } else {
+      ElMessage.success('已触发 AI 候选生成,请刷新查看');
+    }
+    await load();
+  } catch (e) {
+    ElMessage.error((e as { msg?: string })?.msg || '生成失败,请确认已配置启用渠道与 Agent');
+  } finally {
+    generating.value = false;
+  }
+};
+
+/** B3 成本估算:先看预估再决定是否生成。 */
+const aiEstimate = async () => {
+  try {
+    const res = await estimateFaqAnswers(20);
+    const data = (res as unknown as { data?: { candidates: number; estimatedCost: string | null } })?.data;
+    const cost = data?.estimatedCost ? `,预估费用 ${data.estimatedCost}` : ',未配置单价';
+    ElMessage.info(`待生成候选 ${data?.candidates ?? 0} 条${cost}`);
+  } catch {
+    ElMessage.error('估算失败');
+  }
+};
+
 const expire = async () => {
   try {
     await expireAnswers();
@@ -119,6 +153,8 @@ onMounted(load);
       <div class="cs-actions">
         <el-button type="primary" size="small" @click="dialog = true">新增答案</el-button>
         <el-button size="small" @click="generate">从零命中生成</el-button>
+        <el-button size="small" type="success" :loading="generating" @click="aiGenerate">AI 生成候选</el-button>
+        <el-button size="small" @click="aiEstimate">成本估算</el-button>
         <el-button size="small" @click="expire">清理过期</el-button>
         <el-select v-model="statusFilter" size="small" style="width: 140px" @change="load">
           <el-option label="全部" value="" />
@@ -132,6 +168,15 @@ onMounted(load);
         <el-table-column prop="question" label="问题" min-width="200" show-overflow-tooltip />
         <el-table-column prop="answer" label="答案" min-width="240" show-overflow-tooltip />
         <el-table-column prop="source" label="来源" width="110" />
+        <el-table-column label="AI 候选" width="180">
+          <template #default="{ row }">
+            <template v-if="row.source === 'ai_generated'">
+              <el-tag size="small" type="info">{{ row.confidence != null ? Number(row.confidence).toFixed(2) : '-' }}</el-tag>
+              <span class="cs-cite" :title="row.citations || ''">{{ (row.citations || '[]').slice(0, 40) }}</span>
+            </template>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="110" />
         <el-table-column prop="effectiveFrom" label="生效时间" width="170" />
         <el-table-column label="操作" width="150">
@@ -180,4 +225,5 @@ onMounted(load);
 .cs-card { margin-top: 12px; }
 .cs-header { display: flex; align-items: center; justify-content: space-between; }
 .cs-actions { margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
+.cs-cite { margin-left: 6px; font-size: 11px; color: var(--el-text-color-secondary); }
 </style>

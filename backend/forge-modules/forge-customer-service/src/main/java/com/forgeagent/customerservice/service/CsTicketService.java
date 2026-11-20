@@ -470,6 +470,18 @@ public class CsTicketService {
         return assigned;
     }
 
+    /**
+     * A3 内部备注:只写工单事件轨迹,不进 agent_message、不推访客 SSE 通道。
+     * 供坐席协作留痕,访客侧不可见(与对客 reply 严格隔离)。
+     */
+    public void addNote(Long ticketId, Long seatUserId, String content) {
+        CsTicket ticket = ticketMapper.selectById(ticketId);
+        if (ticket == null) {
+            throw new ServiceException("工单不存在");
+        }
+        event(ticket, "NOTE", ticket.getStatus(), ticket.getStatus(), "SEAT", seatUserId, content);
+    }
+
     private void event(CsTicket ticket, String type, String from, String to,
                        String actorType, Object actorId, String note) {
         CsTicketEvent e = new CsTicketEvent();

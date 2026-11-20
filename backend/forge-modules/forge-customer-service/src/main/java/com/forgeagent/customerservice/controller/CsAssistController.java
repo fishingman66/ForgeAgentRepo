@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -62,6 +63,7 @@ public class CsAssistController extends BaseController {
     private final CsConversationMapper conversationMapper;
     private final CsWorkspaceResolver workspaceResolver;
     private final RunEventBuffer runEventBuffer;
+    private final com.forgeagent.agent.api.customerservice.CsChatFacade chatFacade;
 
     /** 某会话最新推荐(≤5 条):初始化历史,增量由 events 游标流承接。 */
     @GetMapping("/suggestions")
@@ -119,6 +121,24 @@ public class CsAssistController extends BaseController {
             result.add(one);
         }
         return R.ok(result);
+    }
+
+    /**
+     * A3 坐席 Copilot 文本改写:润色 / 中英互译。
+     * 从会话解析归属 agentId 与 workspace,模型不可用返回 ok(null),前端保留原文。
+     */
+    @PostMapping("/assist/rewrite")
+    public R<String> rewrite(@RequestParam Long conversationId,
+                             @RequestParam(defaultValue = "polish") String mode,
+                             @RequestBody String text) {
+        CsConversation conv = conversationMapper.selectById(conversationId);
+        if (conv == null || !conv.getWorkspaceId().equals(currentWorkspaceId())) {
+            return R.fail("会话不存在或无权访问");
+        }
+        if (!java.util.Set.of("polish", "translate_en", "translate_zh").contains(mode)) {
+            return R.fail("改写模式非法");
+        }
+        return R.data(chatFacade.rewrite(conv.getAgentId(), text, mode));
     }
 
     /** 数据边界:与工作台其他端点同口径,坐席行缺失返回 -1 空空间。 */

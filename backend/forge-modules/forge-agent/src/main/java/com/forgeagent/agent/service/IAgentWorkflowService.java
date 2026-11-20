@@ -97,6 +97,11 @@ public interface IAgentWorkflowService {
     WorkflowTrialRunVo resumeRun(Long runId, boolean approved);
 
     /**
+     * C1:等待类节点(表单/等待)续跑,payload 写入等待节点输出。
+     */
+    WorkflowTrialRunVo resumeWaitRun(Long runId, String payloadJson);
+
+    /**
      * 直接审批决策:更新关联审批单状态后恢复运行(工作流页快捷操作入口)
      */
     WorkflowTrialRunVo respondRun(Long runId, boolean approved);

@@ -111,6 +111,10 @@ sa-token:
   # jwt秘钥
   jwt-secret-key: abcdefghijklmnopqrstuvwxyz
 
+# F2 SaaS 外壳:注册即开空间 / 成员邀请 / 品牌域名;默认关,私有化行为零变更
+saas:
+  enabled: false
+
 # security配置
 security:
   # 排除路径
@@ -135,6 +139,8 @@ security:
     - /chat-api/**
     # 智能客服渠道回调(C3):验签 + 时间窗 + 消息幂等,免登录
     - /chat-channel/**
+    # 公开帮助中心(B1):渠道校验 + IP 预限流,只读,免登录
+    - /help-api/**
     # 语音与呼叫中心回调(V1):AICC 验签 + 时间窗 + nonce + 事件幂等,免登录
     - /chat-voice/**
     # 对外 MCP 端点(R1/A5):优先 agent_mcp_client 客户端令牌(绑定工作空间与授权域),

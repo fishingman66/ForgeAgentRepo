@@ -104,6 +104,23 @@ export const setPromptStable = (templateId: number, versionId: number) =>
 export const previewPrompt = (versionId: number, variables: string): AxiosPromise<Record<string, any>> =>
   request({ url: '/agent/governance/prompt/preview', method: 'post', data: { versionId, variables } });
 
+/** C4:业务描述 → system prompt 草稿(不落库,人工确认后走模板发布) */
+export interface PromptGenerateResult {
+  ok: boolean;
+  message?: string;
+  content?: string;
+  sections?: Record<string, any>;
+  estimatedTokens?: number;
+  modelName?: string;
+}
+
+export const generatePromptDraft = (data: Record<string, any>): AxiosPromise<PromptGenerateResult> =>
+  request({ url: '/agent/governance/prompt/generate', method: 'post', data });
+
+/** C4:草稿内容直接渲染预览(不落版本链) */
+export const previewPromptDraft = (data: Record<string, any>): AxiosPromise<Record<string, any>> =>
+  request({ url: '/agent/governance/prompt/preview-draft', method: 'post', data });
+
 /** ============ P1 / B3 效果评测 ============ */
 export interface EvalDataset {
   id: number;

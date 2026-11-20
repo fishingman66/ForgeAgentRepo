@@ -50,6 +50,13 @@ public class AgentRuntimeProperties {
      */
     private boolean workflowHttpGuardEnabled = true;
 
+    /**
+     * D4:MCP 服务端地址的 SSRF 守护开关。
+     * 默认关闭——内网/回环是 MCP 的常见合法部署方式,开启后按 SsrfGuard 口径
+     * (DNS 解析拒绝回环/私网/链路本地/组播)校验,需配合白名单场景评估后再开。
+     */
+    private boolean mcpSsrfGuardEnabled = false;
+
     /** 代码沙箱默认执行秒数(工作流内可覆盖) */
     private long sandboxDefaultTimeoutSeconds = 30;
 

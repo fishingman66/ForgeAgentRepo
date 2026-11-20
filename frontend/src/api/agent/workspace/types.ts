@@ -12,6 +12,10 @@ export interface WorkspaceVO {
   myRole?: string;
   createTime?: string;
   updateTime?: string;
+  /** F2 品牌外观 */
+  logoUrl?: string;
+  themeColor?: string;
+  helpCenterDomain?: string;
 }
 
 /** 工作空间表单对象 */
@@ -22,6 +26,9 @@ export interface WorkspaceForm {
   status?: string;
   keyword?: string;
   deptId?: number | string;
+  logoUrl?: string;
+  themeColor?: string;
+  helpCenterDomain?: string;
 }
 
 /** 工作空间查询参数 */

@@ -26,7 +26,8 @@ import java.util.Map;
 record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName,
                         String approvalMode, Integer approvalTimeout,
                         ApprovalContext ctx, IAgentApprovalService approvalService,
-                        PendingApprovalRegistry registry, Long actionLogId) implements AgentTool {
+                        PendingApprovalRegistry registry, Long actionLogId,
+                        Long replayToolId, String replayToolDefJson) implements AgentTool {
 
     /**
      * 审批上下文(创建审批单所需)
@@ -130,6 +131,17 @@ record ApprovalGateTool(AgentTool delegate, String toolSource, String serverName
                 new PendingApprovalRegistry.PendingTask(delegate, param, runId, actionLogId));
         } else {
             log.warn("[ApprovalGate] 待执行注册表为空,approvalId={} 审批通过后无法回调执行", approvalId);
+        }
+        // F4:无论注册表是否存在,都把 runId/actionLogId 持久化到审批单——
+        // 跨实例/重启后据此推明确回执,不再静默丢弃( delegate 无法序列化,退化为人工跟进)
+        try {
+            approvalService.markPendingExecution(approvalId, runId, actionLogId);
+            // F4一期:平台工具(http/sandbox)落定义快照,供重启后按快照重建执行
+            if (replayToolId != null) {
+                approvalService.markReplaySnapshot(approvalId, replayToolId, replayToolDefJson);
+            }
+        } catch (Exception e) {
+            log.warn("[F4] 审批单 {} 执行上下文落库失败: {}", approvalId, e.getMessage());
         }
         log.info("[ApprovalGate] 工具 [{}] 异步审批已提交, approvalId={}, runId={}",
             getName(), approvalId, runId);

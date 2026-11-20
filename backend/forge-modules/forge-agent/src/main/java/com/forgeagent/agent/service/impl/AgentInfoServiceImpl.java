@@ -60,6 +60,8 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
     private final com.forgeagent.agent.service.governance.AgentVersionService versionService;
     private final com.forgeagent.agent.service.governance.ReleaseGateService gateService;
     private final com.forgeagent.agentcore.service.ResourceAccessGuard resourceGuard;
+    private final com.forgeagent.agent.mapper.AgentPromptTemplateMapper promptTemplateMapper;
+    private final com.forgeagent.agent.mapper.AgentPromptVersionMapper promptVersionMapper;
 
 
     @Override
@@ -105,6 +107,7 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
         checkWorkspaceExists(bo.getWorkspaceId());
         checkNameUnique(bo.getWorkspaceId(), bo.getName(), null);
         validateBindings(bo.getModelId(), bo.getToolIds(), bo.getKnowledgeIds(), bo.getMcpIds(), bo.getWorkspaceId());
+        validatePromptBinding(bo, bo.getWorkspaceId());
         validateOutputConfig(bo, bo.getWorkspaceId(), null);
         AgentInfo entity = MapstructUtils.convert(bo, AgentInfo.class);
         entity.setId(null);
@@ -137,6 +140,7 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
         }
         checkNameUnique(exists.getWorkspaceId(), bo.getName(), bo.getId());
         validateBindings(bo.getModelId(), bo.getToolIds(), bo.getKnowledgeIds(), bo.getMcpIds(), exists.getWorkspaceId());
+        validatePromptBinding(bo, exists.getWorkspaceId());
         validateOutputConfig(bo, exists.getWorkspaceId(), bo.getId());
         AgentInfo update = MapstructUtils.convert(bo, AgentInfo.class);
         update.setWorkspaceId(null);
@@ -356,6 +360,33 @@ public class AgentInfoServiceImpl implements IAgentInfoService {
             .ne(excludeId != null, AgentInfo::getId, excludeId);
         if (agentMapper.selectCount(wrapper) > 0) {
             throw new ServiceException("该空间下已存在同名 Agent:" + name);
+        }
+    }
+
+    /**
+     * Prompt 模板绑定校验(此前缺失,存在跨空间绑模板的口子):
+     * 模板须存在且同空间可见;指定版本须属于该模板;LOCKED 模式必须带版本。
+     */
+    private void validatePromptBinding(AgentInfoBo bo, Long workspaceId) {
+        Long templateId = bo.getPromptTemplateId();
+        if (templateId == null) {
+            return;
+        }
+        com.forgeagent.agent.domain.AgentPromptTemplate template = promptTemplateMapper.selectById(templateId);
+        if (template == null) {
+            throw new ServiceException("绑定的 Prompt 模板不存在:" + templateId);
+        }
+        if (template.getWorkspaceId() != null && !template.getWorkspaceId().equals(workspaceId)) {
+            throw new ServiceException("Prompt 模板不属于当前工作空间,无法绑定");
+        }
+        Long versionId = bo.getPromptVersionId();
+        if (versionId != null) {
+            com.forgeagent.agent.domain.AgentPromptVersion version = promptVersionMapper.selectById(versionId);
+            if (version == null || !templateId.equals(version.getTemplateId())) {
+                throw new ServiceException("Prompt 版本不属于该模板,无法绑定");
+            }
+        } else if ("LOCKED".equalsIgnoreCase(bo.getPromptBindingMode())) {
+            throw new ServiceException("LOCKED 模式必须指定锁定的模板版本");
         }
     }
 

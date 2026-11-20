@@ -91,6 +91,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.forgeagent.agent.api.customerservice.CsHandoffFacade;
 import com.forgeagent.agent.service.workflow.run.ApprovalPauseException;
 import com.forgeagent.agent.service.workflow.run.WorkflowRunContext;
 import org.springframework.stereotype.Component;
@@ -116,6 +117,13 @@ public class WorkflowNodeExecutors {
     private final ToolAssembler toolAssembler;
     private final com.forgeagent.agent.config.AgentRuntimeProperties runtimeProperties;
     private final com.forgeagent.agentcore.service.ResourceAccessGuard resourceGuard;
+
+    /**
+     * 转人工节点跨模块契约:实现位于 forge-customer-service(依赖方向不允许 agent 反向 import)。
+     * 客服模块未启用时为 null,节点执行时报明确错误而不是静默跳过。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CsHandoffFacade handoffFacade;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -206,6 +214,18 @@ public class WorkflowNodeExecutors {
                 approvalMapper.insert(approval);
                 throw new ApprovalPauseException(t.getNodeId(), t.getNodeName(), approval.getId());
             }
+            case "form" -> {
+                executeFormNode(config, t, vars, ctx);
+                return null;
+            }
+            case "wait" -> {
+                executeWaitNode(config, t, vars, ctx);
+                return null;
+            }
+            case "human_transfer" -> {
+                executeHumanTransferNode(config, t, vars, ctx);
+                return null;
+            }
             default -> {
                 String message = "未知节点类型[" + type + "],当前引擎不支持,试运行终止";
                 // 体检 F2:节点状态统一为 fail(此前 default 分支写 failed,与全类不一致)
@@ -213,6 +233,102 @@ public class WorkflowNodeExecutors {
                 t.setOutput(message);
                 throw new ServiceException(message);
             }
+        }
+    }
+
+    /**
+     * 表单收集节点(C1):字段定义写入上下文后暂停,答案经 signal 接口回填并写 {@code <节点名>.output}。
+     *
+     * <p>首次执行只落表单 schema 不产出数据;续跑时节点已在 completed 集合内,输出由 signal 预置。</p>
+     */
+    private void executeFormNode(JsonNode config, WorkflowTrialRunVo.NodeTrace t,
+                                 Map<String, String> vars, WorkflowRunContext ctx) {
+        String outKey = t.getNodeName() + ".output";
+        if (vars.containsKey(outKey)) {
+            t.setStatus("success");
+            t.setOutput(vars.get(outKey));
+            return;
+        }
+        JsonNode fields = config.path("fields");
+        if (!fields.isArray() || fields.isEmpty()) {
+            throw new ServiceException("表单节点未配置字段列表:" + t.getNodeName());
+        }
+        // 与 approval 节点一致:试运行也暂停,便于在画布上验证暂停点与字段定义
+        if (ctx.run() == null) {
+            throw new ServiceException("表单节点缺少运行实例,无法暂停");
+        }
+        vars.put(t.getNodeName() + ".form", fields.toString());
+        throw new ApprovalPauseException(t.getNodeId(), t.getNodeName(), null);
+    }
+
+    /**
+     * 等待节点(C1):暂停运行,由外部事件经 signal 接口推送 payload 后继续。
+     */
+    private void executeWaitNode(JsonNode config, WorkflowTrialRunVo.NodeTrace t,
+                                 Map<String, String> vars, WorkflowRunContext ctx) {
+        String outKey = t.getNodeName() + ".output";
+        if (vars.containsKey(outKey)) {
+            t.setStatus("success");
+            t.setOutput(vars.get(outKey));
+            return;
+        }
+        if (ctx.run() == null) {
+            throw new ServiceException("等待节点缺少运行实例,无法暂停");
+        }
+        vars.put(t.getNodeName() + ".waitEvent", config.path("eventKey").asText(""));
+        throw new ApprovalPauseException(t.getNodeId(), t.getNodeName(), null);
+    }
+
+    /**
+     * 转人工节点(C1):按运行输入里的 conversationId 建工单,结果写入节点输出。
+     *
+     * <p>缺少 conversationId 或客服模块未启用时 fail-closed,不产出假的工单号。</p>
+     */
+    private void executeHumanTransferNode(JsonNode config, WorkflowTrialRunVo.NodeTrace t,
+                                          Map<String, String> vars, WorkflowRunContext ctx) {
+        String reason = interpolate(config.path("reason").asText("工作流触发转人工"), vars);
+        if (ctx.dryRun()) {
+            vars.put(t.getNodeName() + ".output",
+                "{\"ticketId\":0,\"ticketNo\":\"DRYRUN\",\"status\":\"WAITING_AGENT\"}");
+            t.setStatus("success");
+            t.setOutput("转人工已跳过(试运行桩)");
+            return;
+        }
+        Long conversationId = resolveConversationId(ctx.inputs(), vars);
+        if (conversationId == null) {
+            throw new ServiceException("转人工节点缺少 conversationId:请在运行输入中提供,"
+                + "或由对话链路触发该工作流");
+        }
+        if (handoffFacade == null) {
+            throw new ServiceException("客服模块未启用,转人工节点不可用");
+        }
+        CsHandoffFacade.HandoffResult result = handoffFacade.transfer(
+            ctx.agent().getWorkspaceId(), conversationId, reason);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ticketId", result.ticketId());
+        out.put("ticketNo", result.ticketNo());
+        out.put("status", result.status());
+        String json = writeJson(out, "{}");
+        vars.put(t.getNodeName() + ".output", json);
+        vars.put(t.getNodeName() + ".ticketId", String.valueOf(result.ticketId()));
+        t.setStatus("success");
+        t.setOutput(json);
+    }
+
+    /** 会话 ID 优先取运行输入,兼容 start.<key> 插值来源;非法值返回 null。 */
+    private Long resolveConversationId(String inputs, Map<String, String> vars) {
+        String raw = parseJson(inputs).path("conversationId").asText("");
+        if (StringUtils.isBlank(raw)) {
+            raw = vars.getOrDefault("start.conversationId", "");
+        }
+        return parseLong(raw);
+    }
+
+    private String writeJson(Object value, String fallback) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return fallback;
         }
     }
 

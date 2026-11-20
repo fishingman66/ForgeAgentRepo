@@ -212,7 +212,7 @@ public class ToolAssembler {
                     AgentTool wrapped = inner instanceof ApprovalExempt
                         ? inner
                         : gate(inner, "platform-" + provider.type(), "",
-                            def.approvalMode(), def.approvalTimeout(), approvalCtx);
+                            def.approvalMode(), def.approvalTimeout(), approvalCtx, def);
                     registerIfAbsent(toolkit, wrapped, inner.getName(), opts, csGuardDecorator);
                 }
             }
@@ -270,7 +270,7 @@ public class ToolAssembler {
         for (McpSchema.Tool t : mcpTools) {
             McpAgentTool mcpTool = new McpAgentTool(t, wrapper);
             registerIfAbsent(toolkit, gate(mcpTool, "mcp", def.name(),
-                def.approvalMode(), def.approvalTimeout(), approvalCtx), t.name(), opts, csGuardDecorator);
+                def.approvalMode(), def.approvalTimeout(), approvalCtx, null), t.name(), opts, csGuardDecorator);
         }
         log.info("[ToolAssembler] MCP 服务器 [{}] 注册 {} 个工具", def.name(), mcpTools.size());
     }
@@ -337,9 +337,19 @@ public class ToolAssembler {
     }
 
     private AgentTool gate(AgentTool inner, String source, String serverName,
-                           String mode, Integer timeout, ApprovalGateTool.ApprovalContext ctx) {
+                           String mode, Integer timeout, ApprovalGateTool.ApprovalContext ctx,
+                           ToolDef replayDef) {
+        Long replayId = null;
+        String replayJson = null;
+        // F4一期:A档仅平台 http/sandbox 支持重放;sql 轮级 collector 会丢,MCP 需建连,均不落快照
+        if (replayDef != null
+            && ("http".equals(replayDef.toolType()) || "sandbox".equals(replayDef.toolType()))) {
+            replayId = replayDef.id();
+            try { replayJson = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(replayDef); }
+            catch (Exception e) { replayJson = null; }
+        }
         return new ApprovalGateTool(inner, source, serverName, mode, timeout, ctx,
-            approvalService, pendingApprovalRegistry, null);
+            approvalService, pendingApprovalRegistry, null, replayId, replayJson);
     }
 
     /**

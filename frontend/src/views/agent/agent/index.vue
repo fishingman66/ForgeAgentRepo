@@ -39,7 +39,8 @@
             <span class="heading-tip">支持表单配置与拖拽工作流两种编排方式</span>
           </div>
           <div class="toolbar-actions">
-            <el-button v-hasPermi="['agent:agent:add']" type="primary" plain icon="Plus" @click="handleAdd">新建 Agent</el-button>
+            <el-button v-hasPermi="['agent:agent:add']" type="primary" plain icon="Plus" @click="wizardVisible = true">新建 Agent</el-button>
+            <el-button v-hasPermi="['agent:agent:add']" link type="primary" @click="handleAdd">高级新建</el-button>
           </div>
         </div>
       </template>
@@ -228,6 +229,14 @@
     <SkillDrawer v-model="skillVisible" :agent-id="skillAgent.id" :agent-name="skillAgent.name" />
     <EvalDrawer v-model="evalVisible" :agent-id="evalAgentId" :workspace-id="queryParam.workspaceId" />
     <PromptCenterDrawer v-model="promptVisible" :workspace-id="queryParam.workspaceId" @changed="loadPromptTemplates" />
+    <CreateWizard
+      v-model="wizardVisible"
+      :workspace-options="workspaceOptions"
+      :model-options="modelOptions"
+      :knowledge-options="knowledgeOptions"
+      :tool-options="toolOptions"
+      @created="getList"
+    />
     <EndpointDrawer v-model="endpointVisible" :agent-id="endpointAgentId" />
   </div>
 </template>
@@ -252,6 +261,7 @@ import VersionDrawer from './components/VersionDrawer.vue';
 import SkillDrawer from './components/SkillDrawer.vue';
 import EvalDrawer from './components/EvalDrawer.vue';
 import PromptCenterDrawer from './components/PromptCenterDrawer.vue';
+import CreateWizard from './components/CreateWizard.vue';
 import EndpointDrawer from './components/EndpointDrawer.vue';
 import { listPromptTemplates, previewGate, type PromptTemplate } from '@/api/agent/governance';
 
@@ -310,6 +320,7 @@ const versionAgent = ref<{ id: number | string; name: string }>({ id: '', name: 
 const evalVisible = ref(false);
 const evalAgentId = ref<number | string>('');
 const promptVisible = ref(false);
+const wizardVisible = ref(false);
 const promptTemplates = ref<PromptTemplate[]>([]);
 
 const loadPromptTemplates = async () => {

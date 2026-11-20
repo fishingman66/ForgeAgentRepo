@@ -16,11 +16,26 @@
   .bubble { max-width: 82%; padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
   .row.me .bubble { background: #2563eb; color: #fff; }
   .row:not(.me) .bubble { background: #fff; border: 1px solid #e5e7eb; }
+  .bubble.md p { margin: 0 0 6px; }
+  .bubble.md p:last-child { margin-bottom: 0; }
+  .bubble.md a { color: #2563eb; }
+  .bubble.md code { background: #f1f5f9; border-radius: 3px; padding: 1px 4px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .bubble.md pre { background: #0f172a; color: #e2e8f0; border-radius: 6px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+  .bubble.md pre code { background: transparent; color: inherit; padding: 0; }
+  .bubble.md ul, .bubble.md ol { margin: 4px 0; padding-left: 20px; }
+  .typing { display: inline-flex; gap: 3px; align-items: center; height: 14px; }
+  .typing i { width: 5px; height: 5px; border-radius: 50%; background: #9ca3af; animation: blink 1.2s infinite; }
+  .typing i:nth-child(2) { animation-delay: .2s; }
+  .typing i:nth-child(3) { animation-delay: .4s; }
+  .cursor-blink::after { content: ""; display: inline-block; width: 6px; height: 13px; vertical-align: -2px; margin-left: 2px; background: #6b7280; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 0%, 60% { opacity: 1; } 100% { opacity: .25; } }
   .tip { text-align: center; font-size: 12px; color: #6b7280; margin: 6px 0; }
+  .src { font-size: 11px; color: #94a3b8; margin-top: 4px; }
   .bar { border-top: 1px solid #e5e7eb; background: #fff; padding: 8px; }
   .bar textarea { width: 100%; height: 56px; resize: none; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px; font-size: 13px; }
   .actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
   .actions button { border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .actions button:disabled { opacity: .5; cursor: not-allowed; }
   .actions .send { margin-left: auto; background: #2563eb; border-color: #2563eb; color: #fff; }
   .rate { display: none; gap: 4px; align-items: center; margin-top: 6px; font-size: 12px; }
   .rate button { border: 1px solid #d1d5db; background: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; }
@@ -48,11 +63,13 @@
   var qs = new URLSearchParams(location.search);
   var channel = qs.get('channel') || 'default';
   var base = qs.get('base') || '';
+  var apiBase = base.replace(/\/$/, '');
   document.getElementById('title').textContent = qs.get('title') || '在线客服';
 
   var log = document.getElementById('log');
   var statusEl = document.getElementById('status');
   var input = document.getElementById('input');
+  var sendBtn = document.getElementById('send');
   var visitorKey = 'forge_cs_visitor_' + channel;
   var visitorId = localStorage.getItem(visitorKey);
   if (!visitorId) {
@@ -63,19 +80,69 @@
   var conversationId = 0;
   var cursor = 0;
   var busy = false;
+  var STREAM = true; // 后端 stream-enabled 关闭时,首帧失败自动降级整段发送
 
   function uuid() {
     return window.crypto && crypto.randomUUID ? crypto.randomUUID() : 'm-' + Date.now() + '-' + Math.random();
   }
-  function add(role, text) {
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  // 极简 Markdown 白名单渲染:先转义,再只放开粗体/行内码/代码块/链接/换行/列表。
+  // 不引第三方库(访客页在 public/ 下不走 Vite,零依赖是硬约束)。
+  function renderMd(src) {
+    var text = esc(src == null ? '' : String(src));
+    var blocks = text.split(/```/);
+    var out = '';
+    for (var b = 0; b < blocks.length; b++) {
+      if (b % 2 === 1) {
+        out += '<pre><code>' + blocks[b].replace(/^\w*\n/, '') + '</code></pre>';
+      } else {
+        var lines = blocks[b].split('\n');
+        var htmlLines = [];
+        var inList = false;
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
+          var m = line.match(/^\s*[-*]\s+(.*)$/);
+          if (m) {
+            if (!inList) { htmlLines.push('<ul>'); inList = true; }
+            htmlLines.push('<li>' + inline(m[1]) + '</li>');
+            continue;
+          }
+          if (inList) { htmlLines.push('</ul>'); inList = false; }
+          if (/^\s*$/.test(line)) continue;
+          htmlLines.push('<p>' + inline(line) + '</p>');
+        }
+        if (inList) htmlLines.push('</ul>');
+        out += htmlLines.join('');
+      }
+    }
+    return out;
+    function inline(s) {
+      return s
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+          '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    }
+  }
+  function bubbleRow(role, markdown) {
     var row = document.createElement('div');
     row.className = 'row' + (role === 'me' ? ' me' : '');
     var bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = text;
+    bubble.className = 'bubble' + (markdown ? ' md' : '');
     row.appendChild(bubble);
     log.appendChild(row);
     log.scrollTop = log.scrollHeight;
+    return bubble;
+  }
+  function add(role, text, markdown) {
+    var bubble = bubbleRow(role, markdown !== false);
+    if (markdown === false) bubble.textContent = text;
+    else bubble.innerHTML = renderMd(text);
+    return bubble;
   }
   function tip(text) {
     var div = document.createElement('div');
@@ -84,10 +151,15 @@
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;
   }
+  function setBusy(v) {
+    busy = v;
+    sendBtn.disabled = v;
+    statusEl.textContent = v ? '正在回复…' : '已连接';
+  }
   function request(path, method, body, withToken) {
     var headers = { 'Content-Type': 'application/json' };
     if (withToken && token) headers['X-Visitor-Token'] = token;
-    return fetch(base + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
+    return fetch(apiBase + path, { method: method, headers: headers, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.json(); })
       .then(function (r) {
         if (r.code !== 200) throw new Error(r.msg || '请求失败');
@@ -102,9 +174,123 @@
         conversationId = data.conversationId;
         statusEl.textContent = data.reused ? '已恢复上次会话' : '已连接';
         cursor = 0;
-        poll();
       })
       .catch(function (e) { statusEl.textContent = '连接失败: ' + e.message; });
+  }
+  function handleEvent(ev, ctx) {
+    var id = Number(ev.id) || 0;
+    if (id > cursor) cursor = id;
+    var name = ev.event;
+    var data = {};
+    try { data = JSON.parse(ev.data || '{}'); } catch (e) { data = {}; }
+    if (name === 'delta' || name === 'chat_chunk') {
+      var chunk = typeof data.text === 'string' ? data.text
+        : typeof data.content === 'string' ? data.content : '';
+      if (chunk) { ctx.buf += chunk; ctx.bubble.innerHTML = renderMd(ctx.buf) + '<span class="cursor-blink"></span>'; }
+    } else if (name === 'chat_done') {
+      ctx.doneText = typeof data.content === 'string' ? data.content : ctx.buf;
+      if (data.fallback) tip('未找到答案，已记录知识缺口');
+      ctx.done = true;
+    } else if (name === 'done') {
+      // 平台内核终帧;客服权威终态以 chat_done 为准,忽略此帧的 content 避免重复渲染
+    } else if (name === 'error') {
+      ctx.error = data.message || '生成失败';
+    } else if (name === 'cs_ticket_new' || name === 'cs_handoff') {
+      tip('已为你转接人工客服');
+    } else if (name === 'cs_queue_position') {
+      tip('正在排队等待坐席接入');
+    } else if (name === 'cs_csat_invite') {
+      document.getElementById('rateBox').style.display = 'flex';
+    }
+  }
+  function renderFrame(line, state, ctx, flush) {
+    if (line === '') { flush(); return; }
+    if (line.indexOf('event:') === 0) state.name = line.slice(6).trim();
+    else if (line.indexOf('data:') === 0) {
+      var d = line.slice(5);
+      state.dataLines.push(d.charAt(0) === ' ' ? d.slice(1) : d);
+    } else if (line.indexOf('id:') === 0) state.id = Number(line.slice(3).trim()) || 0;
+  }
+  function readSse(resp, ctx) {
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buffer = '';
+    var st = { name: '', dataLines: [], id: 0 };
+    var flush = function () {
+      if (!st.name && !st.dataLines.length && !st.id) return;
+      handleEvent({ id: st.id, event: st.name, data: st.dataLines.join('\n') }, ctx);
+      st.name = ''; st.dataLines = []; st.id = 0;
+    };
+    return (function loop() {
+      return reader.read().then(function (r) {
+        if (r.done) { flush(); return; }
+        buffer += decoder.decode(r.value, { stream: true });
+        var idx;
+        while ((idx = buffer.indexOf('\n')) > -1) {
+          var line = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 1);
+          if (line.charAt(line.length - 1) === '\r') line = line.slice(0, -1);
+          renderFrame(line, st, ctx, flush);
+        }
+        return loop();
+      });
+    })();
+  }
+  function replay(ctx, after) {
+    return request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/events?after=' + after, 'GET', null, true)
+      .then(function (list) {
+        (list || []).forEach(function (ev) { handleEvent(ev, ctx); });
+      });
+  }
+  function sendStream(text, clientMsgId, ctx) {
+    var headers = { 'Content-Type': 'application/json', 'X-Visitor-Token': token };
+    return fetch(apiBase + '/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/messages/stream',
+      { method: 'POST', headers: headers, body: JSON.stringify({ clientMsgId: clientMsgId, content: text }) })
+      .then(function (resp) {
+        if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+        return readSse(resp, ctx);
+      })
+      .then(function () {
+        if (!ctx.done && !ctx.error) return replay(ctx, cursor); // 断网兜底:按游标补齐终帧
+      })
+      .then(function () {
+        if (ctx.error) throw new Error(ctx.error);
+        var finalText = ctx.doneText != null ? ctx.doneText : ctx.buf;
+        ctx.bubble.innerHTML = renderMd(finalText || '（无回复）');
+      })
+      .catch(function (e) {
+        if (!STREAM) throw e;
+        STREAM = false; // 流式不可用(开关关闭或网关不支持 SSE),降级整段
+        ctx.bubble.innerHTML = '';
+        return sendPlain(text, clientMsgId, ctx);
+      });
+  }
+  function sendPlain(text, clientMsgId, ctx) {
+    return request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/messages',
+      'POST', { clientMsgId: clientMsgId, content: text }, true)
+      .then(function (data) {
+        if (!data.reused) ctx.bubble.innerHTML = renderMd(data.content || '（无回复）');
+        if (data.fallback) tip('未找到答案，已记录知识缺口');
+        if (data.handoff) tip('已为你转接人工客服');
+      });
+  }
+  function send(text, clientMsgId, attempt) {
+    var ctx = { bubble: null, buf: '', doneText: null, done: false, error: '' };
+    // 打字提示先占位;首帧 delta 到达后移除
+    var bubble = bubbleRow('bot', true);
+    bubble.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    ctx.bubble = bubble;
+    return (STREAM ? sendStream(text, clientMsgId, ctx) : sendPlain(text, clientMsgId, ctx))
+      .then(function () { statusEl.textContent = '已连接'; })
+      .catch(function (e) {
+        if (attempt < 3) {
+          statusEl.textContent = '网络不稳定，正在重试…';
+          return new Promise(function (resolve) { setTimeout(resolve, 500 * (attempt + 1)); })
+            .then(function () { return send(text, clientMsgId, attempt + 1); });
+        }
+        bubble.innerHTML = '';
+        statusEl.textContent = '发送失败: ' + e.message;
+      });
   }
   function poll() {
     if (!conversationId || !token) return;
@@ -112,7 +298,9 @@
       'GET', null, true)
       .then(function (list) {
         (list || []).forEach(function (ev) {
-          cursor = Math.max(cursor, Number(ev.id) || 0);
+          // 聊天增量由流式通道处理;轮询只负责控制面事件,避免重复上屏
+          var id = Number(ev.id) || 0;
+          if (id > cursor) cursor = id;
           if (ev.event === 'cs_ticket_new' || ev.event === 'cs_handoff') tip('已为你转接人工客服');
           if (ev.event === 'cs_queue_position') tip('正在排队等待坐席接入');
           if (ev.event === 'cs_csat_invite') { document.getElementById('rateBox').style.display = 'flex'; }
@@ -120,31 +308,13 @@
       })
       .catch(function () { /* 轮询失败不影响聊天,下次继续 */ });
   }
-  function send(text, clientMsgId, attempt) {
-    return request('/chat-api/' + encodeURIComponent(channel) + '/sessions/' + conversationId + '/messages',
-      'POST', { clientMsgId: clientMsgId, content: text }, true)
-      .then(function (data) {
-        if (!data.reused) add('bot', data.content || '（无回复）');
-        if (data.fallback) tip('未找到答案，已记录知识缺口');
-        if (data.handoff) tip('已为你转接人工客服');
-        statusEl.textContent = '已连接';
-      })
-      .catch(function (e) {
-        if (attempt < 3) {
-          statusEl.textContent = '网络不稳定，正在重试…';
-          return new Promise(function (resolve) { setTimeout(resolve, 500 * (attempt + 1)); })
-            .then(function () { return send(text, clientMsgId, attempt + 1); });
-        }
-        statusEl.textContent = '发送失败: ' + e.message;
-      });
-  }
-  document.getElementById('send').addEventListener('click', function () {
+  sendBtn.addEventListener('click', function () {
     var text = input.value.trim();
     if (!text || busy || !conversationId) return;
-    busy = true;
-    add('me', text);
+    add('me', text, false);
     input.value = '';
-    send(text, uuid(), 1).then(function () { busy = false; });
+    setBusy(true);
+    send(text, uuid(), 1).then(function () { setBusy(false); });
   });
   document.getElementById('handoff').addEventListener('click', function () {
     if (!conversationId) return;

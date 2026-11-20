@@ -25,4 +25,11 @@ public interface IAgentModelService {
     Boolean changeStatus(Long id, String status);
 
     Boolean deleteByIds(List<Long> ids);
+
+    /**
+     * C3-2:保存前连通性测试(BYO-key 自助)。
+     *
+     * <p>入参为页面当前表单:apiKey 留空或含掩码时回退到库内密文,便于"只改地址"也能测。</p>
+     */
+    com.forgeagent.agent.domain.vo.AgentModelTestVo testConnection(AgentModelBo bo);
 }

@@ -37,7 +37,11 @@ const form = reactive<CsChannel>({
   channelSecret: '',
   corsAllowlist: '',
   rateLimit: 60,
-  status: '0'
+  status: '0',
+  widgetTheme: '#2563eb',
+  widgetMode: 'bubble',
+  widgetWelcome: '',
+  widgetConfig: ''
 });
 
 const reset = () => {
@@ -54,6 +58,10 @@ const reset = () => {
   form.corsAllowlist = '';
   form.rateLimit = 60;
   form.status = '0';
+  form.widgetTheme = '#2563eb';
+  form.widgetMode = 'bubble';
+  form.widgetWelcome = '';
+  form.widgetConfig = '';
 };
 
 const load = async () => {
@@ -201,7 +209,7 @@ onMounted(load);
         <span class="cs-code-label">{{ row.channelCode }}</span>
         <code>{{ widgetSnippet(row.channelCode) }}</code>
       </div>
-      <div class="cs-tip">挂件为原生 JS，随前端 public 目录打包；也可直接访问 /customer-service/index.html?channel=编码 打开 H5 访客页。</div>
+      <div class="cs-tip">挂件主题、形态、开场消息在上方可视化配置，由后端 widget-config 端点下发给挂件；扩展配置 JSON 可设 position/size/allowedOrigins（宿主上下文桥白名单）。挂件为原生 JS，随 public 目录打包。</div>
     </el-card>
 
     <el-dialog v-model="dialog" :title="editing ? '编辑渠道' : '新增渠道'" width="560px">
@@ -235,6 +243,15 @@ onMounted(load);
         </el-form-item>
         <el-form-item label="回调验签密钥"><el-input v-model="form.channelSecret" placeholder="公众号/企微回调 token" /></el-form-item>
         <el-form-item label="限流(次/分)"><el-input-number v-model="form.rateLimit" :min="1" :max="1000" /></el-form-item>
+        <el-form-item label="挂件主题色"><el-input v-model="form.widgetTheme" placeholder="#2563eb" /></el-form-item>
+        <el-form-item label="挂件形态">
+          <el-select v-model="form.widgetMode" style="width: 100%">
+            <el-option label="气泡按钮" value="bubble" />
+            <el-option label="侧边栏" value="sidebar" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开场消息"><el-input v-model="form.widgetWelcome" placeholder="留空则不展示" /></el-form-item>
+        <el-form-item label="扩展配置JSON"><el-input v-model="form.widgetConfig" type="textarea" :rows="2" placeholder='{"position":"right","size":{"width":360,"height":520}}' /></el-form-item>
         <el-form-item label="状态">
           <el-select v-model="form.status" style="width: 100%">
             <el-option label="启用" value="0" />

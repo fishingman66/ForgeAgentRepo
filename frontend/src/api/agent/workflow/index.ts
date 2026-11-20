@@ -279,3 +279,13 @@ export const getWorkflowRun = (runId: number | string): AxiosPromise<WorkflowRun
     method: 'get'
   });
 };
+
+/** C1:唤醒等待类节点(表单/等待),payload 作为该节点输出 */
+export const signalWorkflowRun = (runId: number | string, payloadJson: string): AxiosPromise<any> => {
+  return request({
+    url: `/agent/workflow/run/${runId}/signal`,
+    method: 'post',
+    data: payloadJson,
+    headers: { 'Content-Type': 'text/plain' }
+  });
+};

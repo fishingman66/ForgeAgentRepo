@@ -68,8 +68,47 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
         approval.setServerName(serverName == null ? "" : serverName);
         approval.setCallArgs(callArgs == null ? "{}" : callArgs);
         approval.setStatus("pending");
+        approval.setExecState("PENDING");
         approvalMapper.insert(approval);
         return approval.getId();
+    }
+
+    @Override
+    public void markPendingExecution(Long id, String runId, Long actionLogId) {
+        if (id == null) { return; }
+        AgentApproval update = new AgentApproval();
+        update.setRunId(runId);
+        update.setActionLogId(actionLogId);
+        approvalMapper.update(update, new LambdaUpdateWrapper<AgentApproval>()
+            .eq(AgentApproval::getId, id));
+    }
+
+    @Override
+    public void markReplaySnapshot(Long id, Long toolId, String toolDefJson) {
+        if (id == null || toolId == null) { return; }
+        AgentApproval update = new AgentApproval();
+        update.setToolId(toolId);
+        update.setToolDefSnapshot(toolDefJson);
+        approvalMapper.update(update, new LambdaUpdateWrapper<AgentApproval>()
+            .eq(AgentApproval::getId, id));
+    }
+
+    @Override
+    public boolean markExecState(Long id, String fromState, String toState) {
+        if (id == null) { return false; }
+        AgentApproval update = new AgentApproval();
+        update.setExecState(toState);
+        return approvalMapper.update(update, new LambdaUpdateWrapper<AgentApproval>()
+            .eq(AgentApproval::getId, id)
+            .eq(AgentApproval::getExecState, fromState)) > 0;
+    }
+
+    @Override
+    public java.util.List<AgentApproval> listStaleApproved() {
+        return approvalMapper.selectList(new LambdaQueryWrapper<AgentApproval>()
+            .eq(AgentApproval::getStatus, "approved")
+            .ne(AgentApproval::getExecState, "DONE")
+            .ne(AgentApproval::getExecState, "NEED_MANUAL"));
     }
 
     @Override
@@ -121,13 +160,16 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
         }
         AgentApproval update = new AgentApproval();
         update.setStatus(approve ? "approved" : "rejected");
+        if (approve) { update.setExecState("APPROVED"); }
         update.setResultNote(StringUtils.isBlank(note) ? (approve ? "同意调用" : "拒绝调用") : note);
         update.setApproveBy(LoginHelper.getUserId());
         update.setApproveTime(new Date());
         // 带状态条件的条件更新:并发处理同一审批单时仅一个成功,避免后写覆盖与重复续跑
-        boolean ok = approvalMapper.update(update, new LambdaUpdateWrapper<AgentApproval>()
+        LambdaUpdateWrapper<AgentApproval> cond = new LambdaUpdateWrapper<AgentApproval>()
             .eq(AgentApproval::getId, id)
-            .eq(AgentApproval::getStatus, "pending")) > 0;
+            .eq(AgentApproval::getStatus, "pending");
+        if (approve) { cond.eq(AgentApproval::getExecState, "PENDING"); }
+        boolean ok = approvalMapper.update(update, cond) > 0;
         if (!ok) {
             throw new ServiceException("该审批单已被处理");
         }
@@ -157,7 +199,11 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
         com.forgeagent.agent.service.runner.PendingApprovalRegistry.PendingTask task =
             pendingApprovalRegistry.remove(approval.getId());
         if (task == null) {
-            // 同步 ask / 已消费 / 实例重启后无登记项 —— 属正常,不告警刷屏
+            // F4:跨实例/重启后进程内注册表丢失——不再静默丢弃
+            String storedRunId = approval.getRunId();
+            log.warn("[F4] 审批单 {} 已通过但进程内无待执行项(重启/跨实例),标记需人工跟进", approval.getId());
+            publishReceipt(storedRunId, "need_manual", approval.getToolName(),
+                "操作已审批,但执行实例已变更,正在人工跟进,请稍候");
             return;
         }
         String runId = task.runId();
@@ -175,6 +221,7 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
                         log.warn("[C4] 审批通过后工具 [{}] 执行失败: {}", toolName, ex.getMessage());
                         publishReceipt(runId, "failed", toolName, "审批已通过,但工具执行失败: " + ex.getMessage());
                     } else {
+                        markExecState(approval.getId(), "APPROVED", "DONE");
                         // 只回执执行状态,不把工具原文推给访客(可能含内部/敏感数据)
                         publishReceipt(runId, "approved", toolName, "人工审批已通过,操作已执行完成");
                     }

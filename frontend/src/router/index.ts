@@ -53,6 +53,18 @@ export const constantRoutes: RouteRecordRaw[] = [
     hidden: true
   },
   {
+    path: '/help/:lang(zh_CN|en_US)?/:slug?',
+    component: () => import('@/views/help/index.vue'),
+    hidden: true,
+    meta: { title: '帮助中心' }
+  },
+  {
+    path: '/invite/accept',
+    component: () => import('@/views/invite/accept.vue'),
+    hidden: true,
+    meta: { title: '加入工作空间' }
+  },
+  {
     path: '/:pathMatch(.*)*',
     component: () => import('@/views/error/404.vue'),
     hidden: true

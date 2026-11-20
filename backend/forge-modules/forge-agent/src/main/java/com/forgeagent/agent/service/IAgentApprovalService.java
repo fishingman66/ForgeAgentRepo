@@ -50,4 +50,16 @@ public interface IAgentApprovalService {
      * 标记审批单超时
      */
     void markExpired(Long id);
+
+    /** F4:ask_async 创建审批单后落执行上下文(runId/actionLogId)。 */
+    void markPendingExecution(Long id, String runId, Long actionLogId);
+
+    /** F4一期:落工具重放快照(toolId + ToolDef JSON),供重启后按快照重建执行。 */
+    void markReplaySnapshot(Long id, Long toolId, String toolDefJson);
+
+    /** F4:执行态条件流转(仅当前为 fromState 时才置 toState),返回是否抢到。 */
+    boolean markExecState(Long id, String fromState, String toState);
+
+    /** F4:启动扫描已批准但未完成的审批单。 */
+    java.util.List<com.forgeagent.agent.domain.AgentApproval> listStaleApproved();
 }

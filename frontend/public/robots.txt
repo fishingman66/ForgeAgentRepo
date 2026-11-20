@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /prod-api/
+Disallow: /chat-api/
+Disallow: /help-api/
+Disallow: /agent/
+Disallow: /login
+Disallow: /register
+
+Sitemap: /sitemap.xml

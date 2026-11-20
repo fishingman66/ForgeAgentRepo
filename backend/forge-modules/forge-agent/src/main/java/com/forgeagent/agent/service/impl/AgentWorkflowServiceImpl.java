@@ -281,6 +281,11 @@ public class AgentWorkflowServiceImpl implements IAgentWorkflowService {
     }
 
     @Override
+    public WorkflowTrialRunVo resumeWaitRun(Long runId, String payloadJson) {
+        return launcher.resumeWaitRun(runId, payloadJson);
+    }
+
+    @Override
     public List<AgentWorkflowVersionVo> listVersion(Long agentId) {
         AgentInfo agent = agentMapper.selectById(agentId);
         if (agent == null) {

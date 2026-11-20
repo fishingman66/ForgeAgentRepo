@@ -27,7 +27,9 @@ public class WorkflowGraphValidator {
 
     public static final Set<String> VALID_NODE_TYPES = Set.of(
         "start", "llm", "tool", "knowledge", "condition", "approval", "end",
-        "loop", "code", "http", "parallel", "join"
+        "loop", "code", "http", "parallel", "join",
+        // C1:表单收集 / 等待外部事件 / 转人工
+        "form", "wait", "human_transfer"
     );
 
     public static final Set<String> HTTP_METHODS = Set.of("GET", "POST", "PUT", "DELETE", "PATCH");
@@ -159,6 +161,33 @@ public class WorkflowGraphValidator {
                     String method = node.path("config").path("method").asText("GET").toUpperCase();
                     if (!HTTP_METHODS.contains(method)) {
                         blockers.add(issue(id, null, "HTTP 节点请求方法不支持:" + method));
+                    }
+                }
+                case "form" -> {
+                    JsonNode fields = node.path("config").path("fields");
+                    if (!fields.isArray() || fields.isEmpty()) {
+                        blockers.add(issue(id, null, "表单节点必须配置至少一个字段:" + name));
+                    } else {
+                        for (JsonNode f : fields) {
+                            if (StringUtils.isBlank(f.path("name").asText(null))) {
+                                blockers.add(issue(id, null, "表单节点存在缺少 name 的字段:" + name));
+                                break;
+                            }
+                        }
+                    }
+                }
+                case "wait" -> {
+                    if (StringUtils.isBlank(node.path("config").path("eventKey").asText(null))) {
+                        blockers.add(issue(id, null, "等待节点必须配置事件标识(eventKey):" + name));
+                    }
+                    int minutes = node.path("config").path("timeoutMinutes").asInt(0);
+                    if (minutes < 0 || minutes > 7 * 24 * 60) {
+                        blockers.add(issue(id, null, "等待节点超时需在 0~10080 分钟(0 表示不超时):" + name));
+                    }
+                }
+                case "human_transfer" -> {
+                    if (StringUtils.isBlank(node.path("config").path("reason").asText(null))) {
+                        warnings.add(issue(id, null, "转人工节点未配置原因,将使用默认原因:" + name));
                     }
                 }
                 default -> {
@@ -315,6 +344,9 @@ public class WorkflowGraphValidator {
                             blockers.add(issue(nid, null, "并行分支内不支持人工审批节点:" + bn));
                         } else if ("condition".equals(bt)) {
                             blockers.add(issue(nid, null, "并行分支内不支持条件分支节点:" + bn));
+                        } else if ("wait".equals(bt) || "form".equals(bt) || "human_transfer".equals(bt)) {
+                            // C1:暂停类节点会让整个 run 挂起,并行分支内会破坏汇聚语义
+                            blockers.add(issue(nid, null, "并行分支内不支持暂停类节点(表单/等待/转人工):" + bn));
                         }
                     }
                 }

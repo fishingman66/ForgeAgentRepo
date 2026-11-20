@@ -54,6 +54,11 @@ public class AgentWorkspaceBo implements Serializable {
      */
     private Long deptId;
 
+    /** F2 品牌外观:logo / 主题色 / 帮助中心域名(与 B1 共用)。 */
+    private String logoUrl;
+    private String themeColor;
+    private String helpCenterDomain;
+
     /**
      * 查询关键字(仅查询用)
      */

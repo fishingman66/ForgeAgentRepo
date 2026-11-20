@@ -10,19 +10,23 @@
  * call.ring / call.hangup 维护「通话中」标识。
  * 采纳 = 话术填入输入框、保留修改权,由坐席手动发送(方案 v1.1 定稿)。
  */
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
+  addTicketNote,
   executeSuggestionAction,
   feedbackSuggestion,
   getConversationAttachment,
   listConversationAttachments,
   listConversationEvents,
+  listAnswers,
+  listSeats,
   listSuggestions,
   replyTicket,
+  rewriteText,
   streamConversationEvents
 } from '@/api/customerservice';
-import type { CsAttachmentBrief, CsSeatSuggestion } from '@/api/customerservice';
+import type { CsAttachmentBrief, CsKnowledgeAnswer, CsSeatSuggestion } from '@/api/customerservice';
 
 const props = defineProps<{ ticketId: number; conversationId: number | null; disabled: boolean }>();
 const emit = defineEmits<{ (e: 'replied'): void }>();
@@ -31,6 +35,19 @@ const emit = defineEmits<{ (e: 'replied'): void }>();
 const MAX_TRANSCRIPTS = 12;
 
 const content = ref('');
+/** A3:对客回复 / 内部备注分栏。备注走 NOTE 事件,访客不可见。 */
+const messageMode = ref<'reply' | 'note'>('reply');
+const rewriting = ref(false);
+const noteSaving = ref(false);
+/** A3:快捷话术(复用已生效 FAQ)与 @ 提及候选坐席。 */
+const quickPhrases = ref<CsKnowledgeAnswer[]>([]);
+const quickOpen = ref(false);
+const mentionOpen = ref(false);
+const mentionQuery = ref('');
+const mentionSeats = ref<Array<{ userId: number; seatGroup?: string; online?: string }>>([]);
+const mentionIndex = ref(0);
+/** @ 查询起始位置(-1 表示未激活);watch content 时定位未闭合的 @。 */
+let mentionStart = -1;
 const sending = ref(false);
 const suggestions = ref<CsSeatSuggestion[]>([]);
 const attachments = ref<CsAttachmentBrief[]>([]);
@@ -68,6 +85,17 @@ interface SuggestAction {
   label: string;
   payload?: Record<string, unknown>;
 }
+
+/** A3:@ 后按输入过滤坐席候选(按 userId / 分组名匹配)。 */
+const mentionCandidates = computed(() => {
+  const q = mentionQuery.value.trim().toLowerCase();
+  const all = mentionSeats.value.filter((s) => s.userId != null);
+  if (!q) {
+    return all.slice(0, 8);
+  }
+  return all.filter((s) => String(s.userId).includes(q)
+    || (s.seatGroup || '').toLowerCase().includes(q)).slice(0, 8);
+});
 
 const parseActions = (raw: string): SuggestAction[] => {
   try {
@@ -107,6 +135,18 @@ const payloadOf = (raw: unknown): Record<string, unknown> => {
   return payload && typeof payload === 'object'
     ? (payload as Record<string, unknown>)
     : envelope;
+};
+
+/** A3:加载快捷话术(已生效 FAQ)与可提及坐席,失败静默(辅助能力不阻断回复)。 */
+const loadCopilotData = async () => {
+  try {
+    const [answers, seats] = await Promise.all([listAnswers('ACTIVE'), listSeats()]);
+    quickPhrases.value = answers?.data ?? [];
+    mentionSeats.value = (seats as unknown as { data?: typeof mentionSeats.value })?.data ?? [];
+  } catch {
+    quickPhrases.value = [];
+    mentionSeats.value = [];
+  }
 };
 
 const loadHistory = async () => {
@@ -248,6 +288,7 @@ const resetStream = () => {
   suggestions.value = [];
   transcripts.value = [];
   callActive.value = false;
+  loadCopilotData();
   loadHistory();
   pollEvents();
 };
@@ -374,6 +415,93 @@ watch(
   }
 );
 
+/** A3:监听 @ 输入,维护提及候选弹层;仅在未闭合 @ 时激活。 */
+watch(content, (val) => {
+  if (messageMode.value !== 'reply') {
+    mentionOpen.value = false;
+    return;
+  }
+  const at = val.lastIndexOf('@');
+  if (at < 0) {
+    mentionStart = -1;
+    mentionOpen.value = false;
+    return;
+  }
+  const tail = val.slice(at + 1);
+  if (/\s/.test(tail) || tail.length > 20) {
+    mentionStart = -1;
+    mentionOpen.value = false;
+    return;
+  }
+  mentionStart = at;
+  mentionQuery.value = tail;
+  mentionIndex.value = 0;
+  mentionOpen.value = mentionCandidates.value.length > 0;
+});
+
+/** A3:插入 @提及,替换 content 里未闭合的 @片段。 */
+const insertMention = (seat: { userId: number }) => {
+  if (mentionStart < 0) {
+    return;
+  }
+  const head = content.value.slice(0, mentionStart);
+  const tail = content.value.slice(mentionStart + 1 + mentionQuery.value.length);
+  content.value = `${head}@${seat.userId} ${tail}`.slice(0, 2000);
+  mentionOpen.value = false;
+  mentionStart = -1;
+};
+
+/** A3:插入快捷话术到输入框末尾(可继续编辑),与推荐卡片共存。 */
+const insertPhrase = (answer: CsKnowledgeAnswer) => {
+  const addition = (answer.answer || '').trim();
+  if (!addition) {
+    return;
+  }
+  content.value = (content.value.trimEnd() + (content.value.trim() ? '\n' : '') + addition).slice(0, 2000);
+  quickOpen.value = false;
+};
+
+/** A3:AI 润色 / 中英互译;模型不可用(返回空)时保留原文并提示。 */
+const rewrite = async (mode: string) => {
+  const raw = content.value.trim();
+  if (!raw || !props.conversationId || props.disabled) {
+    return;
+  }
+  rewriting.value = true;
+  try {
+    const res = await rewriteText(props.conversationId, raw, mode);
+    const text = (res as unknown as string) || (res as { data?: string })?.data;
+    if (typeof text === 'string' && text.trim()) {
+      content.value = text.trim().slice(0, 2000);
+      ElMessage.success(mode === 'polish' ? '已润色' : '已翻译');
+    } else {
+      ElMessage.warning('改写暂不可用,已保留原文');
+    }
+  } catch {
+    ElMessage.warning('改写暂不可用,已保留原文');
+  } finally {
+    rewriting.value = false;
+  }
+};
+
+/** A3:提交内部备注(仅工单事件轨迹,不进访客通道)。 */
+const submitNote = async () => {
+  const text = content.value.trim();
+  if (!text || props.disabled) {
+    return;
+  }
+  noteSaving.value = true;
+  try {
+    await addTicketNote(props.ticketId, text);
+    content.value = '';
+    ElMessage.success('内部备注已保存');
+  } catch {
+    ElMessage.error('备注保存失败');
+  } finally {
+    noteSaving.value = false;
+  }
+};
+
 onMounted(() => {
   resetStream();
   startStream();
@@ -453,17 +581,53 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <el-input
-      v-model="content"
-      type="textarea"
-      :rows="4"
-      :disabled="disabled"
-      placeholder="输入回复内容"
-      maxlength="2000"
-      show-word-limit
-    />
-    <div class="cs-chat-actions">
-      <el-button type="primary" :loading="sending" :disabled="disabled" @click="submit">发送回复</el-button>
+    <div class="cs-compose">
+      <div class="cs-compose-tabs">
+        <el-radio-group v-model="messageMode" size="small" :disabled="disabled">
+          <el-radio-button value="reply">对客回复</el-radio-button>
+          <el-radio-button value="note">内部备注</el-radio-button>
+        </el-radio-group>
+        <span v-if="messageMode === 'note'" class="cs-compose-note-tip">仅坐席可见,客户不会收到</span>
+      </div>
+
+      <div v-if="messageMode === 'reply'" class="cs-compose-tools">
+        <el-button link size="small" :disabled="disabled" @click="quickOpen = !quickOpen">/ 快捷话术</el-button>
+        <el-button link size="small" :loading="rewriting" :disabled="disabled || !content.trim()" @click="rewrite('polish')">AI 润色</el-button>
+        <el-button link size="small" :loading="rewriting" :disabled="disabled || !content.trim()" @click="rewrite('translate_en')">译英</el-button>
+        <el-button link size="small" :loading="rewriting" :disabled="disabled || !content.trim()" @click="rewrite('translate_zh')">译中</el-button>
+        <span class="cs-compose-hint">输入 @ 提及坐席</span>
+      </div>
+
+      <div v-if="quickOpen && messageMode === 'reply'" class="cs-quick-panel">
+        <div v-if="!quickPhrases.length" class="cs-quick-empty">暂无已生效的快捷话术</div>
+        <div v-for="a in quickPhrases" :key="a.id" class="cs-quick-item" @click="insertPhrase(a)">
+          <span class="cs-quick-q">{{ a.question }}</span>
+          <span class="cs-quick-a">{{ a.answer }}</span>
+        </div>
+      </div>
+
+      <div v-if="mentionOpen && mentionCandidates.length" class="cs-mention-panel">
+        <div v-for="(s, i) in mentionCandidates" :key="s.userId"
+             class="cs-mention-item" :class="{ 'is-active': i === mentionIndex }"
+             @click="insertMention(s)">
+          @{{ s.userId }} <span class="cs-mention-group">{{ s.seatGroup || '坐席' }}</span>
+          <el-tag v-if="s.online === '1'" size="small" type="success">在线</el-tag>
+        </div>
+      </div>
+
+      <el-input
+        v-model="content"
+        type="textarea"
+        :rows="4"
+        :disabled="disabled"
+        :placeholder="messageMode === 'reply' ? '输入回复内容' : '输入内部备注,仅团队可见'"
+        maxlength="2000"
+        show-word-limit
+      />
+      <div class="cs-chat-actions">
+        <el-button v-if="messageMode === 'reply'" type="primary" :loading="sending" :disabled="disabled" @click="submit">发送回复</el-button>
+        <el-button v-else type="warning" :loading="noteSaving" :disabled="disabled" @click="submitNote">保存内部备注</el-button>
+      </div>
     </div>
 
     <el-dialog v-model="preview.visible" :title="preview.name" width="520px">
@@ -612,5 +776,77 @@ onUnmounted(() => {
 .cs-chat-actions {
   margin-top: 10px;
   text-align: right;
+}
+.cs-compose {
+  margin-top: 8px;
+}
+.cs-compose-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.cs-compose-note-tip,
+.cs-compose-hint {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.cs-compose-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.cs-quick-panel,
+.cs-mention-panel {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 4px;
+  background: var(--el-bg-color);
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+.cs-quick-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.cs-quick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.cs-quick-item:hover {
+  background: var(--el-fill-color-light);
+}
+.cs-quick-q {
+  font-size: 12px;
+  font-weight: 600;
+}
+.cs-quick-a {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cs-mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.cs-mention-item:hover,
+.cs-mention-item.is-active {
+  background: var(--el-fill-color-light);
+}
+.cs-mention-group {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 </style>

@@ -36,6 +36,11 @@
             <groupId>com.forgeagent</groupId>
             <artifactId>forge-common-satoken</artifactId>
         </dependency>
+        <!-- 横切加密:API Key 落库加密 TypeHandler -->
+        <dependency>
+            <groupId>com.forgeagent</groupId>
+            <artifactId>forge-common-encrypt</artifactId>
+        </dependency>
 
         <!-- AgentScope Java 运行内核(共享模型工厂) -->
         <dependency>

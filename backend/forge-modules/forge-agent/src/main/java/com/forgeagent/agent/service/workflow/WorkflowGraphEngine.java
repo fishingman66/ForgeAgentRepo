@@ -117,7 +117,8 @@ public class WorkflowGraphEngine {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** W8:dryRun 桩输出覆盖的外部调用节点类型(节点级超时经 SaTokenContextBridge 传递登录态) */
-    private static final Set<String> EXTERNAL_NODE_TYPES = Set.of("llm", "tool", "http", "loop", "code", "knowledge");
+    private static final Set<String> EXTERNAL_NODE_TYPES = Set.of(
+        "llm", "tool", "http", "loop", "code", "knowledge", "human_transfer");
 
     /** W7:并行分支执行池(固定有界,CallerRuns 兜底防拒绝) */
     private static final ExecutorService WORKFLOW_EXECUTOR = new ThreadPoolExecutor(
@@ -289,7 +290,10 @@ public class WorkflowGraphEngine {
                 decrementOut(adj, inDegree, queue, cur);
             } catch (ApprovalPauseException pause) {
                 t.setStatus("pending");
-                t.setOutput("等待人工审批(审批单 " + pause.approvalId + "),审批通过后自动续跑");
+                // C1:wait/form 无审批单(approvalId 为 null),不能复用"审批单 0"的文案
+                t.setOutput(pause.approvalId == null
+                    ? "已暂停[" + pause.nodeName + "],等待外部输入或事件后继续"
+                    : "等待人工审批(审批单 " + pause.approvalId + "),审批通过后自动续跑");
                 return new ExecutionOutcome(false, pause.nodeId, pause.nodeName, pause.approvalId);
             } catch (Exception e) {
                 t.setStatus("fail");

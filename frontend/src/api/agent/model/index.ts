@@ -48,6 +48,11 @@ export const changeModelStatus = (id: string | number, status: string) => {
 };
 
 /** 删除模型配置 */
+/** C3-2:保存前测试连通性(失败返回 ok=false,不抛业务异常) */
+export const testModel = (data: Record<string, any>): AxiosPromise<{ ok: boolean; message?: string; sample?: string }> => {
+  return request({ url: '/agent/model/test', method: 'post', data });
+};
+
 export const delModel = (ids: string | number | Array<string | number>) => {
   return request({
     url: '/agent/model/' + ids,

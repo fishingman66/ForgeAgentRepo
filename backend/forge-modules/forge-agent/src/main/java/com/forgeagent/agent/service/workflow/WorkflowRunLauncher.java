@@ -539,6 +539,60 @@ public class WorkflowRunLauncher {
         return vo;
     }
 
+    /**
+     * C1:等待类节点(表单/等待)续跑——由外部事件推送 payload,不做登录态校验调用方自行鉴权。
+     *
+     * <p>与 {@link #resumeRun} 的区别:不吃审批单、允许携带 payload,payload 直接写入
+     * {@code <等待节点名>.output},供下游 {@code {{节点名.output.字段}}} 插值。</p>
+     */
+    public WorkflowTrialRunVo resumeWaitRun(Long runId, String payloadJson) {
+        AgentWorkflowRun run = requireRun(runId);
+        if (!"pending_approval".equals(run.getStatus())) {
+            throw new ServiceException("该运行实例不在等待状态,无需唤醒");
+        }
+        AgentInfo agent = agentMapper.selectById(run.getAgentId());
+        if (agent == null) {
+            throw new ServiceException("Agent 不存在");
+        }
+        List<WorkflowTrialRunVo.NodeTrace> trace = traceCodec.readTrace(run.getTraceJson());
+        Map<String, String> vars = traceCodec.readVars(run.getVarsJson());
+        Set<String> completed = traceCodec.readSet(run.getCompletedJson());
+        Set<String> skipped = traceCodec.readSet(run.getSkippedJson());
+        String pendingNode = run.getPendingNode();
+        WorkflowTrialRunVo.NodeTrace waiting = trace.stream()
+            .filter(t -> pendingNode != null && pendingNode.equals(t.getNodeId()) && "pending".equals(t.getStatus()))
+            .findFirst()
+            .orElseThrow(() -> new ServiceException("运行实例缺少等待中的节点,无法唤醒"));
+        String payload = payloadJson == null || payloadJson.isBlank() ? "{}" : payloadJson;
+        vars.put(waiting.getNodeName() + ".output", payload);
+        vars.put(waiting.getNodeName() + ".payload", payload);
+        waiting.setStatus("success");
+        waiting.setOutput(payload);
+        completed.add(pendingNode);
+
+        WorkflowTrialRunVo vo = new WorkflowTrialRunVo();
+        vo.setInputs(run.getInputs());
+        vo.setTrace(trace);
+        vo.setRunId(run.getId());
+        ExecutionOutcome outcome = graphEngine.executeGraph(run.getWorkflowJson(), run.getInputs(), agent,
+            trace, vars, completed, skipped, run, false, false, null, 100);
+        if (outcome.pendingNode() != null) {
+            snapshotRun(run, "pending_approval", outcome.pendingNode(), outcome.approvalId(),
+                vars, trace, completed, skipped);
+            vo.setStatus("pending_approval");
+            vo.setApprovalId(outcome.approvalId());
+            vo.setMessage("唤醒后再次停在节点[" + outcome.pendingNodeName() + "],工作流继续等待");
+            return vo;
+        }
+        snapshotRun(run, outcome.success() ? "success" : "fail", null, null,
+            vars, trace, completed, skipped);
+        vo.setStatus(outcome.success() ? "success" : "fail");
+        vo.setMessage(outcome.success()
+            ? "工作流已唤醒并续跑完成"
+            : "工作流唤醒后失败:" + (trace.isEmpty() ? "未知错误" : trace.get(trace.size() - 1).getOutput()));
+        return vo;
+    }
+
     public AgentWorkflowRun requireRun(Long runId) {
         AgentWorkflowRun run = runMapper.selectById(runId);
         if (run == null) {

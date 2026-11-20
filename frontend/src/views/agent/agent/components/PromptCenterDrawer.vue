@@ -24,6 +24,7 @@
             <el-form-item label="描述"><el-input v-model="form.description" maxlength="500" /></el-form-item>
             <el-form-item label="模板内容">
               <el-input v-model="form.content" type="textarea" :rows="7" placeholder="支持双花括号变量名占位符,如 tone" />
+              <el-button size="small" icon="MagicStick" style="margin-top: 6px" @click="openGen">AI 生成草稿</el-button>
             </el-form-item>
             <el-form-item label="变量契约">
               <el-input v-model="form.variableSchema" type="textarea" :rows="4" placeholder='{"vars":[{"name":"tone","type":"string","required":true,"default":"专业"}]}' />
@@ -62,6 +63,30 @@
         <el-empty v-else description="左侧选择模板,或新建" />
       </div>
     </div>
+    <el-dialog v-model="genVisible" title="AI 生成提示词草稿" width="560px" append-to-body destroy-on-close>
+      <el-form label-width="90px" size="small">
+        <el-form-item label="生成模型" required>
+          <el-select v-model="genForm.modelId" placeholder="选择模型" filterable style="width: 100%">
+            <el-option v-for="m in genModels" :key="m.id" :label="`${m.name}（${m.modelName}）`" :value="m.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="业务描述" required>
+          <el-input v-model="genForm.purpose" type="textarea" :rows="3" maxlength="500" show-word-limit
+            placeholder="这个提示词负责什么任务？" />
+        </el-form-item>
+        <el-form-item label="语气">
+          <el-input v-model="genForm.tone" maxlength="60" placeholder="如：专业简洁" />
+        </el-form-item>
+        <el-form-item label="边界">
+          <el-input v-model="genForm.boundaries" type="textarea" :rows="2" maxlength="300"
+            placeholder="禁止事项，如：不承诺赔偿金额" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button size="small" @click="genVisible = false">取消</el-button>
+        <el-button size="small" type="primary" :loading="genLoading" @click="doGenerate">生成并填入</el-button>
+      </template>
+    </el-dialog>
   </el-drawer>
 </template>
 
@@ -73,6 +98,8 @@ import {
   previewPrompt, publishPromptVersion, savePromptTemplate, setPromptStable,
   type PromptTemplate, type PromptVersion
 } from '@/api/agent/governance';
+import { generatePromptDraft } from '@/api/agent/governance';
+import { listModel } from '@/api/agent/model';
 import { parseVariableContract } from '@/utils/governance';
 
 const props = defineProps<{ modelValue: boolean; workspaceId?: number | string }>();
@@ -86,6 +113,57 @@ const asStable = ref(true);
 const variablesText = ref('{}');
 const previewText = ref('');
 const form = ref<Record<string, any>>({ id: null, name: '', description: '', category: 'system', content: '', variableSchema: '' });
+
+// C4:AI 生成草稿(生成结果只填内容框,发布仍走现有版本链,contentHash 由后端计算)
+const genVisible = ref(false);
+const genLoading = ref(false);
+const genModels = ref<Array<Record<string, any>>>([]);
+const genForm = ref<{ modelId?: number | string; purpose: string; tone: string; boundaries: string }>({
+  modelId: undefined, purpose: '', tone: '', boundaries: ''
+});
+
+const openGen = async () => {
+  genVisible.value = true;
+  genForm.value = { modelId: undefined, purpose: '', tone: '', boundaries: '' };
+  if (!genModels.value.length) {
+    const res = await listModel({ pageNum: 1, pageSize: 100 });
+    genModels.value = res.data?.rows ?? [];
+  }
+};
+
+const doGenerate = async () => {
+  if (!genForm.value.modelId) {
+    ElMessage.warning('请选择生成模型');
+    return;
+  }
+  if ((genForm.value.purpose || '').trim().length < 5) {
+    ElMessage.warning('请用至少 5 个字描述业务用途');
+    return;
+  }
+  genLoading.value = true;
+  try {
+    const res = await generatePromptDraft({
+      workspaceId: props.workspaceId,
+      modelId: genForm.value.modelId,
+      agentName: form.value.name,
+      purpose: genForm.value.purpose,
+      tone: genForm.value.tone,
+      boundaries: genForm.value.boundaries
+    });
+    const result = res.data;
+    if (!result?.ok) {
+      ElMessage.warning(result?.message || '生成失败，请手工编写');
+      return;
+    }
+    form.value.content = result.content || '';
+    genVisible.value = false;
+    ElMessage.success('已填入模板内容，确认后点“保存模板”或“发布新版本”');
+  } catch (e: any) {
+    ElMessage.error(e?.message || '生成失败');
+  } finally {
+    genLoading.value = false;
+  }
+};
 
 const load = async () => {
   const res = await listPromptTemplates(props.workspaceId);

@@ -152,6 +152,31 @@ public class CsVisitorController extends BaseController {
         return R.ok(true);
     }
 
+    /**
+     * A2:公开挂件配置下发(免访客令牌)。
+     *
+     * <p>只按 channelCode 取渠道并做 Origin 白名单校验,不解析 X-Visitor-Token;
+     * 返回体不含 channelSecret / workspaceId 等内部字段。</p>
+     */
+    @GetMapping("/widget-config")
+    public R<com.forgeagent.customerservice.domain.vo.CsWidgetConfigVo> widgetConfig(
+        @PathVariable String channelCode, jakarta.servlet.http.HttpServletRequest request) {
+        com.forgeagent.customerservice.domain.CsChannel channel = guard.require(channelCode);
+        guard.checkOrigin(channel, request.getHeader("Origin"));
+        com.forgeagent.customerservice.domain.vo.CsWidgetConfigVo vo =
+            new com.forgeagent.customerservice.domain.vo.CsWidgetConfigVo();
+        if (org.springframework.util.StringUtils.hasText(channel.getWidgetTheme())) {
+            vo.setTheme(channel.getWidgetTheme());
+        }
+        if (org.springframework.util.StringUtils.hasText(channel.getWidgetMode())) {
+            vo.setMode(channel.getWidgetMode());
+        }
+        vo.setWelcome(channel.getWidgetWelcome());
+        vo.setConfig(channel.getWidgetConfig());
+        vo.setEnabled("0".equals(channel.getStatus()));
+        return R.data(vo);
+    }
+
     /** C2:访客提交会话满意度(1-5 分)。 */
     @PostMapping("/sessions/{cid}/csat")
     public R<Void> submitCsat(@PathVariable String channelCode, @PathVariable Long cid,

@@ -26,6 +26,10 @@ public class CsKnowledgeAnswerVo implements Serializable {
     private String source;
     private String status;
     private String auditNote;
+
+    /** B3 生成元数据。 */
+    private String citations;
+    private java.math.BigDecimal confidence;
     private Long workspaceId;
     private Long knowledgeId;
     private Long sourceRefId;

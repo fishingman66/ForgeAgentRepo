@@ -98,9 +98,10 @@
           </el-table-column>
           <el-table-column label="所有者" prop="ownerName" width="120" show-overflow-tooltip />
           <el-table-column label="创建时间" prop="createTime" width="170" align="center" />
-          <el-table-column label="操作" width="240" align="center" fixed="right">
+          <el-table-column label="操作" width="300" align="center" fixed="right">
             <template #default="scope">
               <el-button v-hasPermi="['agent:workspace:member']" size="small" text type="primary" icon="User" @click="openMembers(scope.row as WorkspaceVO)">成员</el-button>
+              <el-button v-hasPermi="['agent:workspace:edit']" size="small" text type="success" icon="Link" @click="saasPanelRef?.open(scope.row as WorkspaceVO)">邀请/品牌</el-button>
               <el-button v-hasPermi="['agent:workspace:edit']" size="small" text type="warning" icon="Edit" @click="handleEdit(scope.row as WorkspaceVO)">编辑</el-button>
               <el-button
                 v-hasPermi="['agent:workspace:edit']"
@@ -206,6 +207,7 @@
         @pagination="getMemberList"
       />
     </el-drawer>
+    <SaasPanel ref="saasPanelRef" />
   </div>
 </template>
 
@@ -229,8 +231,11 @@ import type { DeptTreeVO } from '@/api/system/dept/types';
 import { checkPermi } from '@/utils/permission';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { onMounted, reactive, ref } from 'vue';
+import SaasPanel from './SaasPanel.vue';
 
 const loading = ref(false);
+/** F2 SaaS 面板组件引用。 */
+const saasPanelRef = ref<InstanceType<typeof SaasPanel>>();
 const activeTab = ref('my');
 const queryKeyword = ref('');
 const queryDeptId = ref<number | string>();

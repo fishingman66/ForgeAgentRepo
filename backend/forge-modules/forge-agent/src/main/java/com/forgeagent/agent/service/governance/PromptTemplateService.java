@@ -167,6 +167,23 @@ public class PromptTemplateService {
     }
 
     /**
+     * C4:草稿内容直接渲染预览(不落版本链),供"生成 → 预览 → 采纳"链路使用。
+     */
+    public com.forgeagent.agent.domain.vo.PromptPreviewVo previewDraft(String content, String schema,
+                                                                       String variablesJson) {
+        if (StringUtils.isBlank(content)) {
+            throw new ServiceException("草稿内容不能为空");
+        }
+        String rendered = render(content, schema, variablesJson);
+        com.forgeagent.agent.domain.vo.PromptPreviewVo result = new com.forgeagent.agent.domain.vo.PromptPreviewVo();
+        result.setContent(rendered);
+        result.setContentHash(sha256(rendered));
+        result.setLayers(List.of("DRAFT"));
+        result.setEstimatedTokens(Math.max(1, rendered.length() / 4));
+        return result;
+    }
+
+    /**
      * 按 Agent 绑定模式编译系统提示词;MANUAL 或未绑定模板时返回 null,
      * 由调用方沿用 Agent 自带的 systemPrompt。
      */

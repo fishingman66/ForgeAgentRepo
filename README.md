@@ -48,7 +48,7 @@ docker compose up -d
 
 ### 方式二：本地开发
 
-**1. 环境**：JDK 21、Maven 3.9+、**Node ≥ 22.22.0 与 pnpm ≥ 12.0.0**（见 `frontend/package.json` 的 `engines`）；MySQL 8、Redis 6 必装，Milvus 3.0（本地 milvus-lite 3.x / 生产 standalone v3.0.6，均为 gRPC）必装。
+**1. 环境**：JDK 21、Maven 3.9+、**Node ≥ 22.22.0 与 pnpm ≥ 12.0.0**（见 `frontend/package.json` 的 `engines`）；MySQL 8、Redis 6+ 必装，Milvus 3.0（本地 milvus-lite 3.x / 生产 standalone v3.0.6，均为 gRPC）必装。
 
 > dev 默认直连本机 milvus-lite 的 19530（**gRPC**）；生产 compose 用 Milvus 3.0 standalone，二者共用 `milvus-sdk-java 3.0.13` 与同一套业务代码，切环境只改 `rag.knowledge.milvus-*` 连接项。不装 Milvus 时可临时改 `vector-store: mysql` 用 MySQL 向量列跑通全链路，详见 §4.2 与 [forge-rag README](backend/forge-modules/forge-rag/README.md)。
 
@@ -114,7 +114,7 @@ pnpm run dev
 | 前端 | Vue 3.5 + TypeScript 6 + Element Plus 2.14 + Vite 8 + Pinia 4 + vue-router 5 + UnoCSS + ECharts；pnpm 12 |
 | 后端 | Spring Boot 4.1 + JDK 21 + Sa-Token + MyBatis-Plus + MapStruct Plus |
 | 运行内核 | AgentScope 2.0 |
-| 存储 | MySQL 8+（utf8mb4）+ Redis 6（Redisson）+ Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone）。无 Milvus 时可切 `vector-store: mysql`，向量以 `BLOB`（float32 小端）存于分块表/记忆表，由应用层算余弦，扫描上限 5000 |
+| 存储 | MySQL 8+（utf8mb4）+ Redis 6+（Redisson）+ Milvus 3.0（gRPC，本地 milvus-lite / 生产 standalone）。无 Milvus 时可切 `vector-store: mysql`，向量以 `BLOB`（float32 小端）存于分块表/记忆表，由应用层算余弦，扫描上限 5000 |
 
 > **依赖版本基线（2026-11-18 升级后）**：统一管理在 `backend/pom.xml` 的 `<properties>`。Spring Boot 4.1.2、Spring AI 2.0.2、Spring Boot Admin 4.1.5、springdoc 3.2.0、MyBatis 3.5.19 + MyBatis-Plus 3.5.18.1、Sa-Token 1.46.0、Redisson 4.8.0、Hutool 5.8.48、Lombok 1.18.48、AgentScope 2.0.5、Milvus SDK 3.0.13、AWS SDK 2.59.3、BouncyCastle 1.87、Fory 1.7.8、ip2region 3.3.8、mica-mqtt 2.6.15、Elasticsearch Client 7.17.29、pdfbox 3.0.8、MCP SDK 2.2.0。Maven 插件：compiler 3.16.0 / surefire 3.6.1 / jar 3.5.1 / flatten 1.9.0。
 > **升级边界**：跨 major/RC/Beta 不自动升（Boot 4.2-RC、Spring AI 2.1-RC、Agentscope 2.1-BETA、ES 7→9、Scala 2→3、compiler/jar 4.0-beta）；MyBatis 3.6 与 MyBatis-Plus 3.5.x 二进制不兼容（`Cursor.close()` 签名 + `ReflectorFactory.findForClass` 变更），须等 MP 同步大版本再一起升。详见工作日志。

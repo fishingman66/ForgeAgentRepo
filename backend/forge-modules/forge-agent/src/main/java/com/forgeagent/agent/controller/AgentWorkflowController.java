@@ -104,6 +104,17 @@ public class AgentWorkflowController extends BaseController {
     }
 
     /**
+     * C1:唤醒等待类节点(表单填写完成 / 外部事件到达),payload 作为该节点输出。
+     */
+    @SaCheckPermission("agent:agent:edit")
+    @Log(title = "工作流编排", businessType = BusinessType.UPDATE)
+    @PostMapping("/run/{runId}/signal")
+    public R<WorkflowTrialRunVo> signal(@NotNull(message = "运行实例ID不能为空") @PathVariable Long runId,
+                                       @RequestBody(required = false) String payloadJson) {
+        return R.ok(agentWorkflowService.resumeWaitRun(runId, payloadJson));
+    }
+
+    /**
      * 版本历史列表(倒序,不含图快照)
      */
     @SaCheckPermission("agent:agent:list")

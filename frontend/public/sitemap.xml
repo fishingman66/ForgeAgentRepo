@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- 帮助中心为多租户公开页,按渠道动态内容由各站点自行替换本文件;
+       静态样例保证爬虫可发现站点,避免根路径被 SPA 兜底吞成 index.html -->
+  <url><loc>/help/zh_CN</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>/help/en_US</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
+</urlset>

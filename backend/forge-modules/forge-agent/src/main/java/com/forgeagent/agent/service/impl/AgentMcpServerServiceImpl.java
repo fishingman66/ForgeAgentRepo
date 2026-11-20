@@ -6,6 +6,8 @@ import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.rag.service.ext.SsrfGuard;
+import com.forgeagent.agent.config.AgentRuntimeProperties;
 import com.forgeagent.agent.domain.AgentMcpServer;
 import com.forgeagent.agent.domain.bo.AgentMcpServerBo;
 import com.forgeagent.agent.domain.vo.AgentMcpServerVo;
@@ -40,6 +42,7 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
 
     private final AgentMcpServerMapper serverMapper;
     private final ResourceAccessGuard resourceGuard;
+    private final AgentRuntimeProperties runtimeProperties;
 
     @Override
     public PageResult<AgentMcpServerVo> queryPageList(AgentMcpServerBo bo, PageQuery pageQuery) {
@@ -218,6 +221,11 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
         }
         if (StringUtils.isBlank(uri.getHost())) {
             throw new ServiceException("MCP 服务端地址缺少主机名");
+        }
+        // D4:开关式 SSRF 守护——默认关,避免一刀切废掉合法内网 MCP;
+        // 开启后拒绝回环/私网/链路本地/组播,与工作流 http 节点同口径。
+        if (runtimeProperties.isMcpSsrfGuardEnabled()) {
+            SsrfGuard.verify(bo.getUrl());
         }
     }
 

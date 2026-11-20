@@ -59,4 +59,9 @@ public class AgentWorkspace extends BaseEntity {
     @TableLogic
     private Long delFlag;
 
+    /** F2 品牌外观:logo / 主题色 / 帮助中心域名。 */
+    private String logoUrl;
+    private String themeColor;
+    private String helpCenterDomain;
+
 }

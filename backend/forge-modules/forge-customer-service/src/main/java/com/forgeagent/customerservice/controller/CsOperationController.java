@@ -69,6 +69,8 @@ public class CsOperationController extends BaseController {
     private final com.forgeagent.customerservice.service.CsAgentRouteService agentRouteService;
     /** D2:评测回流用例(直写平台评测集 + 人工确认)。 */
     private final com.forgeagent.customerservice.service.CsEvalFeedbackService evalFeedbackService;
+    /** B3 FAQ 答案自动生成。 */
+    private final com.forgeagent.customerservice.service.CsFaqGenerateService faqGenerateService;
 
     @GetMapping("/csat")
     public R<List<com.forgeagent.customerservice.domain.vo.CsCsatVo>> csatList() {
@@ -222,6 +224,20 @@ public class CsOperationController extends BaseController {
     @PostMapping("/knowledge-answers/from-zero-hit")
     public R<Integer> fromZeroHit(@RequestParam(defaultValue = "20") int limit) {
         return R.ok(knowledgeAnswerService.fromZeroHit(currentWorkspaceId(), limit));
+    }
+
+    /** B3 FAQ 答案自动生成:对待审空答案生成候选+引用,仍 PENDING 待人工审核。 */
+    @PostMapping("/knowledge-answers/generate")
+    public R<com.forgeagent.customerservice.service.CsFaqGenerateService.GenerateResult> generateFaq(
+        @RequestParam(defaultValue = "20") int limit) {
+        return R.ok(faqGenerateService.generate(currentWorkspaceId(), limit));
+    }
+
+    /** B3 成本估算:不实际生成,返回待审数与预估费用。 */
+    @GetMapping("/knowledge-answers/generate/estimate")
+    public R<com.forgeagent.customerservice.service.CsFaqGenerateService.GenerateResult> estimateFaq(
+        @RequestParam(defaultValue = "20") int limit) {
+        return R.ok(faqGenerateService.estimate(currentWorkspaceId(), limit));
     }
 
     @PostMapping("/knowledge-answers/expire")

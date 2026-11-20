@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS `agent_approval` (
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
   `del_flag` bigint DEFAULT '0' COMMENT '删除标志(0存在 其他删除)',
   `expired_at` DATETIME NULL COMMENT '审批截止时间(过期清扫置 expired,run 置 fail)',
+  `exec_state` varchar(20) DEFAULT 'PENDING' COMMENT 'F4:执行态 PENDING/APPROVED/DONE/NEED_MANUAL/FAILED',
+  `run_id` varchar(64) NULL COMMENT 'F4:run级SSE回执目标(ask_async 时落库)',
+  `action_log_id` bigint NULL COMMENT 'F4:关联 agent_cs_action_log.id',
+  `tool_id` bigint NULL COMMENT 'F4一期:平台工具ID(重放定位定义行)',
+  `tool_def_snapshot` text NULL COMMENT 'F4一期:工具定义JSON快照(防审批期工具被改/停用)',
   PRIMARY KEY (`id`),
   KEY `idx_approval_session` (`session_id`),
   KEY `idx_approval_status` (`status`)
@@ -335,6 +340,7 @@ CREATE TABLE IF NOT EXISTS `agent_knowledge_document` (
   `notice` varchar(200) DEFAULT '' COMMENT '处理提示(如向量写入失败待补偿)',
   `visibility` varchar(20) NOT NULL DEFAULT 'INHERIT' COMMENT '可见性:INHERIT/RESTRICTED',
   `publish_status` varchar(20) NOT NULL DEFAULT 'PUBLISHED' COMMENT 'DRAFT/PENDING_REVIEW/PUBLISHED/REJECTED',
+  `locale` varchar(10) NOT NULL DEFAULT 'zh_CN' COMMENT '帮助中心语言(zh_CN/en_US)',
   `effective_at` datetime DEFAULT NULL COMMENT '生效时间(NULL=立即)',
   `expires_at` datetime DEFAULT NULL COMMENT '过期时间(NULL=不过期)',
   `trashed` tinyint(1) NOT NULL DEFAULT 0 COMMENT '回收站(1=已入回收站)',
@@ -345,6 +351,7 @@ CREATE TABLE IF NOT EXISTS `agent_knowledge_document` (
   PRIMARY KEY (`id`),
   KEY `idx_kb_doc_knowledge` (`knowledge_id`),
   KEY `idx_kb_doc_visible` (`knowledge_id`,`trashed`,`publish_status`),
+  KEY `idx_kb_doc_help` (`publish_status`,`locale`,`trashed`),
   KEY `idx_akd_kb_md5` (`knowledge_id`,`file_md5`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 知识库文档';
 DROP TABLE IF EXISTS `agent_market_install`;
@@ -498,7 +505,7 @@ CREATE TABLE IF NOT EXISTS `agent_model` (
   `name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '模型配置名称(全局唯一)',
   `provider` varchar(30) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '提供商(openai/anthropic/dashscope/ollama/custom)',
   `base_url` varchar(200) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT 'API基础地址',
-  `api_key` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT 'API密钥',
+  `api_key` varchar(1000) COLLATE utf8mb4_unicode_ci DEFAULT '' COMMENT 'API密钥(AES-GCM密文,ENC:前缀;存量明文兼容)',
   `model_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '模型标识(如 gpt-4o/qwen-plus)',
   `temperature` decimal(3,2) DEFAULT '0.70' COMMENT '采样温度(0-2)',
   `max_tokens` int DEFAULT '4096' COMMENT '最大输出tokens',
@@ -818,6 +825,9 @@ CREATE TABLE IF NOT EXISTS `agent_workspace` (
   `update_by` bigint DEFAULT NULL COMMENT 'æ›´æ–°è€…',
   `update_time` datetime DEFAULT NULL COMMENT 'æ›´æ–°æ—¶é—´',
   `del_flag` bigint DEFAULT '0' COMMENT '删除标志(0存在 其他删除)',
+  `logo_url` varchar(500) DEFAULT '' COMMENT 'F2 品牌 logo URL',
+  `theme_color` varchar(20) DEFAULT '' COMMENT 'F2 主题色',
+  `help_center_domain` varchar(200) DEFAULT '' COMMENT 'F2/B1 帮助中心自定义域名',
   PRIMARY KEY (`id`),
   KEY `idx_dept` (`dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 工作空间';
@@ -835,6 +845,21 @@ CREATE TABLE IF NOT EXISTS `agent_workspace_member` (
   UNIQUE KEY `uk_ws_user` (`workspace_id`,`user_id`),
   KEY `idx_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 工作空间成员';
+DROP TABLE IF EXISTS `agent_workspace_invite`;
+CREATE TABLE IF NOT EXISTS `agent_workspace_invite` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `workspace_id` bigint NOT NULL COMMENT '工作空间ID',
+  `token_hash` char(64) NOT NULL COMMENT '邀请令牌 SHA-256(明文只回传一次)',
+  `role` varchar(20) NOT NULL DEFAULT 'runner' COMMENT '受邀角色(developer/runner)',
+  `max_uses` int NOT NULL DEFAULT 1 COMMENT '最大使用次数',
+  `used_count` int NOT NULL DEFAULT 0 COMMENT '已使用次数',
+  `expires_at` datetime NOT NULL COMMENT '过期时间',
+  `create_by` bigint DEFAULT NULL COMMENT '邀请人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_wsi_token` (`token_hash`),
+  KEY `idx_wsi_ws` (`workspace_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='F2 工作空间邀请令牌';
 DROP TABLE IF EXISTS `flow_category`;
 CREATE TABLE IF NOT EXISTS `flow_category` (
   `category_id` bigint NOT NULL COMMENT '流程分类ID',
@@ -1941,6 +1966,10 @@ CREATE TABLE IF NOT EXISTS `agent_cs_channel` (
   `handoff_keywords` VARCHAR(500) NULL COMMENT '转人工关键词(逗号分隔),空则用平台默认',
   `handoff_rules` TEXT NULL COMMENT '转人工规则链 JSON([{type,enabled,...}]),空用内置默认',
   `identity_binding` VARCHAR(32) NULL COMMENT '访客身份绑定方式,空=未配置(WRITE/HIGH_RISK 工具一律 deny)',
+  `widget_theme` VARCHAR(32) NULL COMMENT 'A2:挂件主题色(#RRGGBB),空用默认 #2563eb',
+  `widget_mode` VARCHAR(16) DEFAULT 'bubble' COMMENT 'A2:挂件形态 bubble/sidebar',
+  `widget_welcome` VARCHAR(200) NULL COMMENT 'A2:开场主动消息,空不展示',
+  `widget_config` TEXT NULL COMMENT 'A2:挂件扩展配置 JSON(logo/position/size 等)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csc_code` (`channel_code`),
   KEY `idx_csc_ws` (`workspace_id`, `status`)
@@ -2092,6 +2121,8 @@ CREATE TABLE IF NOT EXISTS `agent_cs_knowledge_answer` (
   `effective_to` DATETIME NULL,
   `audit_by` BIGINT NULL,
   `audit_note` VARCHAR(500) NULL,
+  `citations` TEXT DEFAULT NULL COMMENT 'B3 AI候选引用(JSON数组)',
+  `confidence` DECIMAL(4,3) DEFAULT NULL COMMENT 'B3 AI候选置信度',
   `create_time` DATETIME NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_cska_hash` (`workspace_id`, `question_hash`),
@@ -2346,6 +2377,49 @@ CREATE TABLE IF NOT EXISTS `agent_cs_ticket_event` (
   PRIMARY KEY (`id`),
   KEY `idx_cste_ticket` (`ticket_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工单事件轨迹';
+
+-- agent_cs_investigation  (source: docs/13 B4 AI 工单根因调查)
+CREATE TABLE IF NOT EXISTS `agent_cs_investigation` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL,
+  `ticket_id` BIGINT NOT NULL,
+  `conversation_id` BIGINT NULL,
+  `datasource_id` BIGINT NULL,
+  `agent_id` BIGINT NULL,
+  `workflow_run_id` BIGINT NULL COMMENT 'RCA 若由工作流执行则回指运行实例',
+  `template_code` VARCHAR(64) NULL COMMENT '调查模板编码,如 RCA_STANDARD',
+  `status` VARCHAR(24) NOT NULL COMMENT 'RUNNING/SUCCEEDED/FAILED/CONFIRMED/REJECTED',
+  `hypotheses_json` TEXT NULL COMMENT '假设列表 JSON',
+  `report_md` MEDIUMTEXT NULL COMMENT '证据链报告(落库前已脱敏)',
+  `confidence` DECIMAL(4,3) NULL,
+  `error_message` VARCHAR(500) NULL,
+  `created_by` BIGINT NULL COMMENT '发起坐席',
+  `confirmed_by` BIGINT NULL,
+  `confirmed_at` DATETIME NULL,
+  `create_time` DATETIME NULL,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_csi_ticket` (`ticket_id`, `id`),
+  KEY `idx_csi_ws_time` (`workspace_id`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 工单根因调查';
+
+-- agent_cs_investigation_evidence  (source: docs/13 B4)
+CREATE TABLE IF NOT EXISTS `agent_cs_investigation_evidence` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `investigation_id` BIGINT NOT NULL,
+  `seq` INT NOT NULL COMMENT '证据序号,从 1 开始',
+  `evidence_type` VARCHAR(16) NOT NULL COMMENT 'SQL/MCP/KB/TICKET_EVENT',
+  `hypothesis_title` VARCHAR(200) NULL,
+  `query_text` VARCHAR(2000) NULL COMMENT '执行的只读查询(已裁剪)',
+  `result_digest` VARCHAR(2000) NULL COMMENT '结果摘要(已脱敏)',
+  `row_count` INT NULL,
+  `elapsed_ms` INT NULL,
+  `success` TINYINT NOT NULL DEFAULT 0,
+  `error_message` VARCHAR(500) NULL,
+  `create_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_csie_inv` (`investigation_id`, `seq`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI 调查证据链';
 
 -- agent_cs_visitor  (source: backend/sql/agent_cs_c0.sql)
 CREATE TABLE IF NOT EXISTS `agent_cs_visitor` (

@@ -100,6 +100,25 @@ export const changeMemberRole = (data: MemberForm) => {
   });
 };
 
+/** F2 创建邀请链接(明文 token 仅返回一次) */
+export const createInvite = (workspaceId: number | string, role?: string, maxUses?: number, ttlHours?: number) => {
+  return request({
+    url: '/agent/saas/invites',
+    method: 'post',
+    params: { workspaceId, role, maxUses, ttlHours }
+  });
+};
+
+/** F2 邀请记录 */
+export const listInvites = (workspaceId: number | string): AxiosPromise<Array<{ id: number; role: string; maxUses: number; usedCount: number; expiresAt: string }>> => {
+  return request({ url: '/agent/saas/invites', method: 'get', params: { workspaceId } });
+};
+
+/** F2 接受邀请(登录用户,token 来自邀请链接) */
+export const acceptInvite = (token: string) => {
+  return request({ url: '/agent/saas/invites/accept', method: 'post', params: { token } });
+};
+
 /** 移除成员 */
 export const delMember = (ids: string | number | Array<string | number>) => {
   return request({

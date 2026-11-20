@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.forgeagent.agent.config.AgentRuntimeProperties;
 import com.forgeagent.agent.domain.AgentMcpServer;
 import com.forgeagent.agent.domain.bo.AgentMcpServerBo;
 import com.forgeagent.agent.domain.vo.AgentMcpServerVo;
@@ -52,6 +53,7 @@ class AgentMcpServerServiceImplTest {
     private ResourceAccessGuard resourceGuard;
 
     private AgentMcpServerServiceImpl service;
+    private AgentRuntimeProperties props;
 
     @BeforeAll
     static void warmUpLambdaCache() {
@@ -62,7 +64,9 @@ class AgentMcpServerServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new AgentMcpServerServiceImpl(serverMapper, resourceGuard);
+        props = new AgentRuntimeProperties();
+        props.setMcpSsrfGuardEnabled(false);
+        service = new AgentMcpServerServiceImpl(serverMapper, resourceGuard, props);
     }
 
     private static AgentMcpServer server(Long id, Long workspaceId) {
@@ -208,6 +212,20 @@ class AgentMcpServerServiceImplTest {
         ServiceException ex = assertThrows(ServiceException.class, () -> service.insertByBo(bo));
 
         assertTrue(ex.getMessage().contains("http/https"));
+        verify(serverMapper, never()).insert(any(AgentMcpServer.class));
+    }
+
+    @Test
+    void ssrfGuardOnRejectsLoopbackAndPrivateMcp() {
+        props.setMcpSsrfGuardEnabled(true);
+        AgentMcpServerBo loopback = bo();
+        loopback.setUrl("http://127.0.0.1:8080/mcp");
+        when(resourceGuard.resolveCreateWorkspace(900L, false)).thenReturn(900L);
+        when(serverMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
+
+        ServiceException ex = assertThrows(ServiceException.class, () -> service.insertByBo(loopback));
+
+        assertTrue(ex.getMessage().contains("内网") || ex.getMessage().contains("保留地址"), ex.getMessage());
         verify(serverMapper, never()).insert(any(AgentMcpServer.class));
     }
 

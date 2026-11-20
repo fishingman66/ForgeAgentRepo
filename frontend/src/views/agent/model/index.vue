@@ -148,6 +148,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialog.visible = false">取消</el-button>
+        <el-button :loading="testing" @click="handleTest">测试连通性</el-button>
         <el-button type="primary" :loading="dialog.saving" @click="submitForm">确定</el-button>
       </template>
     </el-dialog>
@@ -155,7 +156,8 @@
 </template>
 
 <script setup lang="ts" name="AgentModel">
-import { addModel, changeModelStatus, delModel, getModel, listModel, updateModel } from '@/api/agent/model';
+import { addModel, changeModelStatus, delModel, getModel, listModel, testModel, updateModel } from '@/api/agent/model';
+import { ElMessage } from 'element-plus';
 import type { ModelForm, ModelQuery, ModelVO } from '@/api/agent/model/types';
 import ResourceScopeFields from '@/views/agent/components/ResourceScopeFields.vue';
 import { checkPermi } from '@/utils/permission';
@@ -183,6 +185,29 @@ const isEdit = ref(false);
 const formRef = ref();
 const initForm: ModelForm = { id: undefined, name: '', provider: 'openai', baseUrl: '', apiKey: '', modelName: '', supportVision: '0', temperature: 0.7, maxTokens: 4096, contextWindow: null, priceInput: null, priceOutput: null, priceCurrency: 'USD', remark: '' };
 const form = ref<ModelForm>({ ...initForm });
+const testing = ref(false);
+
+/** C3-2:用当前表单直接试调,Key 留空时后端回退库内密文 */
+const handleTest = async () => {
+  if (!form.value.baseUrl && !form.value.id) {
+    ElMessage.warning('请先填写 API 地址');
+    return;
+  }
+  testing.value = true;
+  try {
+    const res = await testModel({ ...form.value });
+    const result = res.data;
+    if (result?.ok) {
+      ElMessage.success(result.message || '连接成功');
+    } else {
+      ElMessage.warning(result?.message || '连接失败');
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '测试失败');
+  } finally {
+    testing.value = false;
+  }
+};
 
 const rules = {
   name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }, { min: 2, max: 50, message: '长度须在 2-50 字符', trigger: 'blur' }],

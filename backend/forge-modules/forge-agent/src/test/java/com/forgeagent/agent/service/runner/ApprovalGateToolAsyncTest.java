@@ -44,7 +44,7 @@ class ApprovalGateToolAsyncTest {
         ApprovalGateTool.ApprovalContext ctx =
             new ApprovalGateTool.ApprovalContext(11L, 22L, "run-1");
         ApprovalGateTool gate = new ApprovalGateTool(delegate, "platform-http", "",
-            "ask_async", 120, ctx, approvalService, registry, null);
+            "ask_async", 120, ctx, approvalService, registry, null, null, null);
 
         ToolCallParam param = mock(ToolCallParam.class);
         when(param.getInput()).thenReturn(Map.of("orderNo", "A1"));
@@ -76,7 +76,7 @@ class ApprovalGateToolAsyncTest {
 
         ApprovalGateTool gate = new ApprovalGateTool(delegate, "mcp", "srv",
             "ask_async", 120, new ApprovalGateTool.ApprovalContext(1L, 2L, "run-2"),
-            approvalService, null, null);
+            approvalService, null, null, null, null);
         ToolCallParam param = mock(ToolCallParam.class);
         when(param.getInput()).thenReturn(Map.of());
 

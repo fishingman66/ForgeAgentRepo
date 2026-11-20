@@ -73,6 +73,16 @@ public class AgentApproval extends BaseEntity {
      * G1:审批截止时间(过期清扫任务置 expired,关联工作流 run 置 fail)
      */
     private java.util.Date expiredAt;
+    /** F4:执行态(PENDING/APPROVED/DONE/NEED_MANUAL/FAILED)。 */
+    private String execState;
+    /** F4:run 级 SSE 回执目标。 */
+    private String runId;
+    /** F4:关联 agent_cs_action_log.id。 */
+    private Long actionLogId;
+    /** F4一期:平台工具ID(重放定位定义行)。 */
+    private Long toolId;
+    /** F4一期:工具定义 JSON 快照。 */
+    private String toolDefSnapshot;
 
     /**
      * 审批说明/拒绝原因

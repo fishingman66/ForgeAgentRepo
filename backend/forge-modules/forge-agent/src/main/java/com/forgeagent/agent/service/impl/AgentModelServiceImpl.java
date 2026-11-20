@@ -13,7 +13,12 @@ import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.MapstructUtils;
 import com.forgeagent.common.core.utils.StringUtils;
 import com.forgeagent.common.mybatis.core.page.PageQuery;
+import com.forgeagent.agentcore.service.UtilityAgents;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
 import org.springframework.stereotype.Service;
+
+import java.time.Duration;
 
 import java.util.List;
 
@@ -102,6 +107,59 @@ public class AgentModelServiceImpl implements IAgentModelService {
                 "修改模型配置[" + bo.getName() + "]");
         }
         return ok;
+    }
+
+
+    @Override
+    public com.forgeagent.agent.domain.vo.AgentModelTestVo testConnection(AgentModelBo bo) {
+        com.forgeagent.agent.domain.vo.AgentModelTestVo result = new com.forgeagent.agent.domain.vo.AgentModelTestVo();
+        String baseUrl = bo.getBaseUrl();
+        String apiKey = bo.getApiKey();
+        String modelName = bo.getModelName();
+        if (bo.getId() != null) {
+            AgentModel exists = modelMapper.selectById(bo.getId());
+            if (exists == null) {
+                throw new ServiceException("模型配置不存在");
+            }
+            resourceGuard.assertReadable(exists.getWorkspaceId());
+            if (StringUtils.isBlank(baseUrl)) {
+                baseUrl = exists.getBaseUrl();
+            }
+            if (StringUtils.isBlank(modelName)) {
+                modelName = exists.getModelName();
+            }
+            // 掩码串不是真 Key,回退库内密文(解密由 TypeHandler 完成)
+            if (StringUtils.isBlank(apiKey) || apiKey.contains("****")) {
+                apiKey = exists.getApiKey();
+            }
+        }
+        if (StringUtils.isBlank(baseUrl) || StringUtils.isBlank(apiKey) || StringUtils.isBlank(modelName)) {
+            result.setOk(false);
+            result.setMessage("地址 / 密钥 / 模型标识不完整,无法测试");
+            return result;
+        }
+        long start = System.currentTimeMillis();
+        try {
+            AgentModel probe = new AgentModel();
+            probe.setBaseUrl(baseUrl);
+            probe.setApiKey(apiKey);
+            probe.setModelName(modelName);
+            String reply = UtilityAgents.build("model-connectivity-test", "你是连通性检测助手,只回复 OK", probe)
+                .call(List.of(Msg.builder().name("user").role(MsgRole.USER).textContent("ping").build()))
+                .block(Duration.ofSeconds(20))
+                .getTextContent();
+            result.setOk(true);
+            result.setMessage("连接成功,延迟 " + (System.currentTimeMillis() - start) + "ms");
+            if (StringUtils.isNotBlank(reply)) {
+                String trimmed = reply.trim();
+                result.setSample(trimmed.length() > 60 ? trimmed.substring(0, 60) : trimmed);
+            }
+            return result;
+        } catch (Exception e) {
+            result.setOk(false);
+            result.setMessage("连接失败:" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+            return result;
+        }
     }
 
     @Override

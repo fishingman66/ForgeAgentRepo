@@ -28,9 +28,10 @@ class CsChatFacadeGrayTest {
     @Mock private IAgentChatService chatService;
     @Mock private RunCancelRegistry runCancel;
     @Mock private AgentInfoMapper agentInfoMapper;
+    @Mock private com.forgeagent.agentcore.service.AgentConfigCacheService agentConfigCache;
 
     private CsChatFacadeImpl facade() {
-        return new CsChatFacadeImpl(chatService, runCancel, agentInfoMapper);
+        return new CsChatFacadeImpl(chatService, runCancel, agentInfoMapper, agentConfigCache);
     }
 
     private static AgentInfo agent(int rollout, Integer publishedVersion) {

@@ -35,6 +35,13 @@ public interface IAgentWorkspaceService {
     Boolean insertByBo(AgentWorkspaceBo bo);
 
     /**
+     * F2 SaaS:为新注册用户自动创建个人空间(显式 ownerId,不依赖登录态)。
+     *
+     * @return 新建空间 ID;名称冲突或异常返回 null,由调用方 fail-safe
+     */
+    Long createForUser(Long userId, String userName);
+
+    /**
      * 编辑空间(需空间管理员)
      */
     Boolean updateByBo(AgentWorkspaceBo bo);

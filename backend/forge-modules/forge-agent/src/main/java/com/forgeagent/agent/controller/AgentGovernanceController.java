@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.forgeagent.agent.service.IAgentInfoService;
 import com.forgeagent.agent.service.governance.AgentVersionService;
 import com.forgeagent.agent.service.governance.EvaluationService;
+import com.forgeagent.agent.service.governance.PromptAuthorService;
 import com.forgeagent.agent.service.governance.PromptTemplateService;
 import com.forgeagent.agent.service.governance.ReleaseGateService;
 import com.forgeagent.agentcore.domain.AgentInfo;
@@ -47,6 +48,7 @@ public class AgentGovernanceController extends BaseController {
 
     private final AgentVersionService versionService;
     private final PromptTemplateService promptService;
+    private final PromptAuthorService promptAuthorService;
     private final EvaluationService evaluationService;
     private final ReleaseGateService gateService;
     private final IAgentInfoService agentInfoService;
@@ -152,6 +154,20 @@ public class AgentGovernanceController extends BaseController {
     public R<Void> setStable(@Validated @RequestBody com.forgeagent.agent.domain.bo.PromptStableBo bo) {
         promptService.setStable(bo.getTemplateId(), bo.getVersionId());
         return R.ok();
+    }
+
+    /** C4:业务描述 → system prompt 草稿(不落库,人工确认后再采纳) */
+    @PostMapping("/prompt/generate")
+    public R<com.forgeagent.agent.domain.vo.PromptGenerateVo> generatePrompt(
+        @RequestBody com.forgeagent.agent.domain.bo.PromptGenerateBo bo) {
+        return R.ok(promptAuthorService.generate(bo));
+    }
+
+    /** C4:草稿内容直接渲染预览(变量契约与模板同格式,不落版本链) */
+    @PostMapping("/prompt/preview-draft")
+    public R<com.forgeagent.agent.domain.vo.PromptPreviewVo> previewDraft(
+        @RequestBody com.forgeagent.agent.domain.bo.PromptDraftPreviewBo bo) {
+        return R.ok(promptService.previewDraft(bo.getContent(), bo.getVariableSchema(), bo.getVariables()));
     }
 
     @PostMapping("/prompt/preview")

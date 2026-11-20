@@ -66,6 +66,13 @@ public class CsSeatController extends BaseController {
         return R.ok(ticketService.reply(id, LoginHelper.getUserId(), bo.getContent()));
     }
 
+    /** A3 内部备注:仅坐席可见的 NOTE 事件,不进访客消息通道。 */
+    @PostMapping("/tickets/{id}/note")
+    public R<Boolean> note(@PathVariable Long id, @Validated @RequestBody com.forgeagent.customerservice.domain.bo.CsNoteBo bo) {
+        ticketService.addNote(id, LoginHelper.getUserId(), bo.getNote());
+        return R.ok(true);
+    }
+
     @PostMapping("/tickets/{id}/hold")
     public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> hold(@PathVariable Long id) {
         return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "ON_HOLD", "HOLD", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));

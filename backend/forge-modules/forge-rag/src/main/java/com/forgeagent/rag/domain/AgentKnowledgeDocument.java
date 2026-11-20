@@ -92,6 +92,9 @@ public class AgentKnowledgeDocument extends BaseEntity {
      */
     private String publishStatus;
 
+    /** F3:帮助中心文章语言(zh_CN/en_US)。 */
+    private String locale;
+
     /**
      * 生效时间(NULL=立即生效)
      */

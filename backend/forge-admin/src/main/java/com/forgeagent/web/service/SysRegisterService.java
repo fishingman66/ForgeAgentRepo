@@ -36,6 +36,10 @@ public class SysRegisterService {
     private final ISysUserService userService;
     private final SysUserMapper userMapper;
     private final CaptchaProperties captchaProperties;
+    /** F2 SaaS:注册后自动建空间(默认关,私有化行为零变更)。 */
+    private final com.forgeagent.agent.service.IAgentWorkspaceService workspaceService;
+    @org.springframework.beans.factory.annotation.Value("${saas.enabled:false}")
+    private boolean saasEnabled;
 
     /**
      * 注册
@@ -70,6 +74,19 @@ public class SysRegisterService {
             throw new UserException("user.register.error");
         }
         recordLoginInfo(username, Constants.REGISTER, MessageUtils.message("user.register.success"));
+        // F2 SaaS:注册即开空间;失败不影响注册成功(fail-safe)
+        if (saasEnabled) {
+            try {
+                com.forgeagent.system.domain.SysUser created = userMapper.lambda()
+                    .eq(com.forgeagent.system.domain.SysUser::getUserName, username).one();
+                if (created != null) {
+                    workspaceService.createForUser(created.getUserId(), username);
+                }
+            } catch (Exception e) {
+                org.slf4j.LoggerFactory.getLogger(SysRegisterService.class)
+                    .warn("[F2] 注册后自动建空间跳过 user={}: {}", username, e.getMessage());
+            }
+        }
     }
 
     /**

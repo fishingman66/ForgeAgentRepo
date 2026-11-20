@@ -74,6 +74,15 @@ public class AgentModelController extends BaseController {
     }
 
     /**
+     * C3-2:保存前测试连通性(BYO-key)。失败返回 ok=false,不影响保存动作。
+     */
+    @SaCheckPermission("agent:model:edit")
+    @PostMapping("/test")
+    public R<com.forgeagent.agent.domain.vo.AgentModelTestVo> testConnection(@RequestBody AgentModelBo bo) {
+        return R.ok(modelService.testConnection(bo));
+    }
+
+    /**
      * 启用/停用模型
      */
     @SaCheckPermission("agent:model:edit")

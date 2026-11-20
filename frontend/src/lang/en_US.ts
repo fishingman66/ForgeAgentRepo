@@ -4,6 +4,29 @@ export default {
     dashboard: 'Dashboard',
     document: 'Document'
   },
+  // Help center (B1/F3)
+  help: {
+    title: 'Help Center',
+    subtitle: 'Find answers and solve problems on your own',
+    searchPlaceholder: 'Search questions and keywords...',
+    searchButton: 'Search',
+    searching: 'Searching...',
+    allArticles: 'All articles',
+    latest: 'Latest updates',
+    faq: 'FAQ',
+    empty: 'No matching articles',
+    emptyHint: 'Try another keyword, or ask the AI directly',
+    askAi: 'Ask AI',
+    turnHuman: 'Talk to a human',
+    wasHelpful: 'Was this article helpful?',
+    helpful: 'Yes, thanks',
+    notHelpful: 'Not really',
+    feedbackDone: 'Thanks for your feedback',
+    back: 'Back to list',
+    notFound: 'Article not found or unpublished',
+    lang: 'Language',
+    poweredBy: 'Powered by ForgeAgent'
+  },
   // 登录页面国际化
   login: {
     username: 'Username',

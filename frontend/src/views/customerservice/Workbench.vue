@@ -5,18 +5,23 @@
  * 操作结果通过 SSE 事件(TICKET_EVENT/CHAT)实时同步给访客与其他坐席。
  * 扩展点:语音通话弹屏(CALL_* 事件)、坐席状态切换、会话转接。
  */
-import { onMounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   assignQueue,
   claimTicket,
+  confirmInvestigation,
   getHandoffSummary,
+  getInvestigation,
   getTicket,
+  investigateTicket,
+  listInvestigations,
   listTickets,
   transferTicket,
   transitionTicket
 } from '@/api/customerservice';
-import type { CsHandoffSummary, CsTicket, CsTicketEvent } from '@/api/customerservice';
+import type { CsHandoffSummary, CsInvestigation, CsTicket, CsTicketEvent } from '@/api/customerservice';
+import { listDatasource } from '@/api/agent/datasource';
 import TicketDetail from './TicketDetail.vue';
 import ChatPanel from './ChatPanel.vue';
 
@@ -67,6 +72,9 @@ const open = async (row: CsTicket) => {
   } catch {
     summary.value = null;
   }
+  // B4:调查历史与可选数据源随工单一起刷新(失败不影响主面板)
+  await loadRcaOptions();
+  await loadInvestigations(row.id);
 };
 
 const act = async (action: string) => {
@@ -129,6 +137,119 @@ const assign = async () => {
     ElMessage.error('分配失败');
   }
 };
+
+// ============ B4 AI 根因调查(RCA) ============
+const rcaDatasourceId = ref<number | string | undefined>(undefined);
+const datasourceOptions = ref<Array<Record<string, any>>>([]);
+const investigations = ref<CsInvestigation[]>([]);
+const rcaStarting = ref(false);
+const rcaVisible = ref(false);
+const rcaDetail = ref<CsInvestigation | null>(null);
+let rcaTimer: ReturnType<typeof setInterval> | null = null;
+
+const loadRcaOptions = async () => {
+  if (datasourceOptions.value.length) {
+    return;
+  }
+  try {
+    const res = await listDatasource({ pageNum: 1, pageSize: 100 });
+    datasourceOptions.value = res.data?.rows ?? [];
+  } catch {
+    datasourceOptions.value = [];
+  }
+};
+
+const loadInvestigations = async (ticketId: number) => {
+  try {
+    const res = await listInvestigations(ticketId);
+    investigations.value = res.data ?? [];
+  } catch {
+    investigations.value = [];
+  }
+};
+
+const stopPolling = () => {
+  if (rcaTimer) {
+    clearInterval(rcaTimer);
+    rcaTimer = null;
+  }
+};
+
+const refreshDetail = async (id: number) => {
+  const res = await getInvestigation(id);
+  rcaDetail.value = res.data ?? null;
+  const hit = investigations.value.find((r) => r.id === id);
+  if (hit && rcaDetail.value) {
+    hit.status = rcaDetail.value.status;
+  }
+  return rcaDetail.value;
+};
+
+const startInvestigation = async () => {
+  if (!current.value) {
+    return;
+  }
+  if (!rcaDatasourceId.value) {
+    ElMessage.warning('请先选择调查用数据源');
+    return;
+  }
+  rcaStarting.value = true;
+  try {
+    const res = await investigateTicket(current.value.id, rcaDatasourceId.value);
+    const invId = res.data as unknown as number;
+    ElMessage.success('已发起调查,通常 10~60 秒出结果');
+    await loadInvestigations(current.value.id);
+    if (invId) {
+      rcaVisible.value = true;
+      await refreshDetail(invId);
+      startPolling(invId);
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '发起调查失败');
+  } finally {
+    rcaStarting.value = false;
+  }
+};
+
+const startPolling = (id: number) => {
+  stopPolling();
+  rcaTimer = setInterval(async () => {
+    try {
+      const detail = await refreshDetail(id);
+      if (detail && detail.status !== 'RUNNING') {
+        stopPolling();
+      }
+    } catch {
+      stopPolling();
+    }
+  }, 2500);
+};
+
+const viewInvestigation = async (row: CsInvestigation) => {
+  rcaVisible.value = true;
+  await refreshDetail(row.id);
+  if (rcaDetail.value?.status === 'RUNNING') {
+    startPolling(row.id);
+  }
+};
+
+const decideInvestigation = async (approved: boolean) => {
+  if (!rcaDetail.value) {
+    return;
+  }
+  try {
+    await confirmInvestigation(rcaDetail.value.id, approved);
+    ElMessage.success(approved ? '已采纳并回填工单' : '已驳回');
+    await refreshDetail(rcaDetail.value.id);
+    if (current.value) {
+      await open(current.value);
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '操作失败');
+  }
+};
+
+onUnmounted(stopPolling);
 
 const canReply = () => current.value?.status === 'PROCESSING';
 
@@ -219,6 +340,32 @@ onMounted(load);
               @replied="open(current)"
             />
 
+            <el-divider content-position="left">AI 根因调查</el-divider>
+            <div class="cs-rca">
+              <div class="cs-rca-bar">
+                <el-select v-model="rcaDatasourceId" size="small" placeholder="调查用数据源" style="width: 220px">
+                  <el-option v-for="d in datasourceOptions" :key="d.id" :label="d.name" :value="d.id" />
+                </el-select>
+                <el-button size="small" type="primary" :loading="rcaStarting" @click="startInvestigation">
+                  发起调查
+                </el-button>
+                <span class="cs-rca-tip">只读取数 + 证据链;报告需坐席确认才回填工单</span>
+              </div>
+              <el-table v-if="investigations.length" :data="investigations" size="small" border>
+                <el-table-column prop="id" label="#" width="60" />
+                <el-table-column prop="status" label="状态" width="110" />
+                <el-table-column prop="createTime" label="时间" min-width="150" show-overflow-tooltip />
+                <el-table-column label="操作" width="80">
+                  <template #default="{ row }">
+                    <el-button link type="primary" size="small" @click="viewInvestigation(row as CsInvestigation)">
+                      查看
+                    </el-button>
+                  </template>
+                </el-table-column>
+                <template #empty><el-empty description="暂无调查记录" :image-size="50" /></template>
+              </el-table>
+            </div>
+
             <el-divider content-position="left">流转轨迹</el-divider>
             <TicketDetail :events="events" />
           </template>
@@ -226,10 +373,101 @@ onMounted(load);
         </el-card>
       </el-col>
     </el-row>
+
+    <el-drawer v-model="rcaVisible" title="AI 根因调查报告" size="680px" @closed="stopPolling">
+      <template v-if="rcaDetail">
+        <el-alert :type="rcaDetail.status === 'FAILED' ? 'error' : rcaDetail.status === 'RUNNING' ? 'info' : 'success'"
+          :closable="false" show-icon class="cs-rca-status"
+          :title="String(rcaDetail.status) + (rcaDetail.errorMessage ? '：' + rcaDetail.errorMessage : '')" />
+        <div v-if="rcaDetail.hypotheses?.length" class="cs-rca-block">
+          <div class="cs-rca-title">调查假设</div>
+          <ul class="cs-rca-list">
+            <li v-for="(h, i) in rcaDetail.hypotheses" :key="i">
+              <b>{{ h.title }}</b><span v-if="h.rationale"> · {{ h.rationale }}</span>
+            </li>
+          </ul>
+        </div>
+        <div v-if="rcaDetail.reportMd" class="cs-rca-block">
+          <div class="cs-rca-title">报告</div>
+          <pre class="cs-rca-report">{{ rcaDetail.reportMd }}</pre>
+        </div>
+        <div v-if="rcaDetail.evidences?.length" class="cs-rca-block">
+          <div class="cs-rca-title">证据链</div>
+          <el-collapse>
+            <el-collapse-item v-for="e in rcaDetail.evidences" :key="e.seq"
+              :name="e.seq" :title="`#${e.seq} ${e.hypothesisTitle || e.evidenceType}（${e.success ? '成功' : '失败'}）`">
+              <div class="cs-rca-code">{{ e.queryText }}</div>
+              <div v-if="e.resultDigest" class="cs-rca-code">{{ e.resultDigest }}</div>
+              <div v-if="e.errorMessage" class="cs-rca-error">{{ e.errorMessage }}</div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+        <div v-if="rcaDetail.status === 'SUCCEEDED'" class="cs-rca-actions">
+          <el-button size="small" @click="decideInvestigation(false)">驳回</el-button>
+          <el-button size="small" type="primary" @click="decideInvestigation(true)">采纳并回填工单</el-button>
+        </div>
+      </template>
+      <el-empty v-else description="加载中或记录不存在" :image-size="70" />
+    </el-drawer>
   </div>
 </template>
 
 <style scoped>
+.cs-rca-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cs-rca-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.cs-rca-status {
+  margin-bottom: 10px;
+}
+.cs-rca-block {
+  margin-bottom: 14px;
+}
+.cs-rca-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.cs-rca-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.cs-rca-report {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.7;
+  background: var(--el-fill-color-lighter);
+  padding: 10px;
+  border-radius: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+.cs-rca-code {
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--el-text-color-regular);
+  margin-bottom: 6px;
+}
+.cs-rca-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
+}
+.cs-rca-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
 .cs-workbench {
   padding: 12px;
 }

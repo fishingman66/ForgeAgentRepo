@@ -1,6 +1,8 @@
 package com.forgeagent.agentcore.domain;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.forgeagent.common.encrypt.typehandler.ApiKeyCipherTypeHandler;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -52,6 +54,7 @@ public class AgentModel extends BaseEntity {
     /**
      * API密钥
      */
+    @TableField(typeHandler = ApiKeyCipherTypeHandler.class)
     private String apiKey;
 
     /**
