@@ -157,7 +157,7 @@ public class KbKgExtractService {
 
     private List<KgTriple> callModel(AgentModel model, String content, Long chunkId) {
         try {
-            Model asModel = AgentScopeModelFactory.build(model.getBaseUrl(), model.getApiKey(),
+            Model asModel = AgentScopeModelFactory.build(model.getProvider(), model.getBaseUrl(), model.getApiKey(),
                 model.getModelName(), 0.0, 800);
             ReActAgent agent = ReActAgent.builder().name("kb-kg-extract").model(asModel).maxIters(1).build();
             Msg reply = agent.call(Msg.builder().name("user").role(MsgRole.USER)

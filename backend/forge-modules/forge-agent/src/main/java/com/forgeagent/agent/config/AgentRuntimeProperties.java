@@ -51,11 +51,30 @@ public class AgentRuntimeProperties {
     private boolean workflowHttpGuardEnabled = true;
 
     /**
-     * D4:MCP 服务端地址的 SSRF 守护开关。
-     * 默认关闭——内网/回环是 MCP 的常见合法部署方式,开启后按 SsrfGuard 口径
-     * (DNS 解析拒绝回环/私网/链路本地/组播)校验,需配合白名单场景评估后再开。
+     * D4:MCP 服务端地址的 SSRF 守护开关。默认开启(防御公网攻击面),
+     * 合法内网 MCP 由 {@link #mcpSsrfAllowlist} 显式放行(默认已含回环与 RFC1918/ULA 常用段)。
+     * 校验按 SsrfGuard 口径:DNS 解析拒绝回环/私网/链路本地/组播,allowlist 命中即放行。
      */
-    private boolean mcpSsrfGuardEnabled = false;
+    private boolean mcpSsrfGuardEnabled = true;
+
+    /**
+     * D4:MCP SSRF 守护白名单(host 精确匹配或 CIDR 网段,如 {@code mcp.internal}、{@code 10.0.0.0/8})。
+     * 默认放行回环与常用内网段,保证既有内网 MCP 部署不受默认开启影响;
+     * <b>链路本地 169.254.0.0/16(云厂商元数据端点)与 CGNAT 100.64/10 默认不放行</b>,
+     * 如确有需要由运维显式追加。置为空列表将导致启动失败(见 {@link #afterPropertiesSet}),
+     * 避免"开了守护但白名单为空"的无效配置。
+     */
+    private java.util.List<String> mcpSsrfAllowlist = java.util.List.of(
+        "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7");
+
+    @jakarta.annotation.PostConstruct
+    void afterPropertiesSet() {
+        if (mcpSsrfGuardEnabled && (mcpSsrfAllowlist == null || mcpSsrfAllowlist.isEmpty())) {
+            throw new IllegalStateException(
+                "agent.runtime.mcp-ssrf-guard-enabled=true 时必须配置 mcp-ssrf-allowlist"
+                    + "(至少放行业务所需内网段);若确要全量拦截请直接关闭开关");
+        }
+    }
 
     /** 代码沙箱默认执行秒数(工作流内可覆盖) */
     private long sandboxDefaultTimeoutSeconds = 30;

@@ -127,6 +127,46 @@ class McpStdioCommandValidatorTest {
     }
 
     @Test
+    @DisplayName("C2 第五闸:npx 参数须逐条命中白名单正则")
+    void argsPatternsRestrictNpxPackages() {
+        McpStdioProperties p = props("npx");
+        p.getArgsPatterns().put("npx", List.of("^-y$", "^@scope/allowed-.*$"));
+
+        assertDoesNotThrow(() -> McpStdioCommandValidator.validate(
+            "npx", List.of("-y", "@scope/allowed-server"), p));
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> McpStdioCommandValidator.validate(
+                "npx", List.of("-y", "@evil/any-package"), p));
+        assertTrue(ex.getMessage().contains("参数不在白名单"));
+    }
+
+    @Test
+    @DisplayName("C2 第五闸:未配置 argsPatterns 的命令放行(存量兼容)")
+    void argsPatternsAbsentKeepsLegacyBehavior() {
+        assertDoesNotThrow(() -> McpStdioCommandValidator.validate(
+            "npx", List.of("-y", "@any/pkg"), props("npx")));
+    }
+
+    @Test
+    @DisplayName("C2 第五闸:空正则列表视为禁用该命令")
+    void emptyArgsPatternsRejects() {
+        McpStdioProperties p = props("node");
+        p.getArgsPatterns().put("node", List.of());
+        assertThrows(ServiceException.class,
+            () -> McpStdioCommandValidator.validate("node", List.of("server.js"), p));
+    }
+
+    @Test
+    @DisplayName("C2 第五闸:非法正则拒绝配置(防闸门静默失效)")
+    void invalidRegexRejects() {
+        McpStdioProperties p = props("node");
+        p.getArgsPatterns().put("node", List.of("[unclosed"));
+        ServiceException ex = assertThrows(ServiceException.class,
+            () -> McpStdioCommandValidator.validate("node", List.of("server.js"), p));
+        assertTrue(ex.getMessage().contains("正则非法"));
+    }
+
+    @Test
     @DisplayName("stdio 参数解析:空/非法 JSON 退化为空列表")
     void parseArgsToleratesBlankAndBad() {
         assertEquals(List.of(), ToolAssembler.parseStdioArgs(null));

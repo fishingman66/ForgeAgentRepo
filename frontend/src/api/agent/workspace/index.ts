@@ -119,6 +119,11 @@ export const acceptInvite = (token: string) => {
   return request({ url: '/agent/saas/invites/accept', method: 'post', params: { token } });
 };
 
+/** F2 校验帮助中心域名(格式 + DNS 可解析;不声称 CNAME/SSL 生效) */
+export const verifyWorkspaceDomain = (workspaceId: number | string): AxiosPromise<string> => {
+  return request({ url: '/agent/saas/domain/verify', method: 'post', params: { workspaceId } });
+};
+
 /** 移除成员 */
 export const delMember = (ids: string | number | Array<string | number>) => {
   return request({

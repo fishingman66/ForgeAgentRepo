@@ -5,7 +5,7 @@
  */
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { createInvite, listInvites, updateWorkspace } from '@/api/agent/workspace';
+import { createInvite, listInvites, updateWorkspace, verifyWorkspaceDomain } from '@/api/agent/workspace';
 import type { WorkspaceVO } from '@/api/agent/workspace/types';
 
 interface InviteRow { id: number; role: string; maxUses: number; usedCount: number; expiresAt: string }
@@ -22,6 +22,11 @@ const form = ref<SaasForm>({
 });
 let workspaceId: number | string = 0;
 let workspaceName = '';
+const domainStatus = ref('');
+const verifyingDomain = ref(false);
+const domainStatusLabel: Record<string, string> = {
+  NONE: '未校验', RESOLVABLE: '可解析', UNRESOLVABLE: '无法解析', INVALID: '格式不合法'
+};
 
 const open = async (row: WorkspaceVO) => {
   workspaceId = row.id;
@@ -31,6 +36,7 @@ const open = async (row: WorkspaceVO) => {
   form.value.logoUrl = row.logoUrl || '';
   form.value.themeColor = row.themeColor || '';
   form.value.helpCenterDomain = row.helpCenterDomain || '';
+  domainStatus.value = row.domainStatus || '';
   visible.value = true;
   try {
     const res = await listInvites(workspaceId);
@@ -64,6 +70,25 @@ const copyLink = async () => {
   }
 };
 
+const verifyDomain = async () => {
+  verifyingDomain.value = true;
+  try {
+    // 先保存当前输入,否则校验的是上一次落库的值
+    await updateWorkspace({
+      id: workspaceId, name: workspaceName,
+      logoUrl: form.value.logoUrl, themeColor: form.value.themeColor,
+      helpCenterDomain: form.value.helpCenterDomain
+    });
+    const res = await verifyWorkspaceDomain(workspaceId);
+    domainStatus.value = (res.data as unknown as string) || '';
+    ElMessage.success('域名校验完成: ' + (domainStatusLabel[domainStatus.value] || domainStatus.value));
+  } catch {
+    ElMessage.error('校验失败,请确认当前为空间管理员');
+  } finally {
+    verifyingDomain.value = false;
+  }
+};
+
 const saveBrand = async () => {
   loading.value = true;
   try {
@@ -73,6 +98,7 @@ const saveBrand = async () => {
       helpCenterDomain: form.value.helpCenterDomain
     });
     ElMessage.success('品牌设置已保存');
+    domainStatus.value = 'NONE';
     visible.value = false;
   } catch {
     ElMessage.error('保存失败');
@@ -111,9 +137,16 @@ const saveBrand = async () => {
         <div class="saas-brand-form">
           <label>Logo URL</label><el-input v-model="form.logoUrl" placeholder="https://..." />
           <label>主题色</label><el-input v-model="form.themeColor" placeholder="#409EFF" />
-          <label>帮助中心域名</label><el-input v-model="form.helpCenterDomain" placeholder="help.example.com" />
+          <label>帮助中心域名</label>
+          <div class="saas-domain-row">
+            <el-input v-model="form.helpCenterDomain" placeholder="help.example.com" />
+            <el-button size="small" :loading="verifyingDomain" @click="verifyDomain">校验</el-button>
+          </div>
         </div>
-        <div class="saas-tip">自定义域名需配置 CNAME 指向平台域名后生效,与帮助中心共用。</div>
+        <div class="saas-tip">
+          <span v-if="domainStatus">状态:{{ domainStatusLabel[domainStatus] || domainStatus }}。</span>
+          仅校验域名格式与 DNS 可解析性;生效还需自行配置 CNAME 与证书,平台暂不代签发。
+        </div>
       </el-tab-pane>
     </el-tabs>
     <template #footer>
@@ -129,5 +162,6 @@ const saveBrand = async () => {
 .saas-list { margin-top: 12px; border-top: 1px solid var(--el-border-color-lighter); padding-top: 8px; }
 .saas-row { display: flex; gap: 16px; font-size: 12px; color: var(--el-text-color-secondary); padding: 4px 0; }
 .saas-brand-form { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; }
+.saas-domain-row { display: flex; gap: 8px; }
 .saas-tip { font-size: 12px; color: var(--el-text-color-secondary); }
 </style>

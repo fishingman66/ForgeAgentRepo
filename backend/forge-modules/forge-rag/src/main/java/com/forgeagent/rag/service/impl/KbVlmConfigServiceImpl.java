@@ -155,7 +155,7 @@ public class KbVlmConfigServiceImpl implements KbVlmConfigService {
             return result;
         }
         try {
-            Model model = AgentScopeModelFactory.build(resolved.baseUrl(), resolved.apiKey(),
+            Model model = AgentScopeModelFactory.build(resolved.provider(), resolved.baseUrl(), resolved.apiKey(),
                 resolved.modelName(), 0.0, 16);
             ReActAgent agent = ReActAgent.builder().name("vlm-test").model(model).maxIters(1).build();
             Msg reply = agent.call(Msg.builder().name("user").role(MsgRole.USER)

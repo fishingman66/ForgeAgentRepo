@@ -63,5 +63,9 @@ public class AgentWorkspace extends BaseEntity {
     private String logoUrl;
     private String themeColor;
     private String helpCenterDomain;
+    /** F2:域名校验状态 NONE/RESOLVABLE/UNRESOLVABLE/INVALID(仅记录校验结果,不声称 CNAME 已生效)。 */
+    private String domainStatus;
+    /** F2:域名最近校验时间。 */
+    private java.util.Date domainVerifiedAt;
 
 }

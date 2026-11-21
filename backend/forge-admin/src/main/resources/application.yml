@@ -433,6 +433,17 @@ agent:
     stdio:
       allowed-commands: []
       allow-inline-code: false
+      # C2 参数级白名单示例:npx 只允许 -y 跟白名单包名,逐参数正则;空=不做参数限制
+      # args-patterns:
+      #   npx:
+      #     - '^(-y|--yes)$'
+      #     - '^@[a-z0-9-]+(/[a-z0-9-]+)?$'
+      #     - '^[a-z0-9@/._-]+$'
+  runtime:
+    # D4:MCP SSRF 守护默认开启(拒绝未放行的内网/链路本地/组播地址,防御云元数据探测面)。
+    # 内网 MCP 由白名单放行(默认含回环与 RFC1918/ULA);链路本地 169.254(云元数据)与 CGNAT 100.64 默认不放行。
+    # mcp-ssrf-guard-enabled: true
+    # mcp-ssrf-allowlist: ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '::1/128', 'fc00::/7']
   callcenter:
     enabled: true
     provider: AICC_MOCK

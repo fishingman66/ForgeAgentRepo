@@ -8,6 +8,7 @@ import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.customerservice.domain.CsInvestigation;
 import com.forgeagent.customerservice.domain.CsTicket;
 import com.forgeagent.customerservice.domain.bo.CsInvestigationConfirmBo;
+import com.forgeagent.customerservice.mapper.CsChannelMapper;
 import com.forgeagent.customerservice.mapper.CsInvestigationEvidenceMapper;
 import com.forgeagent.customerservice.mapper.CsInvestigationMapper;
 import com.forgeagent.customerservice.mapper.CsTicketMapper;
@@ -52,13 +53,22 @@ class CsInvestigationServiceTest {
     private AgentConfigCacheService agentConfigCache;
     @Mock
     private SqlQueryService sqlQueryService;
+    @Mock
+    private CsChannelMapper channelMapper;
+    @Mock
+    private com.forgeagent.agent.api.customerservice.CsKnowledgeGateway knowledgeGateway;
+    @Mock
+    private com.forgeagent.agent.service.governance.PromptTemplateService promptTemplateService;
+    @Mock
+    private com.forgeagent.agent.api.customerservice.McpEvidenceGateway mcpEvidenceGateway;
 
     private CsInvestigationService service;
 
     @BeforeEach
     void setUp() {
         service = new CsInvestigationService(investigationMapper, evidenceMapper, ticketMapper,
-            ticketService, datasourceMapper, agentConfigCache, sqlQueryService);
+            ticketService, datasourceMapper, agentConfigCache, sqlQueryService,
+            channelMapper, knowledgeGateway, promptTemplateService, mcpEvidenceGateway);
     }
 
     private CsTicket ticket(long workspaceId) {

@@ -83,5 +83,9 @@ public class AgentWorkspaceVo implements Serializable {
   private String logoUrl;
   private String themeColor;
   private String helpCenterDomain;
+  /** F2:域名校验状态 NONE/RESOLVABLE/UNRESOLVABLE/INVALID。 */
+  private String domainStatus;
+  /** F2:域名最近校验时间。 */
+  private java.util.Date domainVerifiedAt;
 
 }

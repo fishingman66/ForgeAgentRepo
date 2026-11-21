@@ -139,6 +139,14 @@ public class AgentWorkspaceServiceImpl implements IAgentWorkspaceService {
         AgentWorkspace update = MapstructUtils.convert(bo, AgentWorkspace.class);
         update.setStatus(null);
         boolean flag = workspaceMapper.updateById(update) > 0;
+        // F2:域名变化后旧的校验结果失效,重置为 NONE(避免保存新域名却仍显示上次 RESOLVABLE)
+        if (flag && old != null
+            && !java.util.Objects.equals(old.getHelpCenterDomain(), bo.getHelpCenterDomain())) {
+            workspaceMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentWorkspace>()
+                .eq(AgentWorkspace::getId, bo.getId())
+                .set(AgentWorkspace::getDomainStatus, "NONE")
+                .set(AgentWorkspace::getDomainVerifiedAt, null));
+        }
         // 归属部门转移审计
         if (flag && old != null && bo.getDeptId() != null
             && !java.util.Objects.equals(old.getDeptId(), bo.getDeptId())) {

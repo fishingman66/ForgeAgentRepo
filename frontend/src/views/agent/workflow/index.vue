@@ -314,6 +314,10 @@
                 <el-input-number v-model="selectedNode.config.timeoutMinutes" :disabled="readonly" :min="0" :max="10080" style="width: 100%" />
                 <div class="field-hint">0 表示不超时;超时后节点失败,走失败策略</div>
               </el-form-item>
+              <el-form-item label="超时 payload">
+                <el-input v-model="selectedNode.config.timeoutPayload" :disabled="readonly" type="textarea" :rows="2" maxlength="2000" placeholder='如 {"timedOut":true};留空则超时后节点失败' />
+                <div class="field-hint">可选:合法 JSON 对象。配置后超时不终止工作流,而是把 payload 写入本节点 output 继续执行下游</div>
+              </el-form-item>
               <el-alert type="info" :closable="false" show-icon title="执行到该节点会暂停,外部事件到达后经 run/{id}/signal 携带 payload 唤醒" />
             </template>
 
@@ -624,6 +628,7 @@ interface NodeConfig {
   eventKey?: string;
   /** C1 等待节点:超时分钟(0 表示不超时) */
   timeoutMinutes?: number;
+  timeoutPayload?: string;
   /** C1 转人工节点:转人工原因(支持 {{变量}} 引用) */
   reason?: string;
 }

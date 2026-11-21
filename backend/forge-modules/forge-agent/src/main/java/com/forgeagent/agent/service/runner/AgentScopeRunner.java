@@ -825,7 +825,8 @@ public class AgentScopeRunner implements AgentRunner {
         String sysPrompt = StringUtils.isBlank(member.sysPrompt())
             ? "你是团队协作成员[" + member.agentName() + "],请基于你的专长处理用户请求,输出处理结论。"
             : member.sysPrompt();
-        Model model = AgentScopeModelFactory.build(baseUrl, apiKey, modelName, temperature, maxTokens);
+        String provider = m == null || StringUtils.isBlank(m.provider()) ? ctx.llmProvider() : m.provider();
+        Model model = AgentScopeModelFactory.build(provider, baseUrl, apiKey, modelName, temperature, maxTokens);
         ReActAgent.Builder builder = ReActAgent.builder()
             .name(member.agentName())
             .model(model)
@@ -843,8 +844,8 @@ public class AgentScopeRunner implements AgentRunner {
      * 模型卡路由与协议适配统一由 {@link AgentScopeModelFactory} 处理
      */
     private Model buildModel(RunnerContext ctx) {
-        return AgentScopeModelFactory.build(ctx.llmBaseUrl(), ctx.llmApiKey(), ctx.llmModel(),
-            ctx.temperature(), ctx.maxTokens());
+        return AgentScopeModelFactory.build(ctx.llmProvider(), ctx.llmBaseUrl(), ctx.llmApiKey(),
+            ctx.llmModel(), ctx.temperature(), ctx.maxTokens());
     }
 
     /**

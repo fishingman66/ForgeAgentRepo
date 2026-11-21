@@ -180,6 +180,9 @@ class WorkflowPauseNodesTest {
         stored.setCompletedJson("[]");
         stored.setSkippedJson("[]");
         when(runMapper.selectById(9001L)).thenReturn(stored);
+        // C1:resumeWaitRun 先条件更新抢单(pending_approval→running),需打桩避免误判为已被处理
+        when(runMapper.update(any(), any(com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper.class)))
+            .thenReturn(1);
         when(runMapper.updateById(any(AgentWorkflowRun.class))).thenReturn(1);
 
         WorkflowTrialRunVo vo = launcher.resumeWaitRun(9001L, "{\"orderNo\":\"A100\"}");

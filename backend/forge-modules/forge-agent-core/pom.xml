@@ -47,5 +47,23 @@
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope</artifactId>
         </dependency>
+
+        <!-- agentscope 扩展类本身已打进 all-in-one jar,但官方 SDK 未传递引入;
+             显式声明后,provider=anthropic/gemini 的原生分支才能构造出真实 Model -->
+        <dependency>
+            <groupId>com.anthropic</groupId>
+            <artifactId>anthropic-java</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.genai</groupId>
+            <artifactId>google-genai</artifactId>
+        </dependency>
+
+        <!-- 单元测试(协议路由构造级回归) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

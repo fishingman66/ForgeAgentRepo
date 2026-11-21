@@ -454,6 +454,102 @@ public class AgentWorkflowServiceImpl implements IAgentWorkflowService {
         }
     }
 
+    /**
+     * C1:wait 节点超时清扫(每 5 分钟)。wait/form 暂停不产生审批单,故 sweepExpiredApprovals
+     * 扫不到;改由 agent_workflow_run.pending_deadline 驱动。与 sweepStaleRuns 同驻本门面类,
+     * 不另起调度器(避免双跑)。条件更新 status pending_approval→fail,与 resumeWaitRun 抢占互斥。
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 300_000L, initialDelay = 90_000L)
+    public void sweepExpiredWaits() {
+        List<AgentWorkflowRun> expired;
+        try {
+            expired = runMapper.selectList(new LambdaQueryWrapper<AgentWorkflowRun>()
+                .eq(AgentWorkflowRun::getStatus, "pending_approval")
+                .isNull(AgentWorkflowRun::getApprovalId)
+                .isNotNull(AgentWorkflowRun::getPendingDeadline)
+                .le(AgentWorkflowRun::getPendingDeadline, LocalDateTime.now()));
+        } catch (Exception e) {
+            log.warn("[工作流等待] 超时清扫查询失败: {}", e.getMessage());
+            return;
+        }
+        for (AgentWorkflowRun run : expired) {
+            try {
+                // C1:wait 节点配置了 timeoutPayload 时,超时不再终止,而是注入 payload 继续执行。
+                // resumeWaitRun 内部自带 pending_approval→running 条件更新抢单,与并发唤醒/本扫描互斥。
+                String timeoutPayload = readWaitTimeoutPayload(run);
+                if (StringUtils.isNotBlank(timeoutPayload)) {
+                    try {
+                        launcher.resumeWaitRun(run.getId(), timeoutPayload);
+                        log.info("[工作流等待] 运行实例 {} 等待超时,按节点配置注入 payload 续跑",
+                            run.getId());
+                    } catch (Exception e) {
+                        log.warn("[工作流等待] 运行实例 {} 超时续跑失败(可能已被并发处理): {}",
+                            run.getId(), e.getMessage());
+                    }
+                    continue;
+                }
+                boolean claimed = runMapper.update(null, new LambdaUpdateWrapper<AgentWorkflowRun>()
+                    .eq(AgentWorkflowRun::getId, run.getId())
+                    .eq(AgentWorkflowRun::getStatus, "pending_approval")
+                    .set(AgentWorkflowRun::getStatus, "fail")
+                    .set(AgentWorkflowRun::getPendingDeadline, null)
+                    .set(AgentWorkflowRun::getUpdateTime, LocalDateTime.now())) > 0;
+                if (!claimed) {
+                    continue; // 已被 resumeWaitRun 抢先唤醒
+                }
+                // 标记等待节点轨迹为失败并推终态,口径对齐 failPendingWorkflowRun
+                List<WorkflowTrialRunVo.NodeTrace> trace = StringUtils.isBlank(run.getTraceJson())
+                    ? new ArrayList<>() : traceCodec.readTrace(run.getTraceJson());
+                String pendingNode = run.getPendingNode();
+                for (WorkflowTrialRunVo.NodeTrace t : trace) {
+                    if (pendingNode != null && pendingNode.equals(t.getNodeId())
+                        && "pending".equals(t.getStatus())) {
+                        t.setStatus("fail");
+                        t.setOutput("等待节点超时,工作流终止");
+                    }
+                }
+                AgentWorkflowRun patch = new AgentWorkflowRun();
+                patch.setId(run.getId());
+                patch.setTraceJson(traceCodec.compactTraceJson(trace));
+                patch.setUpdateTime(LocalDateTime.now());
+                runMapper.updateById(patch);
+                graphEngine.publishEvent(run.getId(), "node_error", Map.of(
+                    "nodeId", String.valueOf(pendingNode == null ? "" : pendingNode),
+                    "nodeName", "等待节点", "nodeType", "wait", "error", "等待节点超时,工作流终止"));
+                graphEngine.publishEvent(run.getId(), "done",
+                    Map.of("status", "fail", "message", "等待节点超时,工作流终止"));
+                eventBuffer.terminal("wf-" + run.getId(), "error");
+                log.info("[工作流等待] 运行实例 {} 等待超时终止,节点={}", run.getId(), pendingNode);
+            } catch (Exception e) {
+                log.warn("[工作流等待] 运行实例 {} 超时清扫失败: {}", run.getId(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * C1:从运行实例的 workflowJson 里读出 pendingNode(wait 节点)配置的 timeoutPayload。
+     * 未配置/非 wait 节点/解析失败一律返回 null(走原超时终止口径)。
+     */
+    private String readWaitTimeoutPayload(AgentWorkflowRun run) {
+        try {
+            if (StringUtils.isBlank(run.getWorkflowJson()) || StringUtils.isBlank(run.getPendingNode())) {
+                return null;
+            }
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(run.getWorkflowJson());
+            for (com.fasterxml.jackson.databind.JsonNode node : root.path("nodes")) {
+                if (!run.getPendingNode().equals(node.path("id").asText(null))) {
+                    continue;
+                }
+                String payload = node.path("config").path("timeoutPayload").asText(null);
+                return StringUtils.isBlank(payload) ? null : payload;
+            }
+            return null;
+        } catch (Exception e) {
+            log.warn("[工作流等待] 运行实例 {} 解析 timeoutPayload 失败: {}", run.getId(), e.getMessage());
+            return null;
+        }
+    }
+
     /** G1:审批单过期后,把等待它的工作流运行实例终止为 fail */
     private void failPendingWorkflowRun(AgentApproval approval) {
         if (!"workflow".equals(approval.getToolSource()) || StringUtils.isBlank(approval.getRoundId())) {

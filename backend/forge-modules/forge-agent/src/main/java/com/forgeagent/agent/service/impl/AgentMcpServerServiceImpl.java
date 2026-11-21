@@ -233,10 +233,10 @@ public class AgentMcpServerServiceImpl implements IAgentMcpServerService {
         if (StringUtils.isBlank(uri.getHost())) {
             throw new ServiceException("MCP 服务端地址缺少主机名");
         }
-        // D4:开关式 SSRF 守护——默认关,避免一刀切废掉合法内网 MCP;
-        // 开启后拒绝回环/私网/链路本地/组播,与工作流 http 节点同口径。
+        // D4:默认开启的 SSRF 守护——内网 MCP 由 allowlist 显式放行(默认含回环与常用内网段);
+        // 未命中白名单的地址拒绝回环/私网/链路本地/组播,与工作流 http 节点同口径。
         if (runtimeProperties.isMcpSsrfGuardEnabled()) {
-            SsrfGuard.verify(bo.getUrl());
+            SsrfGuard.verifyWithAllowlist(bo.getUrl(), runtimeProperties.getMcpSsrfAllowlist());
         }
     }
 

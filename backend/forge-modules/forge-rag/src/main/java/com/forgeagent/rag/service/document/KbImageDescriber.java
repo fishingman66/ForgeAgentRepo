@@ -129,7 +129,7 @@ public class KbImageDescriber {
             log.debug("[知识库] 图片描述缓存不可用,直接调用模型: {}", e.getMessage());
         }
         try {
-            Model asModel = AgentScopeModelFactory.build(model.baseUrl(), model.apiKey(),
+            Model asModel = AgentScopeModelFactory.build(model.provider(), model.baseUrl(), model.apiKey(),
                 model.modelName(), 0.0, 400);
             ReActAgent agent = ReActAgent.builder().name("kb-image-describer").model(asModel).maxIters(1).build();
             Msg msg = Msg.builder().name("user").role(MsgRole.USER)

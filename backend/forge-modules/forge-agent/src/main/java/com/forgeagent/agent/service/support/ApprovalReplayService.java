@@ -22,12 +22,16 @@ import java.util.Map;
 /**
  * F4一期(A档):跨实例重建并执行已审批的异步工具调用。
  *
- * <p>只支持 http / sandbox 两类平台工具——它们的执行状态全在 ToolDef 配置里,
- * 无需进程内连接或轮级 collector。重建路径照搬 WorkflowNodeExecutors.executeToolNode:
+ * <p>支持 http / sandbox / sql 三类平台工具——它们的执行状态全在 ToolDef 配置里,
+ * 无需进程内连接或轮级 collector(sql 由 SqlToolProvider 按 datasourceId 反查数据源)。
+ * 重建路径照搬 WorkflowNodeExecutors.executeToolNode:
  * ToolDef 快照 → buildForWorkflow(approvalMode 强制 auto,不会再触发审批) →
  * 按名取工具 → 只喂 input 执行。执行绕过 CsToolGuard 装饰器
  * (buildForWorkflow 不传 csGuardDecorator),与现有 callbackAsyncTool 口径一致,
  * 避免 ask_async 时已写 DONE 的动作日志被幂等键判重拒跑。</p>
+ *
+ * <p>诚实边界:重放是 at-least-once——崩溃前 SQL 已执行但回执未落库时,重启重放会再执行一次。
+ * 上线本类的 SQL 重放前,应确保 sql 工具只绑定只读账号/SELECT 白名单的数据源。</p>
  *
  * @author ForgeAgent
  */
@@ -69,8 +73,10 @@ public class ApprovalReplayService {
         } catch (Exception e) {
             return new ReplayResult(false, false, "工具快照/参数解析失败:" + e.getMessage());
         }
-        // A 档白名单:只重放 http / sandbox,防止 sql 丢 collector / MCP 需建连被误重放
-        if (!"http".equals(def.toolType()) && !"sandbox".equals(def.toolType())) {
+        // A 档白名单:http/sandbox/sql(sql 走 SqlToolProvider 按 datasourceId 反查,无需 collector);
+        // MCP 需建连且服务端会话态不可恢复,仍排除
+        if (!"http".equals(def.toolType()) && !"sandbox".equals(def.toolType())
+            && !"sql".equals(def.toolType())) {
             return new ReplayResult(false, false, "工具类型 " + def.toolType() + " 不在 A 档重放范围");
         }
         try (ToolAssembler.Assembly assembly = toolAssembler.buildForWorkflow(List.of(def))) {

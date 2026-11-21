@@ -1,5 +1,6 @@
 package com.forgeagent.customerservice.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.forgeagent.agent.domain.AgentDatasource;
@@ -12,6 +13,7 @@ import com.forgeagent.agentcore.service.UtilityAgents;
 import com.forgeagent.callcenter.common.CsPiiMasker;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
+import com.forgeagent.customerservice.domain.CsChannel;
 import com.forgeagent.customerservice.domain.CsInvestigation;
 import com.forgeagent.customerservice.domain.CsInvestigationEvidence;
 import com.forgeagent.customerservice.domain.CsTicket;
@@ -63,6 +65,9 @@ public class CsInvestigationService {
         [{"title":"假设简述","rationale":"为什么怀疑","sql":"SELECT ... LIMIT 50"}]
         硬性约束:SQL 只能是单条 SELECT;只能使用给定表结构中的表;必须带 LIMIT 且不超过 100;
         禁止写操作/DDL/注释/多语句;不要编造不存在的表名或字段。
+        若上下文给出了"可用 MCP 工具"目录,可为个别假设追加可选字段
+        "mcp":{"server":"服务器名","tool":"工具名","args":{参数}} 作补充验证;
+        只能使用目录中真实存在的 server/tool,不得虚构,mcp 不替代 SQL。
         """;
 
     private static final String REPORT_SYSTEM = """
@@ -80,6 +85,13 @@ public class CsInvestigationService {
     private final AgentDatasourceMapper datasourceMapper;
     private final AgentConfigCacheService agentConfigCache;
     private final SqlQueryService sqlQueryService;
+    /** B4:KB/TICKET_EVENT 证据数据源(均现成,同模块/跨模块门面)。 */
+    private final com.forgeagent.customerservice.mapper.CsChannelMapper channelMapper;
+    private final com.forgeagent.agent.api.customerservice.CsKnowledgeGateway knowledgeGateway;
+    /** B4:RCA 提示词模板化——复用 agent_prompt_template 表,按 templateCode_PROPOSE/_REPORT 查找,找不到回退内置常量。 */
+    private final com.forgeagent.agent.service.governance.PromptTemplateService promptTemplateService;
+    /** B4:MCP 工具证据网关(catalog 供提示词列工具,call 执行验证并落证据行)。 */
+    private final com.forgeagent.agent.api.customerservice.McpEvidenceGateway mcpEvidenceGateway;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ------------------------------------------------------------ 发起
@@ -138,7 +150,18 @@ public class CsInvestigationService {
             if (inv == null) {
                 return;
             }
-            List<Map<String, Object>> hypotheses = propose(model, ds, context);
+            // B4:模板码驱动提示词加载(<code>_PROPOSE / <code>_REPORT),未配置模板时回退内置常量
+            String code = StringUtils.defaultIfBlank(inv.getTemplateCode(), "RCA_STANDARD");
+            String proposeSystem = resolvePrompt(ticket.getWorkspaceId(), code + "_PROPOSE", PROPOSE_SYSTEM);
+            String reportSystem = resolvePrompt(ticket.getWorkspaceId(), code + "_REPORT", REPORT_SYSTEM);
+            // B4:Agent 绑定了 MCP 服务器时构建工具目录,供假设附带可选 MCP 验证字段
+            List<com.forgeagent.agent.api.customerservice.McpEvidenceGateway.CatalogEntry> mcpCatalog = List.of();
+            try {
+                mcpCatalog = mcpEvidenceGateway.catalog(ticket.getAgentId(), ticket.getWorkspaceId());
+            } catch (Exception e) {
+                log.warn("[RCA] MCP 工具目录构建失败,假设将不含 MCP 验证: {}", e.getMessage());
+            }
+            List<Map<String, Object>> hypotheses = propose(model, ds, context, proposeSystem, mcpCatalog);
             if (hypotheses.isEmpty()) {
                 fail(inv, "模型未给出可执行的调查假设");
                 return;
@@ -181,9 +204,16 @@ public class CsInvestigationService {
                 }
                 evidenceMapper.insert(evidence);
                 evidenceText.append(block).append('\n');
+                // B4:假设附带可选 MCP 验证字段时,追加一条 MCP 证据行
+                seq = appendMcpEvidence(invId, ticket, seq, evidenceText, hypothesis);
             }
 
-            String report = report(model, context, evidenceText.toString());
+            // B4:追加 KB / TICKET_EVENT 两类结构化证据(与 SQL 证据同样落证据链并进报告上下文)。
+            // 各自独立 try/catch:任一数据源失败只写一条"未取到"证据,不拖垮已完成的 SQL 证据与报告。
+            seq = appendKbEvidence(invId, ticket, seq, evidenceText);
+            seq = appendTicketEventEvidence(invId, ticket, seq, evidenceText);
+
+            String report = report(model, context, evidenceText.toString(), reportSystem);
             if (StringUtils.isBlank(report)) {
                 fail(inv, "模型未生成报告");
                 return;
@@ -206,16 +236,190 @@ public class CsInvestigationService {
         }
     }
 
-    private List<Map<String, Object>> propose(AgentModel model, AgentDatasource ds, String context) throws Exception {
+    /**
+     * B4:知识库命中证据。取渠道绑定的知识库,用工单标题+转人工原因做检索 query;
+     * 命中摘要写 resultDigest,文件名写 queryText。无绑定知识库/检索异常不写证据(不制造噪声)。
+     *
+     * @return 更新后的证据序号
+     */
+    int appendKbEvidence(Long invId, CsTicket ticket, int seq, StringBuilder evidenceText) {
+        try {
+            CsChannel channel = channelMapper.selectOne(new LambdaQueryWrapper<CsChannel>()
+                .eq(CsChannel::getWorkspaceId, ticket.getWorkspaceId())
+                .eq(CsChannel::getChannelCode, ticket.getChannelCode())
+                .last("limit 1"));
+            if (channel == null || StringUtils.isBlank(channel.getKnowledgeIds())) {
+                return seq;
+            }
+            List<Long> kbIds = CsVisitorService.parseIds(channel.getKnowledgeIds());
+            if (kbIds.isEmpty()) {
+                return seq;
+            }
+            String query = StringUtils.defaultIfBlank(ticket.getTitle(), "")
+                + " " + StringUtils.defaultIfBlank(ticket.getHandoffReason(), "");
+            if (query.isBlank()) {
+                return seq;
+            }
+            var outcome = knowledgeGateway.retrieve(ticket.getWorkspaceId(), kbIds, query);
+            List<com.forgeagent.rag.domain.vo.KnowledgeSearchHitVo> hits = outcome.hits();
+            if (hits == null || hits.isEmpty()) {
+                return seq;
+            }
+            seq++;
+            CsInvestigationEvidence ev = baseEvidence(invId, seq, "KB");
+            ev.setHypothesisTitle(truncate("知识库命中 " + hits.size() + " 条", 200));
+            StringBuilder names = new StringBuilder();
+            StringBuilder digest = new StringBuilder();
+            for (int i = 0; i < hits.size() && i < 3; i++) {
+                var hit = hits.get(i);
+                if (names.length() > 0) {
+                    names.append(';');
+                }
+                names.append(StringUtils.defaultIfBlank(hit.getFileName(), "unknown"));
+                digest.append("- ").append(CsPiiMasker.mask(StringUtils.defaultIfBlank(hit.getContent(), "")))
+                    .append('\n');
+            }
+            ev.setQueryText(truncate(names.toString(), 2000));
+            ev.setResultDigest(truncate(digest.toString(), 2000));
+            ev.setSuccess(1);
+            ev.setRowCount(hits.size());
+            ev.setCreateTime(new Date());
+            evidenceMapper.insert(ev);
+            evidenceText.append("- 证据").append(seq).append("[KB] 命中")
+                .append(hits.size()).append(" 条\n").append(digest).append('\n');
+        } catch (Exception e) {
+            log.warn("[RCA] KB 证据采集失败 inv={}: {}", invId, e.getMessage());
+        }
+        return seq;
+    }
+
+    /**
+     * B4:工单事件流证据。复用 buildTicketContext 同款 events() 取最近 5 条,
+     * 结构化落 evidenceType=TICKET_EVENT,与塞进 prompt 的文本上下文互补(那不是证据行)。
+     */
+    int appendTicketEventEvidence(Long invId, CsTicket ticket, int seq, StringBuilder evidenceText) {
+        try {
+            List<CsTicketEvent> events = ticketService.events(ticket.getId());
+            if (events == null || events.isEmpty()) {
+                return seq;
+            }
+            int from = Math.max(0, events.size() - 5);
+            List<CsTicketEvent> recent = events.subList(from, events.size());
+            seq++;
+            CsInvestigationEvidence ev = baseEvidence(invId, seq, "TICKET_EVENT");
+            ev.setHypothesisTitle(truncate("工单事件流(最近 " + recent.size() + " 条)", 200));
+            ev.setQueryText(truncate("ticket#" + ticket.getId() + " 事件轨迹", 2000));
+            StringBuilder digest = new StringBuilder();
+            for (CsTicketEvent e : recent) {
+                digest.append("- ").append(StringUtils.defaultIfBlank(e.getEventType(), "-")).append(':')
+                    .append(CsPiiMasker.mask(StringUtils.defaultIfBlank(e.getNote(), ""))).append('\n');
+            }
+            ev.setResultDigest(truncate(digest.toString(), 2000));
+            ev.setSuccess(1);
+            ev.setRowCount(recent.size());
+            ev.setCreateTime(new Date());
+            evidenceMapper.insert(ev);
+            evidenceText.append("- 证据").append(seq).append("[TICKET_EVENT]\n").append(digest).append('\n');
+        } catch (Exception e) {
+            log.warn("[RCA] TICKET_EVENT 证据采集失败 inv={}: {}", invId, e.getMessage());
+        }
+        return seq;
+    }
+
+    private static CsInvestigationEvidence baseEvidence(Long invId, int seq, String type) {
+        CsInvestigationEvidence ev = new CsInvestigationEvidence();
+        ev.setInvestigationId(invId);
+        ev.setSeq(seq);
+        ev.setEvidenceType(type);
+        ev.setSuccess(0);
+        return ev;
+    }
+
+    private List<Map<String, Object>> propose(AgentModel model, AgentDatasource ds, String context,
+                                              String proposeSystem,
+                                              List<com.forgeagent.agent.api.customerservice.McpEvidenceGateway.CatalogEntry> mcpCatalog)
+            throws Exception {
         String schema = truncate(StringUtils.defaultIfBlank(ds.getSchemaSnapshot(), "未提供表结构"), 6000);
         String user = "工单上下文:\n" + context + "\n\n可用表结构:\n" + schema;
-        String raw = callModel(model, PROPOSE_SYSTEM, user, 60);
+        if (mcpCatalog != null && !mcpCatalog.isEmpty()) {
+            StringBuilder catalog = new StringBuilder("可用 MCP 工具(可选补充验证,server|tool|描述):\n");
+            int listed = 0;
+            for (com.forgeagent.agent.api.customerservice.McpEvidenceGateway.CatalogEntry e : mcpCatalog) {
+                if (listed++ >= 30) {
+                    catalog.append("(目录已截断,仅展示前 30 个)\n");
+                    break;
+                }
+                catalog.append("- ").append(e.server()).append(" | ").append(e.tool())
+                    .append(" | ").append(e.description()).append('\n');
+            }
+            user = user + "\n" + catalog;
+        }
+        String raw = callModel(model, proposeSystem, user, 60);
         return parseHypotheses(raw);
     }
 
-    private String report(AgentModel model, String context, String evidenceText) throws Exception {
+    /**
+     * B4:假设携带可选 mcp 字段({"server","tool","args"})时,调用对应工具写一条 MCP 证据。
+     * 字段缺失/格式非法/工具调用失败均写失败证据或不写,不拖垮 SQL 证据链。
+     */
+    int appendMcpEvidence(Long invId, CsTicket ticket, int seq, StringBuilder evidenceText,
+                          Map<String, Object> hypothesis) {
+        Object raw = hypothesis.get("mcp");
+        if (!(raw instanceof Map<?, ?> m) || m.isEmpty()) {
+            return seq;
+        }
+        try {
+            String server = text(m.get("server"));
+            String tool = text(m.get("tool"));
+            if (server.isBlank() || tool.isBlank()) {
+                return seq;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> args = m.get("args") instanceof Map<?, ?> a
+                ? new java.util.LinkedHashMap<>((Map<String, Object>) a) : Map.of();
+            com.forgeagent.agent.api.customerservice.McpEvidenceGateway.McpCallResult result =
+                mcpEvidenceGateway.call(ticket.getAgentId(), ticket.getWorkspaceId(), server, tool,
+                    args, 60);
+            seq++;
+            CsInvestigationEvidence ev = baseEvidence(invId, seq, "MCP");
+            ev.setHypothesisTitle(truncate(text(hypothesis.get("title")), 200));
+            ev.setQueryText(truncate(server + "/" + tool, 2000));
+            ev.setCreateTime(new Date());
+            String digest;
+            if (result.success()) {
+                ev.setSuccess(1);
+                ev.setResultDigest(truncate(CsPiiMasker.mask(result.content()), MAX_DIGEST_CHARS));
+                digest = "MCP 调用成功 " + server + "/" + tool + ":\n"
+                    + truncate(result.content(), 800);
+            } else {
+                ev.setErrorMessage(truncate(result.error(), 500));
+                digest = "MCP 调用失败 " + server + "/" + tool + ": " + result.error();
+            }
+            evidenceMapper.insert(ev);
+            evidenceText.append("- 证据").append(seq).append("[MCP]\n").append(digest).append('\n');
+        } catch (Exception e) {
+            log.warn("[RCA] MCP 证据采集失败 inv={}: {}", invId, e.getMessage());
+        }
+        return seq;
+    }
+
+    private String report(AgentModel model, String context, String evidenceText,
+                          String reportSystem) throws Exception {
         String user = "工单上下文:\n" + context + "\n\n取数证据:\n" + truncate(evidenceText, 8000);
-        return callModel(model, REPORT_SYSTEM, user, 90);
+        return callModel(model, reportSystem, user, 90);
+    }
+
+    /**
+     * B4:按模板名加载已发布模板文本,任何异常或未配置都回退内置兜底(模板是可选覆盖,不是依赖)。
+     */
+    private String resolvePrompt(Long workspaceId, String templateName, String fallback) {
+        try {
+            String loaded = promptTemplateService.compileByCode(workspaceId, templateName);
+            return StringUtils.isBlank(loaded) ? fallback : loaded;
+        } catch (Exception e) {
+            log.warn("[RCA] 模板 {} 加载失败,回退内置提示词: {}", templateName, e.getMessage());
+            return fallback;
+        }
     }
 
     private String callModel(AgentModel model, String systemPrompt, String userPrompt, int timeoutSeconds) {

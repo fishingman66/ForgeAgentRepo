@@ -57,6 +57,14 @@ public class AgentWorkspaceBo implements Serializable {
     /** F2 品牌外观:logo / 主题色 / 帮助中心域名(与 B1 共用)。 */
     private String logoUrl;
     private String themeColor;
+    /**
+     * F2:帮助中心自定义域名。空串=清空自定义域名;非空须为合法主机名(不含协议/端口/路径)。
+     * 格式闸门放在 BO,解析校验走 /saas/domain/verify 端点(需实网 DNS,不放同步保存链路)。
+     */
+    @jakarta.validation.constraints.Pattern(
+        regexp = "^$|^(?=.{1,200}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$",
+        message = "帮助中心域名格式不合法(只填主机名,如 help.example.com)",
+        groups = {AddGroup.class, EditGroup.class})
     private String helpCenterDomain;
 
     /**

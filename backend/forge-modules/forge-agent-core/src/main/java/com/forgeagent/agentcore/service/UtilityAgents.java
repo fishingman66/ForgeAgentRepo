@@ -17,7 +17,7 @@ public final class UtilityAgents {
      */
     public static io.agentscope.core.ReActAgent build(String name, String sysPrompt, AgentModel model) {
         io.agentscope.core.model.Model asModel = AgentScopeModelFactory.build(
-            model.getBaseUrl(), model.getApiKey(), model.getModelName(), null, null);
+            model.getProvider(), model.getBaseUrl(), model.getApiKey(), model.getModelName(), null, null);
         return io.agentscope.core.ReActAgent.builder()
             .name(name)
             .model(asModel)

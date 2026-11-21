@@ -92,6 +92,13 @@ public class AgentWorkflowRun extends BaseEntity {
     private Long approvalId;
 
     /**
+     * C1:wait 节点超时绝对时刻;NULL=不超时或非 wait 暂停。
+     * 与 approval 节点的 expiredAt 分工:审批超时靠 agent_approval.expiredAt,
+     * wait/form 无审批单,靠本列由 sweepExpiredWaits 扫描。
+     */
+    private java.time.LocalDateTime pendingDeadline;
+
+    /**
      * 发起人用户ID
      */
     private Long userId;

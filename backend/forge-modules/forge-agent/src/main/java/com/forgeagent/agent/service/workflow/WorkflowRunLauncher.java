@@ -550,6 +550,17 @@ public class WorkflowRunLauncher {
         if (!"pending_approval".equals(run.getStatus())) {
             throw new ServiceException("该运行实例不在等待状态,无需唤醒");
         }
+        // C1:与 wait 超时扫描互斥——条件更新把 pending_approval 抢为 running。
+        // 抢不到说明已被超时扫描终止或被并发唤醒,直接拒绝,避免"超时后又被 signal 唤醒"。
+        int claimed = runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<AgentWorkflowRun>()
+            .eq(AgentWorkflowRun::getId, runId)
+            .eq(AgentWorkflowRun::getStatus, "pending_approval")
+            .set(AgentWorkflowRun::getStatus, "running")
+            .set(AgentWorkflowRun::getUpdateTime, java.time.LocalDateTime.now()));
+        if (claimed == 0) {
+            throw new ServiceException("该运行实例已被处理(超时终止或并发唤醒),无法唤醒");
+        }
+        run.setStatus("running");
         AgentInfo agent = agentMapper.selectById(run.getAgentId());
         if (agent == null) {
             throw new ServiceException("Agent 不存在");
@@ -616,6 +627,14 @@ public class WorkflowRunLauncher {
             if (approvalId != null) {
                 run.setApprovalId(approvalId);
             }
+            // C1:wait 节点(approvalId=null)暂停时,把超时绝对时刻从 vars 提到独立列,
+            // 并从 vars 移除内部键避免污染续跑插值;非等待态清空,防止残留到下次暂停。
+            if ("pending_approval".equals(status) && approvalId == null) {
+                String raw = vars.remove(WorkflowNodeExecutors.WAIT_DEADLINE_VAR);
+                run.setPendingDeadline(parseDeadline(raw));
+            } else {
+                run.setPendingDeadline(null);
+            }
             String varsJson = objectMapper.writeValueAsString(vars);
             // 体检 R3:vars 是 pending_approval 恢复与下游插值的输入,截断会破坏执行语义,
             // 超长仅告警(由 MEDIUMTEXT 承载);展示用的 trace.output 则可安全截断
@@ -631,6 +650,20 @@ public class WorkflowRunLauncher {
             runMapper.updateById(run);
         } catch (Exception e) {
             throw new ServiceException("运行实例快照写入失败:" + e.getMessage());
+        }
+    }
+
+    /** C1:把 vars 里 epoch ms 字符串转成 DATETIME 口径的 LocalDateTime;非法值当不超时。 */
+    private static java.time.LocalDateTime parseDeadline(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return java.time.LocalDateTime.ofInstant(
+                java.time.Instant.ofEpochMilli(Long.parseLong(raw.trim())),
+                java.time.ZoneId.systemDefault());
+        } catch (Exception e) {
+            return null;
         }
     }
 

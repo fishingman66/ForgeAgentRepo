@@ -39,7 +39,7 @@ public class KbVlmConfigResolver {
      *
      * @param from 命中来源:WORKSPACE / PLATFORM_DEFAULT / GLOBAL
      */
-    public record Resolved(String baseUrl, String apiKey, String modelName, String from) {
+    public record Resolved(String provider, String baseUrl, String apiKey, String modelName, String from) {
     }
 
     public Resolved resolve(AgentKnowledge kb) {
@@ -58,7 +58,7 @@ public class KbVlmConfigResolver {
         if (StringUtils.isNotBlank(properties.getVlmModel())) {
             AgentModel model = modelByName(properties.getVlmModel());
             if (model != null) {
-                return new Resolved(model.getBaseUrl(), model.getApiKey(), model.getModelName(), "GLOBAL");
+                return new Resolved(model.getProvider(), model.getBaseUrl(), model.getApiKey(), model.getModelName(), "GLOBAL");
             }
         }
         return null;
@@ -73,11 +73,11 @@ public class KbVlmConfigResolver {
             String apiKey = StringUtils.isBlank(bo.getApiKey()) ? storedPlainKey(bo.getWorkspaceId()) : bo.getApiKey();
             return StringUtils.isBlank(bo.getBaseUrl()) || StringUtils.isBlank(bo.getModelName())
                 ? null
-                : new Resolved(bo.getBaseUrl().trim(), apiKey, bo.getModelName().trim(), "INPUT");
+                : new Resolved(null, bo.getBaseUrl().trim(), apiKey, bo.getModelName().trim(), "INPUT");
         }
         AgentModel model = modelByName(bo.getModelName());
         return model == null ? null
-            : new Resolved(model.getBaseUrl(), model.getApiKey(), model.getModelName(), "INPUT");
+            : new Resolved(model.getProvider(), model.getBaseUrl(), model.getApiKey(), model.getModelName(), "INPUT");
     }
 
     /**
@@ -97,12 +97,12 @@ public class KbVlmConfigResolver {
             if (StringUtils.isBlank(row.getBaseUrl()) || StringUtils.isBlank(row.getModelName())) {
                 return null;
             }
-            return new Resolved(row.getBaseUrl().trim(), cipher.decrypt(row.getApiKeyCipher()),
+            return new Resolved(null, row.getBaseUrl().trim(), cipher.decrypt(row.getApiKeyCipher()),
                 row.getModelName().trim(), from);
         }
         AgentModel model = modelByName(row.getModelName());
         return model == null ? null
-            : new Resolved(model.getBaseUrl(), model.getApiKey(), model.getModelName(), from);
+            : new Resolved(model.getProvider(), model.getBaseUrl(), model.getApiKey(), model.getModelName(), from);
     }
 
     private AgentKbVlmConfig enabledRow(Long workspaceId) {

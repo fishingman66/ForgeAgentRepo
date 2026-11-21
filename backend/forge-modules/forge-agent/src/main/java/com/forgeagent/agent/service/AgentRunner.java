@@ -137,7 +137,7 @@ public interface AgentRunner {
      */
     record RunnerContext(String agentName, String modelName, String toolNames, String knowledgeNames,
                          String retrievedContext, String systemPrompt, List<ChatTurn> history,
-                         String llmBaseUrl, String llmApiKey, String llmModel,
+                         String llmProvider, String llmBaseUrl, String llmApiKey, String llmModel,
                          Double temperature, Integer maxTokens,
                          Long sessionId, Long agentId, String roundId,
                          List<ToolAssembler.ToolDef> toolDefs,
@@ -194,7 +194,7 @@ public interface AgentRunner {
             /**
              * 成员模型卡(为空表示回退主 Agent 模型)
              */
-            public record MemberModel(String baseUrl, String apiKey, String modelName,
+            public record MemberModel(String provider, String baseUrl, String apiKey, String modelName,
                                       Double temperature, Integer maxTokens) {
             }
         }
@@ -230,8 +230,8 @@ public interface AgentRunner {
                              String llmBaseUrl, String llmApiKey, String llmModel,
                              Double temperature, Integer maxTokens) {
             this(agentName, modelName, toolNames, knowledgeNames, retrievedContext, systemPrompt, history,
-                llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens, null, null, null, List.of(), List.of(),
-                null, null, null, List.of(), "sequential", List.of(), List.of(),
+                null, llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens, null, null, null,
+                List.of(), List.of(), null, null, null, List.of(), "sequential", List.of(), List.of(),
                 new CopyOnWriteArrayList<>(), List.of(), null);
         }
 
@@ -246,7 +246,7 @@ public interface AgentRunner {
                              List<ToolAssembler.ToolDef> toolDefs,
                              List<ToolAssembler.McpDef> mcpDefs) {
             this(agentName, modelName, toolNames, knowledgeNames, retrievedContext, systemPrompt, history,
-                llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens,
+                null, llmBaseUrl, llmApiKey, llmModel, temperature, maxTokens,
                 sessionId, agentId, roundId, toolDefs, mcpDefs, null, null, null, List.of(),
                 "sequential", List.of(), List.of(), new CopyOnWriteArrayList<>(), List.of(), null);
         }

@@ -4,8 +4,10 @@ import com.forgeagent.agent.config.McpStdioProperties;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -98,6 +100,33 @@ public final class McpStdioCommandValidator {
                 if (INLINE_CODE_FLAGS.contains(arg.toLowerCase(Locale.ROOT))) {
                     throw new ServiceException("stdio 禁止解释器内联代码参数(" + arg
                         + "):如需放行请显式设置 agent.mcp.stdio.allow-inline-code=true");
+                }
+            }
+        }
+
+        // 第五闸(C2):args 白名单正则。仅对配置了 argsPatterns 的命令生效,未配置的命令放行
+        // (保持存量兼容);每个参数都必须命中至少一条正则,非法正则直接拒绝(避免闸门静默失效)。
+        Map<String, List<String>> argsPatterns = props == null ? null : props.getArgsPatterns();
+        if (argsPatterns != null && argsPatterns.containsKey(commandName)) {
+            List<String> patterns = argsPatterns.get(commandName);
+            if (patterns == null || patterns.isEmpty()) {
+                throw new ServiceException("stdio 命令 " + commandName + " 配置了空的 argsPatterns,视为禁用");
+            }
+            List<Pattern> compiled = new ArrayList<>();
+            for (String regex : patterns) {
+                if (StringUtils.isBlank(regex)) {
+                    throw new ServiceException("stdio argsPatterns 含空正则,命令=" + commandName);
+                }
+                try {
+                    compiled.add(Pattern.compile(regex));
+                } catch (Exception e) {
+                    throw new ServiceException("stdio argsPatterns 正则非法(" + regex + "):" + e.getMessage());
+                }
+            }
+            for (String arg : argv) {
+                boolean argMatched = compiled.stream().anyMatch(p -> p.matcher(arg).matches());
+                if (!argMatched) {
+                    throw new ServiceException("stdio 参数不在白名单内(" + commandName + "):" + arg);
                 }
             }
         }

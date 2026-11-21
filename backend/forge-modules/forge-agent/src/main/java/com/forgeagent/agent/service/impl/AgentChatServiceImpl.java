@@ -1361,6 +1361,7 @@ public class AgentChatServiceImpl implements IAgentChatService {
             agent.getName(), model == null ? null : model.getName(),
             toolNames, knowledgeNames, retrievedContext, systemPrompt,
             history.turns(),
+            model == null ? null : model.getProvider(),
             model == null ? null : model.getBaseUrl(), model == null ? null : model.getApiKey(),
             model == null ? null : model.getModelName(),
             model == null ? null : (model.getTemperature() == null ? null : model.getTemperature().doubleValue()),

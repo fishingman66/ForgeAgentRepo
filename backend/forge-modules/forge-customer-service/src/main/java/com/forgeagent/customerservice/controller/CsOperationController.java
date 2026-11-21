@@ -251,6 +251,16 @@ public class CsOperationController extends BaseController {
         return R.ok(metricService.list(currentWorkspaceId(), parseDate(from), parseDate(to)));
     }
 
+    /**
+     * A4 服务漏斗真实计数:三段同源于会话明细,不复用日指标物化表。
+     * 日期入参口径与 /metrics 一致(from/to 均为 yyyy-MM-dd)。
+     */
+    @GetMapping("/metrics/funnel")
+    public R<com.forgeagent.customerservice.domain.vo.CsFunnelVo> funnel(@RequestParam(required = false) String from,
+                                                                         @RequestParam(required = false) String to) {
+        return R.ok(metricService.funnel(currentWorkspaceId(), parseDate(from), parseDate(to)));
+    }
+
     @PostMapping("/metrics/rebuild")
     public R<java.util.List<com.forgeagent.customerservice.domain.vo.CsMetricDailyVo>> rebuildMetrics(@RequestParam(required = false) String statDate) {
         Date day = statDate == null || statDate.isBlank()

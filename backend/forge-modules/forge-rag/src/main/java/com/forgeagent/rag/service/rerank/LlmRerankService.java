@@ -56,7 +56,7 @@ public class LlmRerankService implements RerankService {
             throw new ServiceException("重排序模型接入信息不完整:" + (model == null ? "模型不存在" : model.getName()));
         }
         String prompt = buildPrompt(query, candidates);
-        Model asModel = AgentScopeModelFactory.build(
+        Model asModel = AgentScopeModelFactory.build(model.getProvider(),
             model.getBaseUrl(), model.getApiKey(), model.getModelName(), 0.0, 1024);
         ReActAgent agent = ReActAgent.builder()
             .name("rerank")

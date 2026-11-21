@@ -16,6 +16,9 @@ export interface WorkspaceVO {
   logoUrl?: string;
   themeColor?: string;
   helpCenterDomain?: string;
+  /** F2 域名校验状态 NONE/RESOLVABLE/UNRESOLVABLE/INVALID */
+  domainStatus?: string;
+  domainVerifiedAt?: string;
 }
 
 /** 工作空间表单对象 */

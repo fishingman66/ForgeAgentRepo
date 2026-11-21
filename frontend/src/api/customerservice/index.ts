@@ -230,6 +230,16 @@ export const expireAnswers = () =>
 export const listMetrics = (from?: string, to?: string): AxiosPromise<CsMetricDaily[]> =>
   request({ url: '/agent/customerservice/metrics', method: 'get', params: { from, to } });
 
+/** A4 服务漏斗真实计数:三段同源于会话明细,口径与 AI 自动解决率一致。 */
+export interface CsFunnel {
+  sessions: number;
+  contained: number;
+  handoff: number;
+}
+
+export const getFunnel = (from?: string, to?: string): AxiosPromise<CsFunnel> =>
+  request({ url: '/agent/customerservice/metrics/funnel', method: 'get', params: { from, to } });
+
 export const rebuildMetrics = (statDate?: string) =>
   request({ url: '/agent/customerservice/metrics/rebuild', method: 'post', params: { statDate } });
 

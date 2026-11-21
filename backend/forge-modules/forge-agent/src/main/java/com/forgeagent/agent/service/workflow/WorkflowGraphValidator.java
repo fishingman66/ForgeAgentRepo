@@ -184,6 +184,21 @@ public class WorkflowGraphValidator {
                     if (minutes < 0 || minutes > 7 * 24 * 60) {
                         blockers.add(issue(id, null, "等待节点超时需在 0~10080 分钟(0 表示不超时):" + name));
                     }
+                    // C1:可选的超时续跑 payload——配置了就必须是合法 JSON 对象,否则超时分支注入会失败
+                    String timeoutPayload = node.path("config").path("timeoutPayload").asText(null);
+                    if (StringUtils.isNotBlank(timeoutPayload)) {
+                        try {
+                            com.fasterxml.jackson.databind.JsonNode parsed =
+                                new com.fasterxml.jackson.databind.ObjectMapper().readTree(timeoutPayload);
+                            if (!parsed.isObject()) {
+                                blockers.add(issue(id, null,
+                                    "等待节点超时 payload 必须是 JSON 对象:" + name));
+                            }
+                        } catch (Exception e) {
+                            blockers.add(issue(id, null,
+                                "等待节点超时 payload 不是合法 JSON:" + name));
+                        }
+                    }
                 }
                 case "human_transfer" -> {
                     if (StringUtils.isBlank(node.path("config").path("reason").asText(null))) {

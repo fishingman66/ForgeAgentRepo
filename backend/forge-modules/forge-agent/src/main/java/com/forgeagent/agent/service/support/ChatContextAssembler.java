@@ -247,7 +247,8 @@ public class ChatContextAssembler {
                 || StringUtils.isBlank(memberModel.getApiKey()) || StringUtils.isBlank(memberModel.getModelName());
             AgentRunner.RunnerContext.TeamMember.MemberModel modelDef = fallback ? null
                 : new AgentRunner.RunnerContext.TeamMember.MemberModel(
-                    memberModel.getBaseUrl(), memberModel.getApiKey(), memberModel.getModelName(),
+                    memberModel.getProvider(), memberModel.getBaseUrl(), memberModel.getApiKey(),
+                    memberModel.getModelName(),
                     memberModel.getTemperature() == null ? null : memberModel.getTemperature().doubleValue(),
                     memberModel.getMaxTokens());
             boolean allowTools = StringUtils.isNotBlank(member.getToolIdsStr());

@@ -793,8 +793,10 @@ CREATE TABLE IF NOT EXISTS `agent_workflow_run` (
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
   `del_flag` bigint NOT NULL DEFAULT '0' COMMENT '删除标志(0存在 其他删除)',
   `idempotency_key` VARCHAR(128) NULL COMMENT '幂等键(agent内唯一,防重复投递)',
+  `pending_deadline` DATETIME NULL COMMENT 'C1:wait节点超时绝对时刻,NULL=不超时/非wait',
   PRIMARY KEY (`id`),
   KEY `idx_agent_status` (`agent_id`,`status`),
+  KEY `idx_run_wait_deadline` (`status`,`approval_id`,`pending_deadline`),
   UNIQUE KEY `uk_run_idem` (`agent_id`,`idempotency_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流运行实例';
 DROP TABLE IF EXISTS `agent_workflow_version`;
@@ -831,6 +833,8 @@ CREATE TABLE IF NOT EXISTS `agent_workspace` (
   `logo_url` varchar(500) DEFAULT '' COMMENT 'F2 品牌 logo URL',
   `theme_color` varchar(20) DEFAULT '' COMMENT 'F2 主题色',
   `help_center_domain` varchar(200) DEFAULT '' COMMENT 'F2/B1 帮助中心自定义域名',
+  `domain_status` varchar(16) DEFAULT 'NONE' COMMENT 'F2 域名校验状态:NONE/RESOLVABLE/UNRESOLVABLE/INVALID',
+  `domain_verified_at` datetime DEFAULT NULL COMMENT 'F2 域名最近一次校验时间',
   PRIMARY KEY (`id`),
   KEY `idx_dept` (`dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent 工作空间';

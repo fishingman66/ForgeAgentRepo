@@ -216,14 +216,16 @@ class AgentMcpServerServiceImplTest {
     }
 
     @Test
-    void ssrfGuardOnRejectsLoopbackAndPrivateMcp() {
+    void ssrfGuardOnRejectsNonAllowlistedInternalMcp() {
         props.setMcpSsrfGuardEnabled(true);
-        AgentMcpServerBo loopback = bo();
-        loopback.setUrl("http://127.0.0.1:8080/mcp");
+        // D4 新语义:默认白名单放行回环与 RFC1918/ULA(合法内网 MCP),但 169.254 云元数据
+        // 端点默认不放行——用该地址验证"开启守护后未命中白名单的内网地址仍被拒绝"。
+        AgentMcpServerBo metadata = bo();
+        metadata.setUrl("http://169.254.169.254/latest/meta-data/");
         when(resourceGuard.resolveCreateWorkspace(900L, false)).thenReturn(900L);
         when(serverMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 
-        ServiceException ex = assertThrows(ServiceException.class, () -> service.insertByBo(loopback));
+        ServiceException ex = assertThrows(ServiceException.class, () -> service.insertByBo(metadata));
 
         assertTrue(ex.getMessage().contains("内网") || ex.getMessage().contains("保留地址"), ex.getMessage());
         verify(serverMapper, never()).insert(any(AgentMcpServer.class));

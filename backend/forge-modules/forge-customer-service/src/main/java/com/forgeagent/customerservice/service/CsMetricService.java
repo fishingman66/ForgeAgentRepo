@@ -98,6 +98,31 @@ public class CsMetricService {
         return com.forgeagent.common.core.utils.MapstructUtils.convert(rows, com.forgeagent.customerservice.domain.vo.CsMetricDailyVo.class);
     }
 
+    /**
+     * A4 服务漏斗:区间内会话三段真实计数,不复用 list() 的物化表(物化按 buildRow 逐日写,
+     * 且当重建未跑时为空),直接对会话明细做一次范围查询,保证三段同源于 agent_cs_conversation。
+     *
+     * <p>口径与 containmentRate(CsMetricService:139-141)完全一致:未建单(ticket_id IS NULL)
+     * = AI 自动解决,已建单 = 转人工。from/to 语义与 list() 对齐(from 当天 00:00、to 当天 00:00),
+     * 但这里把 to 归一化到次日 00:00 做左闭右开,确保"选到某天"包含该天全天会话。</p>
+     */
+    public com.forgeagent.customerservice.domain.vo.CsFunnelVo funnel(Long workspaceId, Date from, Date to) {
+        Date start = from == null ? null : dayRange(from)[0];
+        Date end = to == null ? null : dayRange(to)[1];
+        List<CsConversation> convs = conversationMapper.selectList(new LambdaQueryWrapper<CsConversation>()
+            .eq(CsConversation::getWorkspaceId, workspaceId)
+            .ge(start != null, CsConversation::getCreateTime, start)
+            .lt(end != null, CsConversation::getCreateTime, end)
+            .select(CsConversation::getId, CsConversation::getTicketId));
+        long contained = convs.stream().filter(c -> c.getTicketId() == null).count();
+        com.forgeagent.customerservice.domain.vo.CsFunnelVo vo =
+            new com.forgeagent.customerservice.domain.vo.CsFunnelVo();
+        vo.setSessions(convs.size());
+        vo.setContained(contained);
+        vo.setHandoff(convs.size() - contained);
+        return vo;
+    }
+
     private CsMetricDaily buildRow(Long workspaceId, Date statDate, String channelCode,
                                    List<CsConversation> conversations, List<CsTicket> tickets,
                                    List<CsCsat> csats, Set<Long> visitorsWithPrior) {

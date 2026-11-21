@@ -267,6 +267,19 @@ const viewInvestigation = async (row: CsInvestigation) => {
   }
 };
 
+/** B4:证据类型标签——SQL/KB/TICKET_EVENT 三类同源于 RCA 证据链,前端只做展示映射。 */
+const rcaEvidenceLabel = (type: string) =>
+  (({
+    SQL: 'SQL 取数',
+    KB: '知识库',
+    TICKET_EVENT: '工单事件'
+  } as Record<string, string>)[type] || '证据');
+const rcaEvidenceTagType = (type: string): 'primary' | 'success' | 'warning' => ({
+  SQL: 'primary',
+  KB: 'success',
+  TICKET_EVENT: 'warning'
+}[type] as 'primary' | 'success' | 'warning') ?? 'primary';
+
 const decideInvestigation = async (approved: boolean) => {
   if (!rcaDetail.value) {
     return;
@@ -439,7 +452,15 @@ onMounted(() => {
           <div class="cs-rca-title">证据链</div>
           <el-collapse>
             <el-collapse-item v-for="e in rcaDetail.evidences" :key="e.seq"
-              :name="e.seq" :title="`#${e.seq} ${e.hypothesisTitle || e.evidenceType}（${e.success ? '成功' : '失败'}）`">
+              :name="e.seq">
+              <template #title>
+                <span class="cs-rca-ev-title">
+                  <el-tag size="small" :type="rcaEvidenceTagType(e.evidenceType)" effect="plain">
+                    {{ rcaEvidenceLabel(e.evidenceType) }}
+                  </el-tag>
+                  <span>#{{ e.seq }} {{ e.hypothesisTitle || e.evidenceType }}（{{ e.success ? '成功' : '失败' }}）</span>
+                </span>
+              </template>
               <div class="cs-rca-code">{{ e.queryText }}</div>
               <div v-if="e.resultDigest" class="cs-rca-code">{{ e.resultDigest }}</div>
               <div v-if="e.errorMessage" class="cs-rca-error">{{ e.errorMessage }}</div>
@@ -505,6 +526,11 @@ onMounted(() => {
 .cs-rca-error {
   color: var(--el-color-danger);
   font-size: 12px;
+}
+.cs-rca-ev-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .cs-rca-actions {
   display: flex;

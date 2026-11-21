@@ -21,6 +21,8 @@ import java.util.List;
 public class SaasController {
 
     private final SaasInviteService inviteService;
+    /** F2:帮助中心域名校验(格式 + DNS 可解析,不声称 CNAME/SSL 生效)。 */
+    private final com.forgeagent.agent.service.SaasDomainVerifier domainVerifier;
 
     /** 管理员创建邀请链接(明文 token 仅此一次返回)。 */
     @PostMapping("/invites")
@@ -41,5 +43,14 @@ public class SaasController {
     @GetMapping("/invites")
     public R<List<AgentWorkspaceInvite>> listInvites(@RequestParam Long workspaceId) {
         return R.data(inviteService.list(workspaceId));
+    }
+
+    /**
+     * F2:校验并落库当前帮助中心域名状态。
+     * 只判断格式与 DNS 可解析性;不校验 CNAME 记录类型,也不签发 SSL。
+     */
+    @PostMapping("/domain/verify")
+    public R<String> verifyDomain(@RequestParam Long workspaceId) {
+        return R.data(domainVerifier.verify(workspaceId));
     }
 }

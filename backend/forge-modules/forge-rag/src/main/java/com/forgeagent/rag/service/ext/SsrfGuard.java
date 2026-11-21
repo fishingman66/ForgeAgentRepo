@@ -47,12 +47,26 @@ public final class SsrfGuard {
     }
 
     /**
-     * 校验目标地址;不通过直接抛业务异常。
+     * 校验目标地址;不通过直接抛业务异常(无白名单,全量拦截)。
      *
      * <p>遍历该主机的<b>全部 A/AAAA 记录</b>:只要有一条落在禁网段就拒绝,
      * 避免"多记录里混一条内网"的绕过。</p>
      */
     public static void verify(String url) {
+        verifyWithAllowlist(url, java.util.List.of());
+    }
+
+    /**
+     * 校验目标地址,带运维显式放行白名单;不通过直接抛业务异常。
+     *
+     * <p>白名单语义(D4 MCP 场景):<b>命中即放行</b>——内网 MCP 是本产品的合法部署形态,
+     * 运维把内网段加进 allowlist 即为明确授权。条目支持三种形态:
+     * ① 精确 host(如 {@code mcp.internal.corp},大小写不敏感,直接短路不做 DNS);
+     * ② 精确 IP(如 {@code 10.0.0.5});
+     * ③ CIDR 网段(如 {@code 10.0.0.0/8},对该主机解析出的任一地址命中即放行)。
+     * 未命中白名单的地址走原有逐记录禁网段判定,语义不变。</p>
+     */
+    public static void verifyWithAllowlist(String url, java.util.List<String> allowlist) {
         URI uri;
         try {
             uri = URI.create(url);
@@ -67,6 +81,14 @@ public final class SsrfGuard {
         if (!StringUtils.hasText(host)) {
             throw new ServiceException("请求地址缺少主机名");
         }
+        java.util.List<String> entries = allowlist == null ? java.util.List.of() : allowlist;
+        // ① 精确 host 放行:不解析 DNS 直接短路(运维显式授权该主机名)
+        for (String entry : entries) {
+            if (entry != null && !entry.isBlank() && !entry.contains("/")
+                && entry.trim().equalsIgnoreCase(host)) {
+                return;
+            }
+        }
         InetAddress[] addresses;
         try {
             addresses = InetAddress.getAllByName(host);
@@ -75,6 +97,21 @@ public final class SsrfGuard {
         }
         if (addresses == null || addresses.length == 0) {
             throw new ServiceException("目标主机无法解析:" + host);
+        }
+        // ②/③ 精确 IP 与 CIDR 放行:解析出的任一地址命中即放行
+        for (InetAddress address : addresses) {
+            String ip = address.getHostAddress();
+            for (String entry : entries) {
+                if (entry == null || entry.isBlank()) {
+                    continue;
+                }
+                String e = entry.trim();
+                if (e.contains("/")
+                    ? com.forgeagent.common.core.utils.NetUtils.isMatchCidr(e, ip)
+                    : e.equalsIgnoreCase(ip)) {
+                    return;
+                }
+            }
         }
         for (InetAddress address : addresses) {
             if (isBlocked(address)) {

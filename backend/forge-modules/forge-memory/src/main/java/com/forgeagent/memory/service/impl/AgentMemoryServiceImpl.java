@@ -482,7 +482,7 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
         if (model == null) {
             return;
         }
-        Model asModel = AgentScopeModelFactory.build(model.getBaseUrl(), model.getApiKey(),
+        Model asModel = AgentScopeModelFactory.build(model.getProvider(), model.getBaseUrl(), model.getApiKey(),
             model.getModelName(), null, null);
         ReActAgent extractor = ReActAgent.builder()
             .name("memory-extractor")
@@ -831,7 +831,7 @@ public class AgentMemoryServiceImpl implements IAgentMemoryService {
         if (rows.isEmpty()) {
             return;
         }
-        Model asModel = AgentScopeModelFactory.build(model.getBaseUrl(), model.getApiKey(),
+        Model asModel = AgentScopeModelFactory.build(model.getProvider(), model.getBaseUrl(), model.getApiKey(),
             model.getModelName(), null, null);
         ReActAgent rebuilder = ReActAgent.builder()
             .name("memory-graph-rebuilder")

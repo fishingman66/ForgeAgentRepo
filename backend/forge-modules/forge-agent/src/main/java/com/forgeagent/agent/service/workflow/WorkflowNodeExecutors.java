@@ -108,6 +108,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class WorkflowNodeExecutors {
 
+    /**
+     * C1:wait 节点超时截止时间(epoch ms)在 vars 中的内部键。
+     * 由快照层读取后落到 agent_workflow_run.pending_deadline,不参与模板插值。
+     */
+    public static final String WAIT_DEADLINE_VAR = "__wf_wait_deadline_ms";
+
     private final AgentModelMapper modelMapper;
     private final AgentApprovalMapper approvalMapper;
     private final TokenUsageRecorder tokenUsageRecorder;
@@ -276,6 +282,13 @@ public class WorkflowNodeExecutors {
             throw new ServiceException("等待节点缺少运行实例,无法暂停");
         }
         vars.put(t.getNodeName() + ".waitEvent", config.path("eventKey").asText(""));
+        // C1:超时分钟数在图校验时已限制 0~10080(0=不超时);转成绝对时刻交快照层落地。
+        // 只在首次暂停写,续跑时 output 已存在会提前 return,不会覆盖。
+        int timeoutMinutes = config.path("timeoutMinutes").asInt(0);
+        if (timeoutMinutes > 0) {
+            vars.put(WAIT_DEADLINE_VAR,
+                String.valueOf(System.currentTimeMillis() + timeoutMinutes * 60_000L));
+        }
         throw new ApprovalPauseException(t.getNodeId(), t.getNodeName(), null);
     }
 
@@ -504,7 +517,7 @@ public class WorkflowNodeExecutors {
         if (StringUtils.isBlank(prompt)) {
             throw new ServiceException("LLM 节点[" + t.getNodeName() + "]提示词为空");
         }
-        Model asModel = AgentScopeModelFactory.build(
+        Model asModel = AgentScopeModelFactory.build(model.getProvider(),
             model.getBaseUrl(), model.getApiKey(), model.getModelName(),
             config.path("temperature").isNumber() ? config.path("temperature").asDouble() : null,
             model.getMaxTokens());
@@ -561,7 +574,7 @@ public class WorkflowNodeExecutors {
                 + " 超过上限 " + maxLoops + ",请缩减集合或调大 maxLoops(最大 20)");
         }
         String promptTemplate = config.path("prompt").asText("");
-        Model asModel = AgentScopeModelFactory.build(
+        Model asModel = AgentScopeModelFactory.build(model.getProvider(),
             model.getBaseUrl(), model.getApiKey(), model.getModelName(),
             config.path("temperature").isNumber() ? config.path("temperature").asDouble() : null,
             model.getMaxTokens());

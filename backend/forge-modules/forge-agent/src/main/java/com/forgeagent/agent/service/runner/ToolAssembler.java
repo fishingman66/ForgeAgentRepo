@@ -361,9 +361,12 @@ public class ToolAssembler {
                            ToolDef replayDef) {
         Long replayId = null;
         String replayJson = null;
-        // F4一期:A档仅平台 http/sandbox 支持重放;sql 轮级 collector 会丢,MCP 需建连,均不落快照
+        // F4:A档重放白名单 http/sandbox/sql——sql 的执行状态全在 ToolDef(datasourceId) 里,
+        // SqlToolProvider 装配时按 datasourceId 反查数据源,无需轮级 collector;
+        // collector 只服务问数过程明细展示,重放回执不需要它。MCP 需建连,仍不落快照。
         if (replayDef != null
-            && ("http".equals(replayDef.toolType()) || "sandbox".equals(replayDef.toolType()))) {
+            && ("http".equals(replayDef.toolType()) || "sandbox".equals(replayDef.toolType())
+            || "sql".equals(replayDef.toolType()))) {
             replayId = replayDef.id();
             try { replayJson = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(replayDef); }
             catch (Exception e) { replayJson = null; }

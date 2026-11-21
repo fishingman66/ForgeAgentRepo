@@ -63,6 +63,14 @@ public class CsTicketService {
     /** P0:转人工建单后发布事件,异步生成交接摘要。 */
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
+    /**
+     * B5:坐席人工回复的邮件渠道回信钩子。非 final 字段注入,保持本类构造器签名不变
+     * (同 WorkflowNodeExecutors.handoffFacade 先例);邮件组件缺失或发送失败均降级,
+     * 不影响坐席回复主流程。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.forgeagent.customerservice.channel.CsMailReplyDispatcher mailReplyDispatcher;
+
     private static final Map<String, Set<String>> ALLOWED = Map.of(
         CsTicketStatus.AI_SERVING.name(), Set.of(CsTicketStatus.WAITING_AGENT.name()),
         // P0:取消转人工回到 AI 接待
@@ -429,6 +437,14 @@ public class CsTicketService {
         }
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT, ticket.getConversationId(), ticketId,
             Map.of("content", content, "senderType", "seat", "messageId", msg.getId())));
+        // B5:邮件渠道人工回信。钩子内部全 try/catch,发送失败不影响上面的消息落库与 SSE
+        if (mailReplyDispatcher != null) {
+            try {
+                mailReplyDispatcher.sendReply(ticket, content);
+            } catch (Exception e) {
+                log.warn("[客服] 工单 {} 人工回信邮件钩子异常: {}", ticketId, e.getMessage());
+            }
+        }
         com.forgeagent.customerservice.domain.vo.CsReplyResultVo data = new com.forgeagent.customerservice.domain.vo.CsReplyResultVo();
         data.setMessageId(msg.getId());
         data.setTicketId(ticketId);

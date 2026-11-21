@@ -2,19 +2,31 @@
 /**
  * 运营总览(C2/C4 + E1-A4):文本指标 + echarts 图表聚合展示。
  * 数据流:listMetrics 按日期区间拉日聚合(全渠道行 + 每渠道行);rebuildMetrics 手动重算。
- * 图表只读现有 rows,不新增后端聚合、不改指标口径:
- *   ① 会话量/转人工双轴趋势(全渠道行按日期)  ② 渠道会话分布(渠道行)  ③ 服务漏斗(全渠道汇总)
+ *   ① 会话量/转人工双轴趋势(全渠道行按日期)  ② 渠道会话分布(渠道行)
+ *   ③ 服务漏斗(全渠道汇总)——A4 起走独立的 /metrics/funnel 真实计数口,
+ *     三段同源于 agent_cs_conversation,不再用"会话数 × 自动解决率"反推的估算值。
  * 扩展点:语音指标(agent_cc_metric_daily)接入本页与通话记录页双入口呈现。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import * as echarts from 'echarts';
 import { ElMessage } from 'element-plus';
-import { listMetrics, rebuildMetrics } from '@/api/customerservice';
-import type { CsMetricDaily } from '@/api/customerservice';
+import { getFunnel, listMetrics, rebuildMetrics } from '@/api/customerservice';
+import type { CsFunnel, CsMetricDaily } from '@/api/customerservice';
 
 const rows = ref<CsMetricDaily[]>([]);
+const funnel = ref<CsFunnel>({ sessions: 0, contained: 0, handoff: 0 });
 const loading = ref(false);
 const rebuilding = ref(false);
+
+/** A4:日期区间与 /metrics 同口径(yyyy-MM-dd);默认近 30 天(含今日)。 */
+const dateRange = ref<[string, string] | null>(defaultRange());
+function defaultRange(): [string, string] {
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const to = new Date();
+  const from = new Date(to.getTime() - 29 * 86400_000);
+  return [fmt(from), fmt(to)];
+}
+const rangeParams = () => ({ from: dateRange.value?.[0], to: dateRange.value?.[1] });
 
 const cards = [
   { key: 'botSessions', label: '自助会话', suffix: '' },
@@ -82,11 +94,8 @@ const renderCharts = async () => {
       }]
     }, true);
   }
-  const tot = tr.reduce((a, r) => ({
-    sessions: a.sessions + (r.botSessions || 0),
-    resolved: a.resolved + Math.round((r.botSessions || 0) * (r.containmentRate || 0) / 100),
-    handled: a.handled + (r.handoffCount || 0)
-  }), { sessions: 0, resolved: 0, handled: 0 });
+  // A4:三段取后端真实聚合(同源于会话表),不再由日指标比率反推
+  const tot = funnel.value;
   if (funnelEl.value && tot.sessions > 0) {
     funnelChart = ensureChart(funnelChart, funnelEl.value);
     funnelChart.setOption({
@@ -96,8 +105,8 @@ const renderCharts = async () => {
         label: { fontSize: 11, formatter: '{b}\n{c}' },
         data: [
           { name: '会话总量', value: tot.sessions },
-          { name: 'AI 自动解决', value: tot.resolved },
-          { name: '转人工', value: tot.handled }
+          { name: 'AI 自动解决', value: tot.contained },
+          { name: '转人工', value: tot.handoff }
         ]
       }]
     }, true);
@@ -107,8 +116,16 @@ const renderCharts = async () => {
 const load = async () => {
   loading.value = true;
   try {
-    const res = await listMetrics();
+    const { from, to } = rangeParams();
+    const res = await listMetrics(from, to);
     rows.value = res.data ?? [];
+    // 漏斗真实数与指标同源同区间;单独捕获,失败不让整页指标空白
+    try {
+      const fr = await getFunnel(from, to);
+      funnel.value = fr.data ?? { sessions: 0, contained: 0, handoff: 0 };
+    } catch {
+      funnel.value = { sessions: 0, contained: 0, handoff: 0 };
+    }
     await renderCharts();
   } catch {
     ElMessage.error('指标加载失败');
@@ -147,6 +164,21 @@ onUnmounted(() => {
 
 <template>
   <div class="cs-page">
+    <el-row :gutter="12" class="cs-filter">
+      <el-col :xs="24" :sm="12" :md="8">
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          :clearable="false"
+          style="width: 100%"
+          @change="load"
+        />
+      </el-col>
+    </el-row>
     <el-row :gutter="12">
       <el-col v-for="item in cards" :key="item.key" :xs="12" :sm="8" :md="4">
         <el-card shadow="never">
@@ -174,7 +206,7 @@ onUnmounted(() => {
       <el-col :xs="24" :md="6">
         <el-card shadow="never" class="cs-card">
           <template #header><span>服务漏斗</span></template>
-          <div v-if="overallRows.length" ref="funnelEl" class="chart"></div>
+          <div v-if="funnel.sessions > 0" ref="funnelEl" class="chart"></div>
           <el-empty v-else description="暂无漏斗数据" :image-size="60" />
         </el-card>
       </el-col>
@@ -207,6 +239,7 @@ onUnmounted(() => {
 
 <style scoped>
 .cs-page { padding: 12px; }
+.cs-filter { margin-bottom: 12px; }
 .cs-row { margin-top: 12px; }
 .cs-card { margin-top: 12px; }
 .cs-row .cs-card { margin-top: 0; }

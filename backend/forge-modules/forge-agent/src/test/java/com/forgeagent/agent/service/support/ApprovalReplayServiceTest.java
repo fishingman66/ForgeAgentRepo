@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
@@ -85,14 +86,34 @@ class ApprovalReplayServiceTest {
         AgentInfo agent = new AgentInfo();
         agent.setWorkspaceId(200L);
         when(agentConfigCache.getAgentById(100L)).thenReturn(agent);
-        String sqlDef = MAPPER.writeValueAsString(new ToolAssembler.ToolDef(
-            1L, "sql_tool", "", "sql", 9L, null, null, null, null,
+        // MCP 需建连且服务端会话态不可恢复,仍在白名单外;sql 已纳入 A 档(见下)
+        String mcpDef = MAPPER.writeValueAsString(new ToolAssembler.ToolDef(
+            1L, "mcp_tool", "", "mcp", 9L, null, null, null, null,
             null, null, null, null, "ask_async", 120));
 
-        var r = service.replay(approval(sqlDef, 1L));
+        var r = service.replay(approval(mcpDef, 1L));
 
         assertFalse(r.attempted());
         assertTrue(r.message().contains("不在 A 档"));
+    }
+
+    @Test
+    void sqlToolDefNowInATierAttemptsRebuild() throws Exception {
+        // sql 纳入 A 档:不再被白名单拒绝,而是走到 buildForWorkflow 重建(数据源由
+        // SqlToolProvider 按 ToolDef.datasourceId 反查,装配失败/执行异常即返回失败结果)。
+        AgentInfo agent = new AgentInfo();
+        agent.setWorkspaceId(200L);
+        when(agentConfigCache.getAgentById(100L)).thenReturn(agent);
+        String sqlDef = MAPPER.writeValueAsString(new ToolAssembler.ToolDef(
+            1L, "sql_tool", "", "sql", 9L, null, null, null, null,
+            null, null, null, null, "ask_async", 120));
+        when(toolAssembler.buildForWorkflow(any())).thenThrow(new IllegalStateException("装配失败"));
+
+        var r = service.replay(approval(sqlDef, 1L));
+
+        assertTrue(r.attempted(), "sql 应进入重建路径而非被白名单拒绝");
+        assertFalse(r.success());
+        assertTrue(r.message().contains("装配失败"));
     }
 
     @Test

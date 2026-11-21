@@ -62,6 +62,43 @@ public class PromptTemplateService {
         return MAPPER.convertValue(t, com.forgeagent.agent.domain.vo.AgentPromptTemplateVo.class);
     }
 
+    /**
+     * B4:按模板名取<b>已发布</b>模板的生效文本(优先工作空间自有,其次平台共享 workspace_id=0)。
+     *
+     * <p>取值顺序:设了稳定版则取稳定版本内容,否则取模板当前 content(草稿态内容不参与——
+     * 调用方约定按已发布语义消费)。找不到或不发布时返回 null,<b>不抛异常</b>:
+     * 调用方(RCA 等)以内置兜底提示词为准,模板是可选覆盖。</p>
+     *
+     * <p>不做变量渲染:本入口面向纯文本系统提示词(无 {{var}} 占位),需要变量渲染走
+     * {@link #compileForAgent} / {@link #preview}。</p>
+     */
+    public String compileByCode(Long workspaceId, String name) {
+        if (StringUtils.isBlank(name)) {
+            return null;
+        }
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentPromptTemplate> qw =
+            Wrappers.lambdaQuery(AgentPromptTemplate.class)
+                .eq(AgentPromptTemplate::getName, name.trim())
+                .in(AgentPromptTemplate::getWorkspaceId,
+                    workspaceId == null ? List.of(0L) : List.of(workspaceId, 0L))
+                .eq(AgentPromptTemplate::getStatus, "published")
+                .orderByDesc(AgentPromptTemplate::getWorkspaceId)
+                .last("limit 2");
+        List<AgentPromptTemplate> rows = templateMapper.selectList(qw);
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        // orderByDesc(workspaceId) 后首选行即工作空间自有(ws>0),无自有时才是共享行
+        AgentPromptTemplate chosen = rows.get(0);
+        if (chosen.getStableVersionId() != null) {
+            AgentPromptVersion version = versionMapper.selectById(chosen.getStableVersionId());
+            if (version != null && StringUtils.isNotBlank(version.getContent())) {
+                return version.getContent();
+            }
+        }
+        return StringUtils.isBlank(chosen.getContent()) ? null : chosen.getContent();
+    }
+
     public Long saveTemplate(com.forgeagent.agent.domain.bo.PromptTemplateSaveBo body) {
         Long id = body.getId();
         String name = StringUtils.defaultIfBlank(body.getName(), "未命名模板");
