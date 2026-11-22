@@ -22,8 +22,13 @@ import com.forgeagent.common.core.utils.StringUtils;
  * 断言产物类型与路由分支正确性;端到端连通性才需要真实 Key。</p>
  *
  * <p>依赖边界:agentscope 2.0.5 的 all-in-one jar 已打入 Anthropic/Gemini 扩展类,但其官方 SDK
- * 未被传递引入,故 forge-agent-core 显式声明 com.anthropic:anthropic-java:2.52.0 与
- * com.google.genai:google-genai:1.45.0——取框架扩展模块编译时的同款版本(兼容优先于追新)。
+ * 未被传递引入,故 forge-agent-core 显式声明 com.anthropic:anthropic-java:2.75.0 与
+ * com.google.genai:google-genai:2.5.0。</p>
+ *
+ * <p><b>版本上限(实测)</b>:anthropic-java 3.x 全系删除了框架 formatter 依赖的
+ * {@code MessageParam$Builder}/{@code $Content}/{@code builder()}/{@code temperature/topK/topP},
+ * 升级后构造能过、真实 generate 会抛 {@code NoSuchMethodError},故锁 2.x 最高版 2.75.0;
+ * google-genai 2.5.0 经框架引用的 101 处成员精确匹配 + 运行时探针验证通过。
  * build 内的 NoClassDefFoundError 守护仅作部署裁剪兜底,正常环境不会触发。</p>
  *
  * @author ForgeAgent

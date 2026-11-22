@@ -66,7 +66,9 @@
         <mica-mqtt.version>2.6.15</mica-mqtt.version>
         <!-- Agent 运行内核 -->
         <agentscope.version>2.0.5</agentscope.version>
-        <!-- 原生协议官方 SDK:版本取框架 2.0.5 扩展模块编译时的同款版本(兼容优先于追新) -->
+        <!-- 原生协议官方 SDK(运行时兼容性探针验证的上限版本):
+             anthropic-java 3.x 删除了框架 formatter 依赖的旧 API,真实调用会 NoSuchMethodError,
+             故锁 2.x 最高版 2.75.0;google-genai 2.5.0 已验证框架引用的 101 处成员全兼容。 -->
         <anthropic-java.version>2.75.0</anthropic-java.version>
         <google-genai.version>2.5.0</google-genai.version>
         <!-- 向量库：Milvus 3.0.x(compose v3.0.6 / 本地 milvus-lite 3.2.x 同代) -->

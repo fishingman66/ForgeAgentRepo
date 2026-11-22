@@ -14,12 +14,15 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 临时探针(验证完即删):调用框架 formatter 的真实转换路径。
- * 构造成功不代表运行期链接成立——formatter 会调更深层的 SDK 类型,
- * 若新版 SDK 删了这些类/方法,这里必然抛 NoClassDefFoundError / NoSuchMethodError。
+ * SDK 与 agentscope 框架扩展类的二进制兼容性回归。
+ *
+ * <p>构造成功不代表运行期链接成立——formatter 的真实转换路径会调用更深层 SDK 类型。
+ * 实测 anthropic-java 3.x 删除了 MessageParam$Builder/builder()/temperature 等,
+ * 构造能过但这里会抛 NoSuchMethodError。保留本测试以锁住版本边界,
+ * 未来升级 SDK 或框架时能第一时间发现不兼容。</p>
  */
 @Tag("dev")
-class TmpRuntimeLinkProbeTest {
+class AgentScopeSdkCompatibilityTest {
 
     private static Msg userMsg() {
         return Msg.builder().role(MsgRole.USER).textContent("hello").build();
