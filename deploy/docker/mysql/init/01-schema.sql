@@ -1981,6 +1981,7 @@ CREATE TABLE IF NOT EXISTS `agent_cs_channel` (
   `widget_welcome` VARCHAR(200) NULL COMMENT 'A2:开场主动消息,空不展示',
   `widget_config` TEXT NULL COMMENT 'A2:挂件扩展配置 JSON(logo/position/size 等)',
   `widget_lang` VARCHAR(10) DEFAULT 'zh_CN' COMMENT 'D2:挂件默认语言 zh_CN/en_US,访客可用 ?lang= 覆盖',
+  `business_hours_json` TEXT NULL COMMENT 'A-1:营业时间配置 JSON({"enabled":true,"timezone":"Asia/Shanghai","days":{"MON":[["09:00","18:00"]],...}}),空/NULL=24h 全天',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csc_code` (`channel_code`),
   KEY `idx_csc_ws` (`workspace_id`, `status`)
@@ -2170,6 +2171,7 @@ CREATE TABLE IF NOT EXISTS `agent_cs_message_receipt` (
   `acceptance` VARCHAR(16) NOT NULL COMMENT 'ACCEPTED/REJECTED/UNKNOWN',
   `run_id` VARCHAR(64) NULL,
   `reply_content` TEXT NULL COMMENT '本轮回复快照,重发时原样返回',
+  `raw_message_id` VARCHAR(255) NULL COMMENT 'A-3:原始RFC Message-ID,人工回信填In-Reply-To/References',
   `create_time` DATETIME NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_csr_dedup` (`session_id`, `client_msg_id`)
@@ -2385,6 +2387,7 @@ CREATE TABLE IF NOT EXISTS `agent_cs_ticket_event` (
   `actor_type` VARCHAR(16) NOT NULL COMMENT 'VISITOR/SEAT/BOT/SYSTEM',
   `actor_id` VARCHAR(64) NULL,
   `target_user_id` BIGINT NULL COMMENT 'A3 @提及的目标坐席用户ID;非MENTION事件为NULL',
+  `read_flag` TINYINT NOT NULL DEFAULT 0 COMMENT 'A-5:@提及已读标记 0未读/1已读',
   `note` VARCHAR(1000) NULL,
   `trace_id` VARCHAR(64) NULL,
   `create_time` DATETIME NULL,

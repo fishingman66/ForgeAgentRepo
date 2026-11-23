@@ -439,6 +439,19 @@ agent:
       #     - '^(-y|--yes)$'
       #     - '^@[a-z0-9-]+(/[a-z0-9-]+)?$'
       #     - '^[a-z0-9@/._-]+$'
+      #
+      # working-directory 等价方案(纯部署配置,零 Java 改动):
+      #   1) deploy/docker/mcp/mcp-stdio-wrapper.sh 已只读挂到 /opt/forge/mcp/
+      #   2) MCP 记录:command=/opt/forge/mcp/mcp-stdio-wrapper.sh
+      #               args=["/opt/forge/mcp/tools/<工具脚本>"]
+      #               env={"MCP_WORKDIR":"/opt/forge/work"}
+      #   3) 必须给 wrapper 的 basename 单独配严格 argsPatterns —— commandName 变成
+      #      wrapper 后,原 node/npx 的 argsPatterns 与解释器内联码闸都不再生效:
+      # allowed-commands: ['/opt/forge/mcp/mcp-stdio-wrapper.sh']
+      # args-patterns:
+      #   mcp-stdio-wrapper.sh:
+      #     - '^/opt/forge/mcp/tools/[A-Za-z0-9_.-]+$'
+      #   (不要放行 sh/node/python,否则 -e/--eval 跳过解释器闸后失去参数约束)
   runtime:
     # D4:MCP SSRF 守护默认开启(拒绝未放行的内网/链路本地/组播地址,防御云元数据探测面)。
     # 内网 MCP 由白名单放行(默认含回环与 RFC1918/ULA);链路本地 169.254(云元数据)与 CGNAT 100.64 默认不放行。

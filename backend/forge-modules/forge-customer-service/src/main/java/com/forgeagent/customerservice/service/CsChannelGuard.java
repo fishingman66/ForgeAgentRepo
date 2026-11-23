@@ -117,7 +117,12 @@ public class CsChannelGuard {
         throw new ServiceException("请求来源不在白名单内");
     }
 
-    private long increment(String key, Duration ttl) {
+    /**
+     * A-4:计数方法对测试可见——Redis 客户端是静态 Bean,纯单测必须能 spy 隔离,
+     * 才能在不连 Redis 的情况下驱动真实 checkNonce 去重判定。
+     * 这是内部计数入口,不参与任何权限判定,开放可见性不改变安全语义。
+     */
+    public long increment(String key, Duration ttl) {
         try {
             RAtomicLong counter = RedisUtils.getClient().getAtomicLong(REDIS_PREFIX + key);
             long value = counter.incrementAndGet();

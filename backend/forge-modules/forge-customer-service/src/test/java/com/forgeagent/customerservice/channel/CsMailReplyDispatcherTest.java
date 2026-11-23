@@ -5,13 +5,16 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.forgeagent.customerservice.compliance.CsSecretCipher;
 import com.forgeagent.customerservice.config.CsModuleProperties;
 import com.forgeagent.customerservice.domain.CsChannel;
+import com.forgeagent.customerservice.domain.CsMessageReceipt;
 import com.forgeagent.customerservice.domain.CsTicket;
 import com.forgeagent.customerservice.domain.CsVisitor;
 import com.forgeagent.customerservice.mapper.CsChannelMapper;
+import com.forgeagent.customerservice.mapper.CsMessageReceiptMapper;
 import com.forgeagent.customerservice.mapper.CsVisitorMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +39,7 @@ class CsMailReplyDispatcherTest {
     @Mock private CsChannelMapper channelMapper;
     @Mock private CsVisitorMapper visitorMapper;
     @Mock private MailTransport mailTransport;
+    @Mock private CsMessageReceiptMapper receiptMapper;
 
     private CsMailReplyDispatcher dispatcher;
 
@@ -44,19 +48,21 @@ class CsMailReplyDispatcherTest {
         MapperBuilderAssistant a = new MapperBuilderAssistant(new MybatisConfiguration(), "");
         TableInfoHelper.initTableInfo(a, CsChannel.class);
         TableInfoHelper.initTableInfo(a, CsVisitor.class);
+        TableInfoHelper.initTableInfo(a, CsMessageReceipt.class);
     }
 
     @BeforeEach
     void setUp() {
         // 真实 cipher:非 ENC: 前缀的存量明文原样返回,不需 key
         dispatcher = new CsMailReplyDispatcher(channelMapper, visitorMapper, mailTransport,
-            new CsSecretCipher(new CsModuleProperties()));
+            new CsSecretCipher(new CsModuleProperties()), receiptMapper);
     }
 
     private static CsTicket ticket() {
         CsTicket t = new CsTicket();
         t.setId(88L); t.setTicketNo("T-88"); t.setWorkspaceId(5L);
         t.setChannelCode("mail-main"); t.setVisitorId(99L);
+        t.setSessionId(123L); // A-3:回执按 sessionId 查询,夹具必须有值
         return t;
     }
 
@@ -134,7 +140,50 @@ class CsMailReplyDispatcherTest {
         verify(mailTransport).send(cfgCap.capture(), cap.capture(), eq("客户你好,已处理"));
         assertEquals("client@example.com", cap.getValue().from(), "收件人应去空格");
         assertTrue(cap.getValue().subject().contains("T-88"), "主题应带工单号");
-        assertNull(cap.getValue().messageId(), "人工回信无原始 Message-ID,线程头留空是诚实边界");
+        assertNull(cap.getValue().messageId(), "老数据无原始 Message-ID 时应退化为按地址回信");
+    }
+
+    @Test
+    @DisplayName("A-3:回执带原始 Message-ID 时人工回信回填线程头")
+    void threadsReplyToOriginalMessageId() {
+        when(channelMapper.selectOne(any())).thenReturn(channel("email", "0", config(true)));
+        CsVisitor v = new CsVisitor(); v.setExternalUserId("client@example.com");
+        when(visitorMapper.selectById(99L)).thenReturn(v);
+        CsMessageReceipt receipt = new CsMessageReceipt();
+        receipt.setRawMessageId("<orig-2026@example.com>");
+        when(receiptMapper.selectOne(any())).thenReturn(receipt);
+
+        dispatcher.sendReply(ticket(), "客户你好,已处理");
+
+        ArgumentCaptor<MailTransport.RawMail> cap = ArgumentCaptor.forClass(MailTransport.RawMail.class);
+        verify(mailTransport).send(any(), cap.capture(), eq("客户你好,已处理"));
+        assertEquals("<orig-2026@example.com>", cap.getValue().messageId());
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CsMessageReceipt>> qCap =
+            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(receiptMapper).selectOne(qCap.capture());
+        String sql = qCap.getValue().getSqlSegment();
+        assertTrue(sql.contains("session_id"), sql);
+        assertTrue(sql.contains("raw_message_id"), sql);
+    }
+
+    @Test
+    @DisplayName("A-3:agentSessionId 未分配时用 -conversationId 口径查回执")
+    void fallsBackToNegativeConversationId() {
+        when(channelMapper.selectOne(any())).thenReturn(channel("email", "0", config(true)));
+        CsVisitor v = new CsVisitor(); v.setExternalUserId("client@example.com");
+        when(visitorMapper.selectById(99L)).thenReturn(v);
+        CsTicket t = ticket(); t.setSessionId(null); t.setConversationId(321L);
+
+        dispatcher.sendReply(t, "客户你好");
+
+        ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CsMessageReceipt>> qCap =
+            ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper.class);
+        verify(receiptMapper).selectOne(qCap.capture());
+        // MP 把值参数化为 MPGENVAL1,getSqlSegment 里看不到字面 -321;且参数映射由 getSqlSegment 触发填充
+        String sql = qCap.getValue().getSqlSegment();
+        assertTrue(sql.contains("session_id"), sql);
+        assertTrue(qCap.getValue().getParamNameValuePairs().containsValue(-321L),
+            String.valueOf(qCap.getValue().getParamNameValuePairs()));
     }
 
     @Test

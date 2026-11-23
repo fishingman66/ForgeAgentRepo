@@ -18,6 +18,7 @@ import {
   listInvestigations,
   listMentions,
   listTickets,
+  markMentionsRead,
   transferTicket,
   transitionTicket
 } from '@/api/customerservice';
@@ -33,7 +34,10 @@ const events = ref<CsTicketEvent[]>([]);
 const statusFilter = ref('');
 const loading = ref(false);
 
-/* A3 @提及提醒:游标增量拉取,只提示新事件;失败下一轮重试,不推进游标。 */
+/* A3 + A-5 @提及提醒:增量游标 + 服务端已读双保险。
+ * 首轮只静默对齐(历史不弹),但必须先把这些 ID 标已读再推进游标——
+ * 否则后端 read_flag 过滤后它们再也不会返回,跨端状态会不一致。
+ * 失败一律不推进游标,下一轮重新拉到未读再试。 */
 let mentionCursor = 0;
 let mentionPrimed = false;
 let mentionTimer: ReturnType<typeof setInterval> | null = null;
@@ -41,8 +45,13 @@ const pollMentions = async () => {
   try {
     const res = await listMentions(mentionCursor);
     const rows = res.data ?? [];
+    if (rows.length === 0) {
+      mentionPrimed = true;
+      return;
+    }
+    const ids = rows.map((m) => m.id);
+    await markMentionsRead(ids);
     if (!mentionPrimed) {
-      // 首次只对齐游标,不把历史提及一次性弹出来
       mentionPrimed = true;
       for (const m of rows) {
         mentionCursor = Math.max(mentionCursor, m.id);
@@ -62,7 +71,7 @@ const pollMentions = async () => {
       }
     }
   } catch {
-    // 下一轮重试;游标未推进不丢提醒
+    // 下一轮重试;已读标记与游标都未提交,不会丢提醒
   }
 };
 
@@ -355,7 +364,12 @@ onMounted(() => {
               :title="summary.oneLineSummary"
             >
               <div v-if="summary.userIntent" class="cs-summary-line">意图：{{ summary.userIntent }}</div>
-              <div class="cs-summary-line">情绪：{{ summary.emotion }}</div>
+              <div class="cs-summary-line">
+                情绪：{{ summary.emotion }}
+                <span v-if="summary.sentimentStreak && summary.sentimentStreak > 0" class="cs-emotion-trend">
+                  （负面连续 {{ summary.sentimentStreak }} 轮）
+                </span>
+              </div>
               <div v-if="summary.triedSolutions?.length" class="cs-summary-line">
                 已尝试：{{ summary.triedSolutions.join('；') }}
               </div>
@@ -566,4 +580,5 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.7;
 }
+.cs-emotion-trend { color: var(--el-color-danger); font-size: 12px; }
 </style>

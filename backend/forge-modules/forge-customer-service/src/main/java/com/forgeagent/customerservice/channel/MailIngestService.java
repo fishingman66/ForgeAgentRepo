@@ -57,7 +57,8 @@ public class MailIngestService {
                     continue;
                 }
                 String content = StringUtils.isBlank(mail.text()) ? "(空邮件正文)" : mail.text();
-                CsInboundMessage inbound = new CsInboundMessage(key, visitor, content, "email", cfg.imapUser());
+                CsInboundMessage inbound = new CsInboundMessage(key, visitor, content, "email",
+                    cfg.imapUser(), normalizeRawMessageId(mail.messageId()));
                 String reply = dispatch.handle(channel, inbound);
                 if (cfg.replyEnabled() && StringUtils.isNotBlank(reply)) {
                     mailTransport.send(cfg, mail, reply);
@@ -101,6 +102,15 @@ public class MailIngestService {
         } catch (Exception e) {
             return "em:" + Integer.toHexString(basis.hashCode());
         }
+    }
+
+    /** 原始 RFC Message-ID 透传值;空值退化为 null,超长截断到 raw_message_id 列宽(255)。 */
+    static String normalizeRawMessageId(String raw) {
+        if (StringUtils.isBlank(raw)) {
+            return null;
+        }
+        String value = raw.trim();
+        return value.length() > 255 ? value.substring(0, 255) : value;
     }
 
     /**

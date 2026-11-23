@@ -28,6 +28,12 @@ public class CsSummaryVo implements Serializable {
     /** 用户情绪 */
     private String emotion;
 
+    /** A-2:会话最新情绪分 [-1,1],与呼叫中心 SentimentAnalyzer 同口径;无信号为 0。 */
+    private Double sentimentScore;
+
+    /** A-2:负面情绪连续轮数(趋势维度),与转人工 SENTIMENT 规则同源。 */
+    private Integer sentimentStreak;
+
     /** 已尝试方案 */
     private List<String> triedSolutions;
 

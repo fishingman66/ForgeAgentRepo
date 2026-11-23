@@ -252,6 +252,11 @@ onMounted(load);
             <el-option label="每条消息独立会话" value="per_message" />
           </el-select>
         </el-form-item>
+        <el-form-item label="营业时间">
+          <el-input v-model="form.businessHoursJson" type="textarea" :rows="3"
+            placeholder='留空=24小时；示例 {"enabled":true,"timezone":"Asia/Shanghai","days":{"MON":[["09:00","18:00"]]}}' />
+          <div class="cs-tip">A-1：非营业时间或无在线坐席时，转人工改为留言回执，不建工单。days 键用 MON~SUN，区间左闭右开。</div>
+        </el-form-item>
         <el-form-item label="回调验签密钥"><el-input v-model="form.channelSecret" placeholder="公众号/企微回调 token" /></el-form-item>
         <template v-if="form.channelType === 'wecom'">
           <el-form-item label="EncodingAESKey">

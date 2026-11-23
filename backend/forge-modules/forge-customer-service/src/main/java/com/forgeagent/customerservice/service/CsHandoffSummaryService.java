@@ -91,12 +91,17 @@ public class CsHandoffSummaryService {
             .filter(value -> value != null && !value.isBlank()).findFirst().orElse(null);
         String opening = firstItemContent(recent);
         List<String> pending = pendingQuestions(conv);
-        String emotion = judgeEmotion(texts);
+        // A-2:情绪口径统一——优先消费 CsTurnSignalService 每轮写入会话的 SPI 信号,
+        // 与转人工 SENTIMENT 规则及呼叫中心 CsCallInsight 同源;无信号时回退原中文词表。
+        String emotion = emotionFromSignals(conv, texts);
 
         com.forgeagent.customerservice.domain.vo.CsSummaryVo summary = new com.forgeagent.customerservice.domain.vo.CsSummaryVo();
         summary.setOneLineSummary(oneLine(intent, emotion, texts.size(), pending.size()));
         summary.setUserIntent(intent);
         summary.setEmotion(emotion);
+        java.math.BigDecimal score = conv.getLastSentimentScore();
+        summary.setSentimentScore(score == null ? 0.0 : score.doubleValue());
+        summary.setSentimentStreak(conv.getSentimentStreak() == null ? 0 : conv.getSentimentStreak());
         summary.setTriedSolutions(triedSolutions(recent, pending));
         summary.setPendingIssues(pending);
         summary.setSuggestedNextStep(nextStep(intent, pending));
@@ -123,6 +128,25 @@ public class CsHandoffSummaryService {
             log.warn("[CS] 交接摘要解析失败 ticketId={}: {}", ticketId, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * A-2:统一情绪口径。会话有 SPI 信号时按分值映射中文展示(NEGATIVE→不满/愤怒按连击,
+     * NEUTRAL→平静,POSITIVE→满意);无信号回退原词表判定,保证老会话与单测行为不变。
+     */
+    public static String emotionFromSignals(CsConversation conv, List<String> texts) {
+        if (conv != null && conv.getLastSentimentScore() != null) {
+            double score = conv.getLastSentimentScore().doubleValue();
+            int streak = conv.getSentimentStreak() == null ? 0 : conv.getSentimentStreak();
+            if (score <= -0.2) {
+                return streak >= 2 ? "愤怒" : "不满";
+            }
+            if (score >= 0.2) {
+                return "满意";
+            }
+            return "平静";
+        }
+        return judgeEmotion(texts);
     }
 
     /** 情绪判定(纯函数):负向命中多判愤怒,单次判不满,其余按平静。 */

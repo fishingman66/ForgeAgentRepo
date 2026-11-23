@@ -106,6 +106,7 @@ class CsTicketNoteTest {
         assertEquals("MENTION", mention.getEventType());
         assertEquals(7L, mention.getTargetUserId());
         assertEquals("42", mention.getActorId());
+        assertEquals(Boolean.FALSE, mention.getReadFlag(), "A-5:新提及必须显式未读,不靠 DDL 默认值时序");
         // 提及自己不再生成第二条 MENTION
         assertEquals(1, cap.getAllValues().stream().filter(e -> "MENTION".equals(e.getEventType())).count());
     }

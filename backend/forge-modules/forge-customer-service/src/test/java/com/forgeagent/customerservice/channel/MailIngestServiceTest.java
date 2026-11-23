@@ -15,6 +15,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -83,7 +84,18 @@ class MailIngestServiceTest {
         assertEquals("email", inbound.msgType());
         assertTrue(inbound.msgId().startsWith("em:"), "幂等键应有前缀");
         assertEquals(35, inbound.msgId().length(), "幂等键必须定长(client_msg_id 仅 64)");
+        assertEquals("<abc@mail>", inbound.rawMessageId(), "A-3:原始 Message-ID 必须透传");
         verify(transport).send(any(), any(), eq("已发货"));
+    }
+
+    @Test
+    @DisplayName("A-3:无原始 Message-ID 时透传 null,超过列宽时截断")
+    void rawMessageIdNormalized() {
+        assertNull(MailIngestService.normalizeRawMessageId(null));
+        assertNull(MailIngestService.normalizeRawMessageId("   "));
+        assertEquals("<a@b>", MailIngestService.normalizeRawMessageId("  <a@b>  "));
+        String longId = "x".repeat(300);
+        assertEquals(255, MailIngestService.normalizeRawMessageId(longId).length());
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.forgeagent.customerservice.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.forgeagent.agent.api.customerservice.CsChatFacade;
 import com.forgeagent.agent.api.customerservice.CsKnowledgeGateway;
@@ -92,6 +94,13 @@ public class CsVisitorService {
     /** M4 后续:检索扩展效果指标。 */
     private final CsKgExpandMetricService kgExpandMetricService;
 
+    /**
+     * A-1:转人工可行性闸门。非 final 字段注入(required=false),组件缺失或单测未打桩时
+     * 视为「可用」放行,保证存量行为与既有 @InjectMocks 测试零变更。
+     */
+    @Autowired(required = false)
+    private CsSeatAvailabilityService seatAvailabilityService;
+
     /** 建立或复用活跃会话;返回 conversationId / visitorToken / reused。 */
     public com.forgeagent.customerservice.domain.vo.CsSendResultVo createSession(CsChannel channel, String externalUserId) {
         return createSession(channel, externalUserId, null, null);
@@ -170,9 +179,17 @@ public class CsVisitorService {
         return send(channel, conversationId, visitorId, clientMsgId, content, List.of());
     }
 
-    /** 发消息:幂等受理 → PII 脱敏 → 知识检索 → 机器人回答 / 多语种兜底转人工。 */
+    /** 兼容入口:不含原始 Message-ID 的渠道(公众号/企微/HTTP)走这条。 */
     public com.forgeagent.customerservice.domain.vo.CsSendResultVo send(CsChannel channel, Long conversationId, Long visitorId,
                                     String clientMsgId, String content, List<Long> attachmentIds) {
+        return send(channel, conversationId, visitorId, clientMsgId, content, attachmentIds, null);
+    }
+
+    /** 发消息:幂等受理 → PII 脱敏 → 知识检索 → 机器人回答 / 多语种兜底转人工。
+     *  A-3:rawMessageId 仅邮件渠道有值,随回执落库供人工回信归并线程。 */
+    public com.forgeagent.customerservice.domain.vo.CsSendResultVo send(CsChannel channel, Long conversationId, Long visitorId,
+                                    String clientMsgId, String content, List<Long> attachmentIds,
+                                    String rawMessageId) {
         boolean hasAttachment = attachmentIds != null && !attachmentIds.isEmpty();
         if ((content == null || content.isBlank()) && !hasAttachment) {
             throw new ServiceException("消息内容不能为空");
@@ -204,7 +221,7 @@ public class CsVisitorService {
 
         // P2 收尾:纯附件消息——附件不进模型上下文,AI 看不到图,直接转人工由坐席看图
         if (content.isBlank() && hasAttachment) {
-            return attachmentOnlyReply(channel, conv, dedupKey, clientMsgId, attachmentIds.size());
+            return attachmentOnlyReply(channel, conv, dedupKey, clientMsgId, attachmentIds.size(), rawMessageId);
         }
 
         // P3:新会话首条消息确定接待 Agent——即使这条走的是 FAQ 或兜底,后续也用同一个 Agent
@@ -213,7 +230,7 @@ public class CsVisitorService {
         // P0:敏感词入站——BLOCK 不送检索与模型,直接转人工;MASK 打码后继续
         CsSensitiveWordService.Hit inboundHit = sensitiveWordService.check(channel.getWorkspaceId(), content);
         if (inboundHit.blocked()) {
-            return sensitiveBlock(channel, conv, dedupKey, clientMsgId, content, inboundHit.words());
+            return sensitiveBlock(channel, conv, dedupKey, clientMsgId, content, inboundHit.words(), rawMessageId);
         }
         if (inboundHit.masked()) {
             content = sensitiveWordService.mask(content, inboundHit.words());
@@ -228,14 +245,23 @@ public class CsVisitorService {
         CsHandoffRuleEngine.HandoffDecision decision = CsHandoffRuleEngine.evaluate(
             content, channel.getHandoffRules(), handoffKeywords(channel), signals);
         if (decision.hit()) {
+            // A-1:规则命中只决定「要不要转」,这里再判「能不能转」。
+            // 非营业时间/无在线坐席/全员满载时不建工单,改为留言回执,避免工单进无人队列悬挂。
+            if (seatAvailabilityService != null) {
+                CsSeatAvailabilityService.Availability availability = seatAvailabilityService.evaluate(channel);
+                if (!availability.transferable()) {
+                    return noAgentAvailableReply(channel, conv, dedupKey, clientMsgId, content,
+                        decision.ruleType(), availability.reason(), rawMessageId);
+                }
+            }
             return keywordHandoff(channel, conv, dedupKey, clientMsgId, content,
-                decision.ruleType(), decision.reason());
+                decision.ruleType(), decision.reason(), rawMessageId);
         }
 
         // P2:配额——空间当日 token 超限时拒绝并转人工(转人工不再消耗模型)
         CsQuotaService.Decision quota = quotaService.check(channel.getWorkspaceId());
         if (quota.blocked()) {
-            return quotaBlocked(channel, conv, dedupKey, clientMsgId);
+            return quotaBlocked(channel, conv, dedupKey, clientMsgId, rawMessageId);
         }
 
         // P1:槽位收集(默认关闭)——命中表单时先收信息,收齐后转人工,不跑检索与模型
@@ -243,7 +269,7 @@ public class CsVisitorService {
             CsSlotFillingService.SlotOutcome outcome = slotFillingService.advance(
                 conv.getId(), channel.getWorkspaceId(), content);
             if (outcome != null) {
-                return slotReply(channel, conv, dedupKey, clientMsgId, content, outcome);
+                return slotReply(channel, conv, dedupKey, clientMsgId, content, outcome, rawMessageId);
             }
         }
 
@@ -335,7 +361,7 @@ public class CsVisitorService {
             semanticCacheService.store(channel.getWorkspaceId(), channel.getChannelCode(), content, reply);
         }
 
-        saveReceipt(dedupKey, clientMsgId, messageId, reply);
+        saveReceipt(dedupKey, clientMsgId, messageId, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), conv.getTicketId(),
@@ -364,12 +390,47 @@ public class CsVisitorService {
      * 规则触发的转人工(P0 差距 4.1 / B2 规则引擎):建单 + 回转接文案 + 推终态事件 + 发布 A1 推荐事件。
      * 与正常路径共用幂等回执与事件格式,前端不需要区分两条分支;reason 记录命中规则便于归因。
      */
+    /**
+     * A-1:规则要求转人工但当前无法转接时的留言回执。
+     * 不建工单、不标 handoff(ticketId=null),避免访客进入无人队列;
+     * 触发原因与不可转原因分别落 message 与事件,便于运营归因。
+     */
+    private com.forgeagent.customerservice.domain.vo.CsSendResultVo noAgentAvailableReply(
+        CsChannel channel, CsConversation conv, long dedupKey, String clientMsgId, String content,
+        String handoffBy, String reason, String rawMessageId) {
+        String reply = "当前" + reason + "，我们已收到你的问题，会尽快回复，请留下联系方式。";
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
+        conv.setLastVisitorAt(new Date());
+        conversationMapper.updateById(conv);
+        transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), null,
+            Map.of("content", reply, "clientMsgId", clientMsgId, "fallback", false,
+                "faqHit", false, "handoff", false, "noAgentAvailable", true)));
+        complianceService.record("NO_AGENT_AVAILABLE", "SYSTEM", null, channel.getWorkspaceId(),
+            channel.getChannelCode(), handoffBy + ":" + reason);
+
+        com.forgeagent.customerservice.domain.vo.CsSendResultVo result =
+            new com.forgeagent.customerservice.domain.vo.CsSendResultVo();
+        result.setReused(false);
+        result.setConversationId(conv.getId());
+        result.setSessionId(conv.getAgentSessionId());
+        result.setClientMsgId(clientMsgId);
+        result.setMessageId(null);
+        result.setContent(reply);
+        result.setFallback(false);
+        result.setFaqHit(false);
+        result.setHandoff(false);
+        result.setHandoffBy(handoffBy);
+        result.setTicketId(null);
+        result.setMessage(reason);
+        return result;
+    }
+
     private com.forgeagent.customerservice.domain.vo.CsSendResultVo keywordHandoff(CsChannel channel, CsConversation conv,
                                                long dedupKey, String clientMsgId, String content,
-                                               String handoffBy, String reason) {
+                                               String handoffBy, String reason, String rawMessageId) {
         CsTicket ticket = ticketService.requestHandoff(conv, reason);
         String reply = "正在为你转接人工客服，请稍候。";
-        saveReceipt(dedupKey, clientMsgId, null, reply);
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), ticket.getId(),
@@ -434,10 +495,10 @@ public class CsVisitorService {
      * <p>不发布 A1 推荐事件——没有文字内容可推荐。</p>
      */
     private com.forgeagent.customerservice.domain.vo.CsSendResultVo attachmentOnlyReply(CsChannel channel, CsConversation conv,
-                                                    long dedupKey, String clientMsgId, int count) {
+                                                    long dedupKey, String clientMsgId, int count, String rawMessageId) {
         CsTicket ticket = ticketService.requestHandoff(conv, "attachment_only");
         String reply = "已收到你上传的 " + count + " 个文件，正在为你转接人工客服处理。";
-        saveReceipt(dedupKey, clientMsgId, null, reply);
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), ticket.getId(),
@@ -468,10 +529,10 @@ public class CsVisitorService {
      * <p>不在这里预生成回复、也不走检索——配额的意义就是省钱,任何模型侧动作都违背目的。</p>
      */
     private com.forgeagent.customerservice.domain.vo.CsSendResultVo quotaBlocked(CsChannel channel, CsConversation conv,
-                                             long dedupKey, String clientMsgId) {
+                                             long dedupKey, String clientMsgId, String rawMessageId) {
         CsTicket ticket = ticketService.requestHandoff(conv, "quota_exceeded");
         String reply = "今日咨询量较大，已为你转接人工客服，请稍候。";
-        saveReceipt(dedupKey, clientMsgId, null, reply);
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), ticket.getId(),
@@ -506,12 +567,12 @@ public class CsVisitorService {
      */
     private com.forgeagent.customerservice.domain.vo.CsSendResultVo slotReply(CsChannel channel, CsConversation conv, long dedupKey,
                                           String clientMsgId, String content,
-                                          CsSlotFillingService.SlotOutcome outcome) {
+                                          CsSlotFillingService.SlotOutcome outcome, String rawMessageId) {
         String reply = outcome.prompt();
         if (outcome.done()) {
             ticketService.requestHandoff(conv, "slot_filled:" + outcome.formName());
         }
-        saveReceipt(dedupKey, clientMsgId, null, reply);
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), conv.getTicketId(),
@@ -548,10 +609,10 @@ public class CsVisitorService {
      */
     private com.forgeagent.customerservice.domain.vo.CsSendResultVo sensitiveBlock(CsChannel channel, CsConversation conv,
                                                long dedupKey, String clientMsgId,
-                                               String content, List<String> words) {
+                                               String content, List<String> words, String rawMessageId) {
         CsTicket ticket = ticketService.requestHandoff(conv, "sensitive_word");
         String reply = "你的消息包含不适宜内容，已为你转接人工客服。";
-        saveReceipt(dedupKey, clientMsgId, null, reply);
+        saveReceipt(dedupKey, clientMsgId, null, reply, rawMessageId);
         conv.setLastVisitorAt(new Date());
         conversationMapper.updateById(conv);
         transport.push(CsEventEnvelope.of(CsEventEnvelope.CHAT_DONE, conv.getId(), ticket.getId(),
@@ -647,12 +708,19 @@ public class CsVisitorService {
     }
 
     public void saveReceipt(long dedupKey, String clientMsgId, Long messageId, String reply) {
+        saveReceipt(dedupKey, clientMsgId, messageId, reply, null);
+    }
+
+    /** A-3:rawMessageId 仅邮件渠道有值,随回执落库供人工回信回填 In-Reply-To/References。 */
+    public void saveReceipt(long dedupKey, String clientMsgId, Long messageId, String reply,
+                            String rawMessageId) {
         CsMessageReceipt receipt = new CsMessageReceipt();
         receipt.setSessionId(dedupKey);
         receipt.setClientMsgId(clientMsgId);
         receipt.setMessageId(messageId);
         receipt.setAcceptance("ACCEPTED");
         receipt.setReplyContent(reply);
+        receipt.setRawMessageId(rawMessageId);
         receipt.setCreateTime(new Date());
         receiptMapper.insert(receipt);
     }

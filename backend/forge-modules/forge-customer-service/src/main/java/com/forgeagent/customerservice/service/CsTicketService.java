@@ -28,6 +28,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -515,6 +516,20 @@ public class CsTicketService {
         return eventMapper.selectMentions(workspaceId, userId, sinceId == null ? 0L : sinceId, 20);
     }
 
+    /**
+     * A-5:把本人本空间的 @提及标记为已读,返回实际更新条数。
+     *
+     * <p>ids 来自前端,但 workspaceId/userId 必须由调用方从登录态取;
+     * 上限 200 条,避免一次请求拼出超长 IN 列表拖垮 SQL。</p>
+     */
+    public int markMentionsRead(Long workspaceId, Long userId, List<Long> ids) {
+        if (workspaceId == null || userId == null || ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        List<Long> safe = ids.stream().filter(Objects::nonNull).distinct().limit(200).toList();
+        return safe.isEmpty() ? 0 : eventMapper.markMentionsRead(workspaceId, userId, safe);
+    }
+
     /** 从备注正文解析 @用户ID:去重、去自己、最多 5 个,非法数字忽略。 */
     static List<Long> parseMentions(String content, Long selfUserId) {
         List<Long> targets = new ArrayList<>();
@@ -550,6 +565,8 @@ public class CsTicketService {
         e.setActorType(actorType);
         e.setActorId(actorId == null ? null : String.valueOf(actorId));
         e.setTargetUserId(targetUserId);
+        // A-5:显式写未读,不依赖 DDL 默认值时序;老行由 DEFAULT 0 兜底
+        e.setReadFlag(Boolean.FALSE);
         e.setNote(note);
         e.setCreateTime(new Date());
         eventMapper.insert(e);

@@ -106,8 +106,9 @@
         </el-form-item>
         <template v-else>
           <el-form-item label="启动命令" prop="command">
-            <el-input v-model="form.command" placeholder="如 npx 或 /usr/local/bin/node" maxlength="200" />
-            <div class="form-tip">必须在服务端 agent.mcp.stdio.allowed-commands 白名单内;默认白名单为空 = stdio 未启用</div>
+            <el-input v-model="form.command" placeholder="如 npx、/usr/local/bin/node 或 /opt/forge/mcp/mcp-stdio-wrapper.sh" maxlength="200" />
+            <div class="form-tip">必须在服务端 agent.mcp.stdio.allowed-commands 白名单内;默认白名单为空 = stdio 未启用。
+            工作目录:用 wrapper 时把 env 填成 {"MCP_WORKDIR":"/opt/forge/work"}</div>
           </el-form-item>
           <el-form-item label="启动参数" prop="args">
             <el-input v-model="form.args" type="textarea" :rows="2" placeholder='JSON 数组,如 ["-y","@modelcontextprotocol/server-filesystem","/data"]' maxlength="5000" />
@@ -190,7 +191,8 @@ const envPlaceholder = computed(() => {
   if (isEdit.value && keys && keys.length) {
     return `已配置 ${keys.length} 项:${keys.join(', ')}(留空不修改)`;
   }
-  return 'JSON 对象,如 {"API_KEY":"xxx"}';
+  // stdio 工作目录经现有 env 通道传给 wrapper,不新增配置字段
+  return 'JSON 对象,如 {"API_KEY":"xxx"} 或 {"MCP_WORKDIR":"/opt/forge/work"}';
 });
 
 const rules = {

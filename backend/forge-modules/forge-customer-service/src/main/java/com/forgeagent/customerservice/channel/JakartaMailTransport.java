@@ -2,10 +2,12 @@ package com.forgeagent.customerservice.channel;
 
 import com.forgeagent.common.core.exception.ServiceException;
 import jakarta.mail.Address;
+import jakarta.mail.Authenticator;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
 import jakarta.mail.Multipart;
+import jakarta.mail.PasswordAuthentication;
 import jakarta.mail.Part;
 import jakarta.mail.Session;
 import jakarta.mail.Store;
@@ -77,7 +79,15 @@ public class JakartaMailTransport implements MailTransport {
     @Override
     public void send(EmailChannelConfig cfg, RawMail original, String reply) {
         try {
-            Session session = Session.getInstance(smtpProperties(cfg));
+            // 实测修复:smtpProperties 只设了 auth=true,却没把渠道级账号/密码交给
+            // Session,Jakarta Mail 在 connect 阶段直接抛 "no password specified?" ——
+            // 所有邮件回信(AI 自动 + 人工)此前都会失败。用 Authenticator 正规提供凭据。
+            Session session = Session.getInstance(smtpProperties(cfg), new Authenticator() {
+                @Override
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication(cfg.smtpUser(), cfg.smtpPassword());
+                }
+            });
             MimeMessage message = new MimeMessage(session);
             message.setFrom(new InternetAddress(cfg.fromAddress()));
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(original.from()));

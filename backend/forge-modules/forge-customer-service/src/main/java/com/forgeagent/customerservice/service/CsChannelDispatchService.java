@@ -13,6 +13,7 @@ import com.forgeagent.customerservice.mapper.CsVisitorMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -52,8 +53,9 @@ public class CsChannelDispatchService {
         if (conv == null || conv.getVisitorId() == null) {
             throw new ServiceException("会话归属解析失败");
         }
+        // A-3:邮件渠道把原始 Message-ID 透传到回执,人工回信据此回填线程头
         com.forgeagent.customerservice.domain.vo.CsSendResultVo result = visitorService.send(channel, conversationId,
-            conv.getVisitorId(), inbound.msgId(), inbound.content());
+            conv.getVisitorId(), inbound.msgId(), inbound.content(), List.of(), inbound.rawMessageId());
         return result == null || result.getContent() == null ? "" : result.getContent();
     }
 

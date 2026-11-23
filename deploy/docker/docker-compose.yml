@@ -204,6 +204,8 @@ services:
     volumes:
       - backend-data:/app/data
       - backend-logs:/app/logs
+      # MCP STDIO 工作目录 wrapper(只读;路径须与 allowed-commands 的容器内绝对路径一致)
+      - ./mcp:/opt/forge/mcp:ro
     depends_on:
       mysql:
         condition: service_healthy

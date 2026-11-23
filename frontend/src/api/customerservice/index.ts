@@ -37,6 +37,8 @@ export interface CsTicketEvent {
   actorType: string;
   actorId?: string | null;
   targetUserId?: number | null;
+  /** 0/1 或 false/true,由后端 read_flag 映射。 */
+  readFlag?: boolean | number | null;
   ticketId?: number;
   note: string | null;
   createTime: string | null;
@@ -73,6 +75,8 @@ export interface CsChannel {
   widgetConfig?: string;
   /** D2:挂件默认语言 zh_CN/en_US */
   widgetLang?: string;
+  /** 营业时间配置 JSON,空=24h 全天 */
+  businessHoursJson?: string;
 }
 
 export const listTickets = (status?: string): AxiosPromise<CsTicket[]> =>
@@ -117,6 +121,10 @@ export const addTicketNote = (id: number, note: string) =>
 /** A3 @提及增量:只返回当前登录坐席被提及的事件(sinceId 为游标)。 */
 export const listMentions = (sinceId = 0): AxiosPromise<CsTicketEvent[]> =>
   request({ url: '/agent/customerservice/mentions', method: 'get', params: { sinceId } });
+
+/** 标记 @提及已读;身份由登录态决定,前端只提交事件 ID。 */
+export const markMentionsRead = (ids: number[]): AxiosPromise<number> =>
+  request({ url: '/agent/customerservice/mentions/read', method: 'post', data: ids });
 
 /** A3 坐席 Copilot 文本改写:polish / translate_en / translate_zh。 */
 export const rewriteText = (conversationId: number, text: string, mode: string) =>
@@ -599,6 +607,9 @@ export interface CsHandoffSummary {
   oneLineSummary?: string;
   userIntent?: string | null;
   emotion?: string;
+  /** 最新情绪分 [-1,1] 与负面连击轮数,与转人工 SENTIMENT 规则同源 */
+  sentimentScore?: number;
+  sentimentStreak?: number;
   triedSolutions?: string[];
   pendingIssues?: string[];
   suggestedNextStep?: string;

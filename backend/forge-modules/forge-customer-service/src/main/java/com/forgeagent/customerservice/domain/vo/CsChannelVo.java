@@ -52,6 +52,8 @@ public class CsChannelVo implements Serializable {
 
     /** D2:挂件默认语言 */
     private String widgetLang;
+    /** A-1:营业时间配置 JSON,空=24h 全天。 */
+    private String businessHoursJson;
     private String status;
     private String fallbackReplyEn;
     private String handoffKeywords;

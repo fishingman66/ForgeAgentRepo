@@ -158,4 +158,6 @@ public class CsChannelSaveBo implements Serializable {
 
     /** D2:挂件默认语言 zh_CN/en_US */
     private String widgetLang;
+    /** A-1:营业时间配置 JSON,空=24h 全天。 */
+    private String businessHoursJson;
 }

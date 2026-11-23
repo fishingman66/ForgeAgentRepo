@@ -85,6 +85,14 @@ public class CsSeatController extends BaseController {
             com.forgeagent.customerservice.domain.vo.CsTicketEventVo.class));
     }
 
+    /**
+     * 标记 @提及已读。身份与空间只从登录态取,前端只提交事件 ID。
+     */
+    @PostMapping("/mentions/read")
+    public R<Integer> markMentionsRead(@RequestBody List<Long> ids) {
+        return R.data(ticketService.markMentionsRead(currentWorkspaceId(), LoginHelper.getUserId(), ids));
+    }
+
     @PostMapping("/tickets/{id}/hold")
     public R<com.forgeagent.customerservice.domain.vo.CsTicketVo> hold(@PathVariable Long id) {
         return R.ok(com.forgeagent.common.core.utils.MapstructUtils.convert(ticketService.transition(id, "ON_HOLD", "HOLD", "SEAT", LoginHelper.getUserId(), null), com.forgeagent.customerservice.domain.vo.CsTicketVo.class));
