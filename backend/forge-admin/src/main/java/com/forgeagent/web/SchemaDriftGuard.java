@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>检查项只列「缺了必炸」的列，均有运行时异常堆栈证据；其余漂移交给
  * scripts/sql/schema_drift_audit.py（只读审计）与 schema_drift_repair.py（幂等修复）覆盖。
- * flow_node.version 按 README:45 决策保留为已知例外，不在此检查。</p>
+ * 全量列/索引差异由 scripts/sql/schema_drift_audit.py 覆盖（flow_node.version 已于 2026-11-24 补齐）。</p>
  *
  * @author ForgeAgent
  */

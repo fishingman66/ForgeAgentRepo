@@ -985,7 +985,7 @@ CREATE TABLE IF NOT EXISTS `flow_node` (
   `listener_path` varchar(400) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '监听器路径',
   `form_custom` char(1) COLLATE utf8mb4_general_ci DEFAULT 'N' COMMENT '审批表单是否自定义（Y是 N否）',
   `form_path` varchar(100) COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '审批表单路径',
-  `version` varchar(20) COLLATE utf8mb4_general_ci NOT NULL COMMENT '版本',
+  `version` varchar(20) COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '版本(Warm-Flow 2.1.1 实体不使用,仅兼容保留;勿设 NOT NULL 无默认值,否则引擎 saveBatch 插入会报 1364)',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `create_by` varchar(64) COLLATE utf8mb4_general_ci DEFAULT '' COMMENT '创建人',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
