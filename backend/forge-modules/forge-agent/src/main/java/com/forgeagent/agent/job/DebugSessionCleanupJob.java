@@ -3,6 +3,7 @@ package com.forgeagent.agent.job;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import com.forgeagent.agent.domain.AgentMessage;
 import com.forgeagent.agent.domain.AgentSession;
 import com.forgeagent.agent.mapper.AgentMessageMapper;
@@ -34,7 +35,12 @@ public class DebugSessionCleanupJob {
      * 每 10 分钟扫描一次,删除 30 分钟无活动的调试会话
      */
     @Scheduled(cron = "${agent.debug-session.cleanup-cron:0 */10 * * * ?}")
-    public void cleanup() {
+        public void scheduledEntry() {
+        ScheduledTaskLock.tryRun("forge:sched:debug-session-cleanup", java.time.Duration.ofMinutes(20), this::cleanup);
+    }
+
+    private void cleanup() {
+
         int ttlMinutes = Integer.parseInt(System.getProperty("agent.debug-session.ttl-minutes", "30"));
         Date threshold = new Date(System.currentTimeMillis() - ttlMinutes * 60_000L);
         List<AgentSession> stale = sessionMapper.selectList(new LambdaQueryWrapper<AgentSession>()

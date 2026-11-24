@@ -23,6 +23,7 @@ import com.forgeagent.agent.service.runner.ToolAssembler.Assembly;
 import com.forgeagent.agent.service.runner.ApprovalGateTool.ApprovalContext;
 import com.forgeagent.common.core.exception.ServiceException;
 import com.forgeagent.common.core.utils.StringUtils;
+import com.forgeagent.common.satoken.utils.SaTokenContextBridge;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -538,12 +539,16 @@ public class AgentScopeRunner implements AgentRunner {
             List<Msg> history = historyMsgs(ctx);
             List<Msg> input = new ArrayList<>(history);
             input.add(buildUserMsg(content, ctx.images()));
+            // 主线程快照登录态:子线程要跑工具/知识库 ACL,脱离上下文会让 LoginHelper.getUserId()
+            // 静默返回 null,受限文档按「不可见」处理且不报错(修复范式见 WorkflowGraphEngine)。
+            String saToken = SaTokenContextBridge.captureToken();
             List<CompletableFuture<Msg>> futures = new ArrayList<>();
             for (int i = 0; i < ctx.teamMembers().size(); i++) {
                 ReActAgent memberAgent = agents.get(i);
                 List<Msg> memberInput = List.copyOf(input);
                 futures.add(CompletableFuture.supplyAsync(
-                    () -> memberAgent.call(memberInput).block(callTimeout), TEAM_POOL));
+                    () -> SaTokenContextBridge.callWithToken(saToken,
+                        () -> memberAgent.call(memberInput).block(callTimeout)), TEAM_POOL));
             }
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             List<Msg> outputs = new ArrayList<>();
@@ -599,19 +604,22 @@ public class AgentScopeRunner implements AgentRunner {
             List<Msg> history = historyMsgs(ctx);
             List<Msg> input = new ArrayList<>(history);
             input.add(buildUserMsg(content, ctx.images()));
+            // 同非流式分支:流式成员也在子线程跑工具/ACL,必须恢复主线程登录态。
+            String saToken = SaTokenContextBridge.captureToken();
             List<CompletableFuture<Msg>> futures = new ArrayList<>();
             for (int i = 0; i < memberCount; i++) {
                 final int idx = i;
                 ReActAgent memberAgent = agents.get(i);
                 List<Msg> memberInput = List.copyOf(input);
-                futures.add(CompletableFuture.supplyAsync(() -> {
-                    listener.onTeamAgentStart(idx, total, memberAgent.getName(), "member");
-                    Msg msg = streamOne(memberAgent, memberInput, idx, listener);
-                    String text = msg == null ? "" : msg.getTextContent();
-                    ChatUsage usage = msg == null ? null : resolveUsage(msg);
-                    listener.onTeamAgentDone(idx, text, usage == null ? null : usage.getTotalTokens());
-                    return msg;
-                }, TEAM_POOL));
+                futures.add(CompletableFuture.supplyAsync(
+                    () -> SaTokenContextBridge.callWithToken(saToken, () -> {
+                        listener.onTeamAgentStart(idx, total, memberAgent.getName(), "member");
+                        Msg msg = streamOne(memberAgent, memberInput, idx, listener);
+                        String text = msg == null ? "" : msg.getTextContent();
+                        ChatUsage usage = msg == null ? null : resolveUsage(msg);
+                        listener.onTeamAgentDone(idx, text, usage == null ? null : usage.getTotalTokens());
+                        return msg;
+                    }), TEAM_POOL));
             }
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             List<Msg> outputs = new ArrayList<>();

@@ -1,6 +1,7 @@
 package com.forgeagent.rag.service.governance;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.forgeagent.rag.config.KnowledgeProperties;
@@ -43,6 +44,11 @@ public class DocTrashCleanupService {
     @Scheduled(fixedDelayString = "${rag.knowledge.trash.cleanup-interval-ms:3600000}",
         initialDelayString = "${rag.knowledge.trash.cleanup-initial-delay-ms:300000}")
     public void purgeExpired() {
+        ScheduledTaskLock.tryRun("forge:sched:kb-trash-cleanup",
+            java.time.Duration.ofMinutes(30), this::purgeExpiredInternal);
+    }
+
+    private void purgeExpiredInternal() {
         if (Boolean.FALSE.equals(properties.getTrashCleanupEnabled())) {
             return;
         }

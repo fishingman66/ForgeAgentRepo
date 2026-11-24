@@ -3,6 +3,7 @@ package com.forgeagent.agent.job;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import com.forgeagent.agent.domain.AgentDatasource;
 import com.forgeagent.agent.mapper.AgentDatasourceMapper;
 import com.forgeagent.agent.service.IAgentDatasourceService;
@@ -33,6 +34,11 @@ public class DatasourceSchemaRefreshJob {
      */
     @Scheduled(cron = "${agent.datasource.schema-refresh-cron:0 0 3 * * ?}")
     public void refreshAll() {
+        ScheduledTaskLock.tryRun("forge:sched:datasource-schema-refresh",
+            java.time.Duration.ofMinutes(30), this::refreshAllInternal);
+    }
+
+    private void refreshAllInternal() {
         List<AgentDatasource> list = datasourceMapper.selectList(
             new LambdaQueryWrapper<AgentDatasource>().eq(AgentDatasource::getStatus, "0"));
         if (list.isEmpty()) {

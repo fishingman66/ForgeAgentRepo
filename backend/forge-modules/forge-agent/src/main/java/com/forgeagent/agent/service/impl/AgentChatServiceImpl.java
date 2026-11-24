@@ -1068,6 +1068,9 @@ public class AgentChatServiceImpl implements IAgentChatService {
         if (agent == null) {
             throw new ServiceException("会话对应的 Agent 已不存在");
         }
+        // 数据安全:缓存返回的是 @Cacheable 共享引用,本轮装配下方有草稿就地覆盖(registerToolIds/
+        // setSystemPrompt 等),必须先深拷贝切断引用,否则调试草稿会写进全局缓存污染其他会话。
+        agent = agentVersionService.copyAgent(agent);
         // D1 灰度:会话创建时锁定的版本在每轮装配前生效——替换成快照视图(deep-copy,
         // 不改缓存共享引用);控制台链路 csGuard 为 null,此分支跳过,存量行为零变更。
         Integer pinnedVersion = session.getCsGuard() == null ? null : session.getCsGuard().pinnedVersion();

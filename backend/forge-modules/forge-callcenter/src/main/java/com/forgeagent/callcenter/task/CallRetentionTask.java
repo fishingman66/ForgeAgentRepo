@@ -1,6 +1,7 @@
 package com.forgeagent.callcenter.task;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import com.forgeagent.callcenter.config.CallcenterProperties;
 import com.forgeagent.callcenter.config.ConditionalOnCallcenterEnabled;
 import com.forgeagent.callcenter.domain.CsCall;
@@ -33,6 +34,11 @@ public class CallRetentionTask {
 
     @Scheduled(cron = "0 40 3 * * ?")
     public void purgeExpired() {
+        ScheduledTaskLock.tryRun("forge:sched:cc-recording-retention",
+            java.time.Duration.ofMinutes(30), this::purgeExpiredInternal);
+    }
+
+    private void purgeExpiredInternal() {
         List<CsCall> expired = callMapper.selectList(new LambdaQueryWrapper<CsCall>()
             .isNotNull(CsCall::getRecordingOssKey)
             .lt(CsCall::getRecordingRetainUntil, new Date())

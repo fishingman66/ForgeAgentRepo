@@ -215,7 +215,8 @@ public class AgentApprovalServiceImpl implements IAgentApprovalService {
         }
         try {
             java.util.concurrent.CompletableFuture
-                .supplyAsync(() -> task.delegate().callAsync(task.param()).block())
+                .supplyAsync(() -> task.delegate().callAsync(task.param())
+                    .block(java.time.Duration.ofSeconds(60)))
                 .whenComplete((result, ex) -> {
                     if (ex != null) {
                         log.warn("[C4] 审批通过后工具 [{}] 执行失败: {}", toolName, ex.getMessage());

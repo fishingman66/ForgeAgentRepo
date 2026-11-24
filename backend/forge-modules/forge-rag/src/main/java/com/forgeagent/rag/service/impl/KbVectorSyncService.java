@@ -3,6 +3,7 @@ package com.forgeagent.rag.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.forgeagent.common.core.utils.StringUtils;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import com.forgeagent.rag.config.KnowledgeProperties;
 import com.forgeagent.rag.domain.AgentKbChunk;
 import com.forgeagent.rag.domain.AgentKnowledge;
@@ -66,6 +67,11 @@ public class KbVectorSyncService {
     @Scheduled(fixedDelayString = "${rag.knowledge.sync.compensation-interval-ms:30000}",
         initialDelayString = "${rag.knowledge.sync.compensation-initial-delay-ms:20000}")
     public void compensate() {
+        ScheduledTaskLock.tryRun("forge:sched:kb-vector-sync",
+            java.time.Duration.ofMinutes(5), this::compensateInternal);
+    }
+
+    private void compensateInternal() {
         if (!Boolean.TRUE.equals(properties.getSyncCompensationEnabled())) {
             return;
         }

@@ -56,6 +56,8 @@ import com.forgeagent.common.redis.utils.RedisUtils;
 import com.forgeagent.common.satoken.utils.LoginHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -440,6 +442,10 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
     @Transactional(rollbackFor = Exception.class)
     @Override
     public Boolean deleteByIds(List<Long> ids) {
+        // 外部资源清理(Milvus RPC / 磁盘 I/O)不能留在事务内:会长时间占用数据库连接,
+        // 并发删除时耗尽 Hikari 池。收集为 afterCommit 回调,事务提交后再执行;
+        // 事务回滚时外部资源保持原样,与 DB 状态一致。
+        List<Runnable> afterCommit = new ArrayList<>();
         for (Long id : ids) {
             AgentKnowledge kb = knowledgeMapper.selectById(id);
             if (kb == null) {
@@ -451,22 +457,23 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
             if (!boundAgents.isEmpty()) {
                 throw new ServiceException("知识库「" + kb.getName() + "」已绑定 Agent:" + String.join("、", boundAgents) + ",请先解绑");
             }
-            // 级联删除:向量 -> 分块 -> 文档与文件 -> 知识库
-            try {
-                vectorStore.deleteByKnowledgeId(id);
-            } catch (Exception e) {
-                log.warn("[知识库] 删除知识库 {} 向量失败: {}", id, e.getMessage());
-            }
-            chunkMapper.delete(new LambdaQueryWrapper<AgentKbChunk>().eq(AgentKbChunk::getKnowledgeId, id));
             List<AgentKnowledgeDocument> docs = documentMapper.selectList(
                 new LambdaQueryWrapper<AgentKnowledgeDocument>().eq(AgentKnowledgeDocument::getKnowledgeId, id));
-            for (AgentKnowledgeDocument doc : docs) {
+            afterCommit.add(() -> {
                 try {
-                    Files.deleteIfExists(Path.of(doc.getFilePath()));
+                    vectorStore.deleteByKnowledgeId(id);
                 } catch (Exception e) {
-                    log.warn("[知识库] 删除文档文件失败: {}", e.getMessage());
+                    log.warn("[知识库] 删除知识库 {} 向量失败: {}", id, e.getMessage());
                 }
-            }
+                for (AgentKnowledgeDocument doc : docs) {
+                    try {
+                        Files.deleteIfExists(Path.of(doc.getFilePath()));
+                    } catch (Exception e) {
+                        log.warn("[知识库] 删除文档文件失败: {}", e.getMessage());
+                    }
+                }
+            });
+            chunkMapper.delete(new LambdaQueryWrapper<AgentKbChunk>().eq(AgentKbChunk::getKnowledgeId, id));
             documentMapper.delete(new LambdaQueryWrapper<AgentKnowledgeDocument>()
                 .eq(AgentKnowledgeDocument::getKnowledgeId, id));
             knowledgeMapper.deleteById(id);
@@ -475,6 +482,16 @@ public class AgentKnowledgeServiceImpl implements IAgentKnowledgeService {
                 Map.of("name", kb.getName(), "docCount", docs.size(),
                     "rerankModel", StringUtils.defaultString(kb.getRerankModel(), "")),
                 null, "0", "RISK");
+        }
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    afterCommit.forEach(Runnable::run);
+                }
+            });
+        } else {
+            afterCommit.forEach(Runnable::run);
         }
         return true;
     }

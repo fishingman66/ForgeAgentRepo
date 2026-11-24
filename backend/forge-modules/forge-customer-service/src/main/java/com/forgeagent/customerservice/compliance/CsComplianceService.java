@@ -1,6 +1,7 @@
 package com.forgeagent.customerservice.compliance;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import com.forgeagent.agent.domain.AgentMessage;
 import com.forgeagent.agent.domain.AgentSession;
 import com.forgeagent.agent.mapper.AgentMessageMapper;
@@ -120,8 +121,14 @@ public class CsComplianceService {
         return 1;
     }
 
-    /** 留存到期清理:返回本次删除的会话数。 */
+    /** 定时入口:跨实例互斥;手动接口直接调 purgeExpired() 不受锁影响。 */
     @Scheduled(cron = "0 0 3 * * ?")
+    public void scheduledPurgeExpired() {
+        ScheduledTaskLock.tryRun("forge:sched:cs-retention-purge",
+            java.time.Duration.ofMinutes(30), () -> purgeExpired());
+    }
+
+    /** 留存到期清理:返回本次删除的会话数。 */
     public int purgeExpired() {
         int days = properties.getRetentionDays() == null ? 180 : properties.getRetentionDays();
         Calendar calendar = Calendar.getInstance();

@@ -16,6 +16,7 @@ import com.forgeagent.customerservice.mapper.CsKnowledgeAnswerMapper;
 import com.forgeagent.customerservice.mapper.CsSeatSuggestionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -231,7 +232,12 @@ public class CsAssistMetricService {
      * 单个空间失败只记日志,不中断其余空间。</p>
      */
     @Scheduled(cron = "${agent.customer-service.assist.recycle-cron:0 30 2 * * ?}")
-    public void recycleDaily() {
+        public void scheduledEntry() {
+        ScheduledTaskLock.tryRun("forge:sched:cs-assist-recycle", java.time.Duration.ofMinutes(30), this::recycleDaily);
+    }
+
+    private void recycleDaily() {
+
         CsModuleProperties.Assist assist = properties.getAssist();
         if (assist != null && Boolean.FALSE.equals(assist.getRecycleEnabled())) {
             return;

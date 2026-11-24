@@ -18,4 +18,12 @@ public interface SchemaIntrospectMapper {
         + "WHERE table_schema = DATABASE() AND table_name = #{table} "
         + "AND column_name = #{column} AND is_nullable = 'NO'")
     long countNotNullColumn(String table, String column);
+
+    /**
+     * 列是否存在（不关心可空性）。启动期强依赖列自检用。
+     */
+    @Select("SELECT COUNT(*) FROM information_schema.columns "
+        + "WHERE table_schema = DATABASE() AND table_name = #{table} "
+        + "AND column_name = #{column}")
+    long countColumn(String table, String column);
 }

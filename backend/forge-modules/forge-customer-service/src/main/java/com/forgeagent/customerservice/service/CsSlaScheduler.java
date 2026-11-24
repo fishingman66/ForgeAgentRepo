@@ -7,6 +7,7 @@ import com.forgeagent.customerservice.domain.CsTicket;
 import com.forgeagent.customerservice.mapper.CsTicketMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -41,7 +42,12 @@ public class CsSlaScheduler {
 
     /** 每分钟扫一次;要关闭扫描请把 sla-enabled 置 false(周期 0 会让定时任务注册直接失败)。 */
     @Scheduled(fixedDelayString = "${agent.customer-service.sla-scan-ms:60000}")
-    public void scan() {
+        public void scheduledEntry() {
+        ScheduledTaskLock.tryRun("forge:sched:cs-sla-scan", java.time.Duration.ofMinutes(5), this::scan);
+    }
+
+    private void scan() {
+
         if (Boolean.FALSE.equals(properties.getSlaEnabled())) {
             return;
         }

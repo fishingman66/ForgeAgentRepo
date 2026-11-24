@@ -23,6 +23,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -217,6 +218,22 @@ class AgentVersionServiceTest {
     void d1SnapshotAgentSkipsWithoutVersion() {
         AgentInfo cached = agent();
         assertEquals(cached, service().snapshotAgent(cached, null));
+    }
+
+    @Test
+    void copyAgentDetachesCachedSharedReference() {
+        // @Cacheable 返回共享引用：就地改写会污染全局缓存。copyAgent 必须给出独立副本。
+        AgentInfo cached = agent();
+        AgentInfo copy = service().copyAgent(cached);
+        assertNotEquals(System.identityHashCode(cached), System.identityHashCode(copy),
+            "必须是不同对象，不能返回原引用");
+        copy.setSystemPrompt("草稿提示词");
+        copy.setModelId(99L);
+        assertEquals("你是客服", cached.getSystemPrompt(), "改副本不得影响缓存原对象");
+        assertEquals(null, cached.getModelId(), "改副本不得影响缓存原对象");
+        assertEquals("草稿提示词", copy.getSystemPrompt());
+        assertEquals(Long.valueOf(99L), copy.getModelId());
+        assertNull(service().copyAgent(null), "null 入参应安全返回 null");
     }
 
     private static AgentVersion versionWithSnapshot(String json) {

@@ -6,6 +6,7 @@ import com.forgeagent.memory.mapper.AgentMemoryMapper;
 import com.forgeagent.memory.domain.vo.MemoryGovernanceResultVo;
 import com.forgeagent.memory.mapper.MemoryGovernanceMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -44,6 +45,12 @@ public class MemoryGovernanceService {
     /** 定时治理;开关关闭时空转(周期配 0 会让应用起不来,开关别用周期表达)。 */
     @Scheduled(fixedDelayString = "${memory.governance.scan-ms:600000}")
     public void scheduledRun() {
+        ScheduledTaskLock.tryRun("forge:sched:memory-governance",
+            java.time.Duration.ofMinutes(10), this::scheduledRunInternal);
+    }
+
+    /** 包级可见:单测绕过分布式锁直接验证禁用逻辑本身。 */
+    void scheduledRunInternal() {
         if (!properties.isEnabled()) {
             return;
         }

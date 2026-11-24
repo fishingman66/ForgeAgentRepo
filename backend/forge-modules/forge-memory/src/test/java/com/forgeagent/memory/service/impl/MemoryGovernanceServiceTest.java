@@ -149,7 +149,8 @@ class MemoryGovernanceServiceTest {
     @Test
     void scheduledRunDoesNothingWhenDisabled() {
         properties.setEnabled(false);
-        service.scheduledRun();
+        // 直接调内部方法:锁由 ScheduledTaskLock 单测覆盖,此处只验证禁用逻辑本身
+        service.scheduledRunInternal();
         verifyNoInteractions(governanceMapper, memoryMapper);
     }
 

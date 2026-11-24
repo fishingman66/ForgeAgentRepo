@@ -87,7 +87,7 @@ public class CsChannelGuard {
         if (nonce == null || nonce.isBlank()) {
             throw new ServiceException("缺少 nonce");
         }
-        if (increment("nonce:" + channelCode + ":" + nonce, Duration.ofMinutes(5)) > 1) {
+        if (incrementStrict("nonce:" + channelCode + ":" + nonce, Duration.ofMinutes(5)) > 1) {
             throw new ServiceException("重复的请求");
         }
     }
@@ -124,16 +124,38 @@ public class CsChannelGuard {
      */
     public long increment(String key, Duration ttl) {
         try {
-            RAtomicLong counter = RedisUtils.getClient().getAtomicLong(REDIS_PREFIX + key);
-            long value = counter.incrementAndGet();
-            if (value == 1) {
-                counter.expire(ttl);
-            }
-            return value;
+            return doIncrement(key, ttl);
         } catch (Exception e) {
-            log.warn("[CS] Redis 计数不可用,降级放行 key={}: {}", key, e.getMessage());
+            // 限流场景:Redis 挂时放行,可用性优先(业务自身还有 HMAC/验签兜底)
+            log.warn("[CS] Redis 限流计数不可用,降级放行 key={}: {}", key, e.getMessage());
             return 1L;
         }
+    }
+
+    /**
+     * 严格计数:Redis 故障时抛异常而非静默放行。
+     *
+     * <p>nonce 重放去重必须 fail-closed——若 Redis 不可用就放行,同一验签回调可被无限重放。
+     * 渠道回调返回 403 会触发渠道侧重投,正常请求不会丢失。</p>
+     */
+    public long incrementStrict(String key, Duration ttl) {
+        try {
+            return doIncrement(key, ttl);
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceException("安全校验暂时不可用,请稍后重试");
+        }
+    }
+
+    /** 包级可见:纯单测可 spy 注入 Redis 故障,验证限流降级与 nonce 拒绝的分级语义。 */
+    long doIncrement(String key, Duration ttl) {
+        RAtomicLong counter = RedisUtils.getClient().getAtomicLong(REDIS_PREFIX + key);
+        long value = counter.incrementAndGet();
+        if (value == 1) {
+            counter.expire(ttl);
+        }
+        return value;
     }
 
     /** 签发访客令牌:base64(channelCode|visitorId|exp|hmac)。 */

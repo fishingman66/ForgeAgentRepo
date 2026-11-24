@@ -7,6 +7,7 @@ import com.forgeagent.customerservice.domain.CsConversation;
 import com.forgeagent.customerservice.mapper.CsConversationMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import com.forgeagent.common.redis.utils.ScheduledTaskLock;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -36,7 +37,12 @@ public class CsMetricScheduler {
     private final CsModuleProperties properties;
 
     @Scheduled(cron = "${agent.customer-service.metric-rebuild-cron:0 0 4 * * ?}")
-    public void rebuildYesterday() {
+        public void scheduledEntry() {
+        ScheduledTaskLock.tryRun("forge:sched:cs-metric-rebuild", java.time.Duration.ofMinutes(2*60), this::rebuildYesterday);
+    }
+
+    private void rebuildYesterday() {
+
         if (!Boolean.TRUE.equals(properties.getMetricRebuildEnabled())) {
             return;
         }

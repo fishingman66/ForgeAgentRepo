@@ -42,7 +42,7 @@ docker compose up -d
 
 默认管理员：`admin / admin123`。
 
-> **Docker 新库表结构与种子已补齐**（2026-11-19 复检）：`01-schema.sql` 现含全部 **139 张表**，与 `forge-vue` 开发库的表/列/索引**三方零差异**（脚本核验见 `scripts/sql/schema_drift_audit.py`，空库全量回放见 `scripts/sql/baseline_replay_verify.py`，两者均通过）。全部 `CREATE TABLE IF NOT EXISTS`、增量列直接写进建表定义，可重复执行；中文注释乱码已修复。`02-seed.sql` 含 **262 条菜单**（含智能客服 12 个页面入口与知识库「检索日志」，否则表有了但导航里没入口），`03-demo.sql` 的演示账号/空间/Agent 可重复执行。`backend/sql/` 已清空（2026-11-19）：139 表结构与全部业务种子已收口到 `init/` 下 01~04 四个文件，新库按序执行即可，无需再跑增量脚本；历史脚本快照归档在 `docs/archive/backend_sql_snapshot_20261119.zip`（仅供追溯）。`04-seed-agent.sql` 承载模型供应商、内置工具、客服意图/敏感词/质检规则、呼叫中心渠道/打断词/IVR/路由等运行必需数据。**唯一保留差异**：`flow_node.version`（Warm-Flow 引擎表，开发库是旧版残留，加列会影响引擎行为，需随引擎升级单独评估）。
+> **Docker 新库表结构与种子已补齐**（2026-11-24 复检）：`01-schema.sql` 现含全部 **142 张表**。2026-11-23 全面审查发现存量开发库与基线存在漂移（缺 3 表 / 33 列 / 3 索引），实测导致帮助中心端点 500（缺失列被 `GlobalExceptionHandler` 模糊为错误编号）；2026-11-24 已用 `scripts/sql/schema_drift_repair.py --apply` 补齐（幂等，可重复执行，脚本自动从基线提取差异，白名单排除例外列）。补后复核：基线缺表 0 / 缺列 0 / 缺索引 0，审计命令 `python scripts/sql/schema_drift_audit.py`（默认库 `forge-vue`，可用 `FORGE_DB` / `FORGE_MYSQL_PWD` 覆盖），空库全量回放见 `scripts/sql/baseline_replay_verify.py`。启动时 `SchemaDriftGuard` 对 3 个代码强依赖列（`agent_approval.exec_state`、`agent_cs_channel.encoding_aes_key`、`agent_workflow_run.pending_deadline`）做自检，缺失即拒绝启动并打印修复指引。**唯一保留差异**：`flow_node.version`（Warm-Flow 引擎表，开发库是旧版残留，加列会影响引擎行为，经评估不补，随引擎升级单独处理）。全部 `CREATE TABLE IF NOT EXISTS`、增量列直接写进建表定义，可重复执行；中文注释乱码已修复。`02-seed.sql` 含 **262 条菜单**（含智能客服 12 个页面入口与知识库「检索日志」，否则表有了但导航里没入口），`03-demo.sql` 的演示账号/空间/Agent 可重复执行。`backend/sql/` 已清空（2026-11-19）：表结构与全部业务种子已收口到 `init/` 下 01~04 四个文件，新库按序执行即可，无需再跑增量脚本；历史脚本快照归档在 `docs/archive/backend_sql_snapshot_20261119.zip`（仅供追溯）。`04-seed-agent.sql` 承载模型供应商、内置工具、客服意图/敏感词/质检规则、呼叫中心渠道/打断词/IVR/路由等运行必需数据。
 >
 > **演示环境每日重置**：`.env` 里 `DEMO_ENABLED=true` 会开启后端写保护并在登录页展示「演示账号一键登录」；配合 `bash demo/reset-demo.sh`（建议 crontab `0 4 * * *`）清空 demo 账号与演示空间产生的运行时数据、恢复演示种子、清空 Redis。清理范围与保留项见脚本头部注释。
 
@@ -68,7 +68,7 @@ mysql --default-character-set=utf8mb4 -u用户名 -p forge-vue < deploy/docker/m
 ```
 
 > - 导入务必带 `--default-character-set=utf8mb4`，否则中文双重编码。
-> - `01-schema.sql` 是**全量结构基线**（139 表，含知识图谱与所有 Agent 域表），可重复执行；`02-seed.sql` / `03-demo.sql` / `04-seed-agent.sql` 依次导入即得到与 Docker 完全一致的数据。
+> - `01-schema.sql` 是**全量结构基线**（142 表，含知识图谱与所有 Agent 域表），可重复执行；存量库若比基线旧，按前文 `schema_drift_repair.py` 补齐后再启动；`02-seed.sql` / `03-demo.sql` / `04-seed-agent.sql` 依次导入即得到与 Docker 完全一致的数据。
 > - 原 `backend/sql/` 下 95 个增量脚本已于 2026-11-19 全部折进上述文件并清空（快照见 `docs/archive/`），**不要再按字母序通配跑增量脚本**。
 > - Windows 终端执行前先 `chcp 65001`，避免控制台中文乱码。
 

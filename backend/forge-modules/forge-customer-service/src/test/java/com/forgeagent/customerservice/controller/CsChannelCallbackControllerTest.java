@@ -45,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>standaloneSetup 不加载 Sa-Token 拦截器,但验签、时间窗、nonce 去重全部走真实
  * {@link CsChannelGuard} 逻辑;只有 DB 与 Redis 两处外部依赖被隔离——
- * require 用 stub 返回渠道,increment 用 spy 模拟原子计数。</p>
+ * require 用 stub 返回渠道,incrementStrict 用 spy 模拟原子计数。</p>
  */
 @Tag("dev")
 class CsChannelCallbackControllerTest {
@@ -64,9 +64,10 @@ class CsChannelCallbackControllerTest {
         dispatch = mock(CsChannelDispatchService.class);
         guard = org.mockito.Mockito.spy(new CsChannelGuard(mock(CsChannelMapper.class), properties, null));
         nonceSeq = new AtomicLong();
-        // A-4:隔离 Redis 静态客户端,保留 checkNonce 的真实判定逻辑(首次 1,重放 2)
+        // A-4:隔离 Redis 静态客户端,保留 checkNonce 的真实判定逻辑(首次 1,重放 2)。
+        // nonce 去重走严格计数(Redis 故障 fail-closed),spy 目标随之改为 incrementStrict。
         doAnswer(inv -> nonceSeq.getAndIncrement() == 0 ? 1L : 2L)
-            .when(guard).increment(anyString(), any(Duration.class));
+            .when(guard).incrementStrict(anyString(), any(Duration.class));
         CsChannelCallbackController controller = new CsChannelCallbackController(
             List.of(new WecomChannelAdapter()), guard, dispatch, properties);
         // standaloneSetup 默认 StringHttpMessageConverter 用 ISO-8859-1,会把中文回包写成 ???;

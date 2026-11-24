@@ -314,6 +314,19 @@ public class AgentVersionService {
     }
 
     /**
+     * 复制一份 AgentInfo 视图，切断 {@code @Cacheable} 共享引用。
+     *
+     * <p>任何需要在本轮装配中就地改写 Agent 配置的链路（调试草稿、临时覆盖）都必须先调本方法，
+     * 否则 setter 会写进全局缓存，污染后续会话。字段多且含集合，用 Jackson convertValue 而非 clone。</p>
+     */
+    public AgentInfo copyAgent(AgentInfo current) {
+        if (current == null) {
+            return null;
+        }
+        return MAPPER.convertValue(current, AgentInfo.class);
+    }
+
+    /**
      * D1 灰度:按版本构造一份「快照配置视图」用于本轮装配,不修改入参、不落库。
      *
      * <p>必须先 deep-copy——{@code agentConfigCache.getAgentById} 返回的是 @Cacheable
