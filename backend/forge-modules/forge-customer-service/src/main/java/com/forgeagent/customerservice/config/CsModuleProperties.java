@@ -19,6 +19,16 @@ public class CsModuleProperties {
     /** 模块总开关;关闭时客服 Bean 与端点均不装配,主应用行为零变化。 */
     private Boolean enabled = true;
 
+    /**
+     * P0-2 坐席分配策略:min-load(默认,与现有行为完全一致) / longest-ready /
+     * most-ready-times / least-answer / least-talk / most-after-time / round-robin / random。
+     * 依赖统计字段但当前无数据源的策略会显式降级 min-load。
+     */
+    private String acdAgentStrategy = "min-load";
+
+    /** P0-2 排队顺序策略:fifo(默认) / vip / custom。 */
+    private String acdLineupStrategy = "fifo";
+
     /** 实时通道:sse(默认,文本期) / websocket(语音期,C5)。 */
     private String transport = "sse";
 

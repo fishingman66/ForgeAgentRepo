@@ -2,6 +2,8 @@ package com.forgeagent.callcenter.config;
 
 import com.forgeagent.callcenter.common.sentiment.LexiconSentimentAnalyzer;
 import com.forgeagent.callcenter.common.sentiment.SentimentAnalyzer;
+import com.forgeagent.callcenter.provider.DbNumberProvider;
+import com.forgeagent.callcenter.provider.DbTrunkProvider;
 import com.forgeagent.callcenter.provider.NoopNumberProvider;
 import com.forgeagent.callcenter.provider.NoopTrunkProvider;
 import com.forgeagent.callcenter.provider.NumberProvider;
@@ -33,14 +35,25 @@ public class CallcenterConfiguration {
         return new LexiconSentimentAnalyzer();
     }
 
-    /** D8:暂无号码与中继,V1 一律装配 noop;接真实 AICC 号码池时新增实现并按配置切换。 */
+    /**
+     * P2-1:号码/中继按配置切换,默认仍 noop(零回退)。
+     * db 实现只读写号码池元数据,不接 SIP/PSTN、不发起 originate(FR 红线)。
+     */
     @Bean
-    public NumberProvider numberProvider() {
+    public NumberProvider numberProvider(CallcenterProperties properties,
+                                          com.forgeagent.callcenter.mapper.CsNumberPoolMapper mapper) {
+        if ("db".equalsIgnoreCase(properties.getNumberProvider())) {
+            return new DbNumberProvider(mapper);
+        }
         return new NoopNumberProvider();
     }
 
     @Bean
-    public TrunkProvider trunkProvider() {
+    public TrunkProvider trunkProvider(CallcenterProperties properties,
+                                        com.forgeagent.callcenter.mapper.CsNumberPoolMapper mapper) {
+        if ("db".equalsIgnoreCase(properties.getTrunkProvider())) {
+            return new DbTrunkProvider(mapper);
+        }
         return new NoopTrunkProvider();
     }
 

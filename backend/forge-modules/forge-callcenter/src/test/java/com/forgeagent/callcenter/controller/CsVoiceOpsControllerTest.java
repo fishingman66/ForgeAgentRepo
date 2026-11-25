@@ -8,6 +8,7 @@ import com.forgeagent.callcenter.domain.bo.CsCallSeatBindingBo;
 import com.forgeagent.callcenter.domain.vo.CsCallChannelConfigVo;
 import com.forgeagent.callcenter.mapper.CsCallChannelConfigMapper;
 import com.forgeagent.callcenter.mapper.CsCallSeatStateMapper;
+import com.forgeagent.callcenter.service.EnterpriseQuotaService;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -32,7 +33,8 @@ class CsVoiceOpsControllerTest {
 
     private final CsCallChannelConfigMapper channelMapper = mock(CsCallChannelConfigMapper.class);
     private final CsCallSeatStateMapper seatStateMapper = mock(CsCallSeatStateMapper.class);
-    private final CsVoiceOpsController controller = new CsVoiceOpsController(channelMapper, seatStateMapper);
+    private final EnterpriseQuotaService quotaService = mock(EnterpriseQuotaService.class);
+    private final CsVoiceOpsController controller = new CsVoiceOpsController(channelMapper, seatStateMapper, quotaService);
 
     private CsCallChannelConfig channel(String code, String provider) {
         CsCallChannelConfig c = new CsCallChannelConfig();
@@ -148,6 +150,43 @@ class CsVoiceOpsControllerTest {
     void bindSeatRequiresWorkNo() {
         CsCallSeatBindingBo noWorkNo = new CsCallSeatBindingBo();
         assertTrue(controller.bindSeat(noWorkNo).getCode() != 200);
+        verify(seatStateMapper, never()).insert(any(CsCallSeatState.class));
+    }
+
+    @Test
+    void quotaDisabledKeepsLegacyBehavior() {
+        // 默认 enabled=false:既有 upsert/bindSeat 行为不变,不触发配额查询
+        when(channelMapper.selectOne(any())).thenReturn(null);
+        assertTrue(controller.upsertVoiceChannel(channelBo("CC_NEW", "FS")).getCode() == 200);
+        verify(channelMapper, never()).selectCount(any());
+
+        CsCallSeatBindingBo bind = new CsCallSeatBindingBo();
+        bind.setWorkNo("2002");
+        bind.setExtension("2002");
+        bind.setWorkspaceId(1L);
+        when(seatStateMapper.selectOne(any())).thenReturn(null);
+        assertTrue(controller.bindSeat(bind).getCode() == 200);
+        verify(seatStateMapper, never()).selectCount(any());
+    }
+
+    @Test
+    void quotaEnabledRejectsSeatAndChannelWhenFull() {
+        when(quotaService.enabled()).thenReturn(true);
+        when(quotaService.checkExpiry(any())).thenReturn(EnterpriseQuotaService.Decision.allow(-1, -1));
+        when(quotaService.checkChannel(any(), org.mockito.ArgumentMatchers.anyLong()))
+            .thenReturn(EnterpriseQuotaService.Decision.deny("渠道满", 1L, 1L));
+        when(channelMapper.selectOne(any())).thenReturn(null);
+        assertTrue(controller.upsertVoiceChannel(channelBo("CC_NEW", "FS")).getCode() != 200,
+            "渠道配额满时拒绝新增");
+        verify(channelMapper, never()).insert(any(CsCallChannelConfig.class));
+
+        when(quotaService.checkSeat(any(), org.mockito.ArgumentMatchers.anyLong()))
+            .thenReturn(EnterpriseQuotaService.Decision.deny("坐席满", 1L, 1L));
+        when(seatStateMapper.selectOne(any())).thenReturn(null);
+        CsCallSeatBindingBo bind = new CsCallSeatBindingBo();
+        bind.setWorkNo("3003");
+        bind.setWorkspaceId(1L);
+        assertTrue(controller.bindSeat(bind).getCode() != 200, "坐席配额满时拒绝新增");
         verify(seatStateMapper, never()).insert(any(CsCallSeatState.class));
     }
 }

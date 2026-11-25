@@ -5,6 +5,13 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.forgeagent.agent.domain.AgentMessage;
 import com.forgeagent.agent.mapper.AgentMessageMapper;
 import com.forgeagent.common.core.exception.ServiceException;
+import com.forgeagent.callcenter.common.acd.AcdCandidate;
+import com.forgeagent.callcenter.common.acd.AgentStrategy;
+import com.forgeagent.callcenter.common.acd.LineupStrategy;
+import com.forgeagent.customerservice.acd.assign.AgentStrategies;
+import com.forgeagent.customerservice.acd.assign.SkillMatcher;
+import com.forgeagent.customerservice.acd.lineup.LineupStrategies;
+import com.forgeagent.customerservice.config.CsModuleProperties;
 import com.forgeagent.customerservice.config.ConditionalOnCustomerServiceEnabled;
 import com.forgeagent.customerservice.domain.CsConversation;
 import com.forgeagent.customerservice.domain.CsQueue;
@@ -71,6 +78,10 @@ public class CsTicketService {
      */
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.forgeagent.customerservice.channel.CsMailReplyDispatcher mailReplyDispatcher;
+
+    /** P0-2 ACD 策略配置;非 final 注入保持构造器签名(测试与调用方零改动)。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CsModuleProperties acdProperties;
 
     private static final Map<String, Set<String>> ALLOWED = Map.of(
         CsTicketStatus.AI_SERVING.name(), Set.of(CsTicketStatus.WAITING_AGENT.name()),
@@ -456,23 +467,28 @@ public class CsTicketService {
 
     /** ACD:技能匹配 → 最小负载 → 入队时间,返回成功分配数。 */
     public int assignWaiting() {
-        List<CsQueue> waiting = queueMapper.selectList(new LambdaQueryWrapper<CsQueue>()
-            .eq(CsQueue::getState, "WAITING").orderByAsc(CsQueue::getEnqueuedAt).last("limit 20"));
+        AgentStrategy strategy = AgentStrategies.fromCode(
+            acdProperties == null ? null : acdProperties.getAcdAgentStrategy());
+        LineupStrategy lineup = LineupStrategies.fromCode(
+            acdProperties == null ? null : acdProperties.getAcdLineupStrategy());
+
+        List<CsQueue> waiting = new java.util.ArrayList<>(queueMapper.selectList(
+            new LambdaQueryWrapper<CsQueue>()
+                .eq(CsQueue::getState, "WAITING").orderByAsc(CsQueue::getEnqueuedAt).last("limit 20")));
+        // 排队策略:默认 fifo(按入队时间)与改造前一致;vip 才按优先级重排
+        waiting.sort((a, b) -> Long.compare(
+            lineup.score(a.getPriority(), ts(a.getEnqueuedAt())),
+            lineup.score(b.getPriority(), ts(b.getEnqueuedAt()))));
         int assigned = 0;
         for (CsQueue item : waiting) {
+            strategy.beginRound();
             List<CsSeat> seats = seatMapper.selectList(new LambdaQueryWrapper<CsSeat>()
                 .eq(CsSeat::getWorkspaceId, item.getWorkspaceId())
                 .eq(CsSeat::getOnline, "1")
                 .orderByAsc(CsSeat::getCurrentLoad).last("limit 5"));
-            CsSeat target = null;
-            for (CsSeat seat : seats) {
-                int load = seat.getCurrentLoad() == null ? 0 : seat.getCurrentLoad();
-                int max = seat.getMaxLoad() == null ? 5 : seat.getMaxLoad();
-                if (load < max) {
-                    target = seat;
-                    break;
-                }
-            }
+            // 激活 requiredSkill:有技能要求时先过滤,无要求时保持原样
+            List<CsSeat> eligible = SkillMatcher.filter(seats, item.getRequiredSkill());
+            CsSeat target = pickBest(eligible, item.getRequiredSkill(), strategy);
             if (target == null) {
                 transport.push(CsEventEnvelope.of(CsEventEnvelope.QUEUE_POSITION, null, item.getTicketId(),
                     Map.of("state", "WAITING", "reason", "no_available_seat")));
@@ -486,6 +502,50 @@ public class CsTicketService {
             }
         }
         return assigned;
+    }
+
+    /** 按策略分数选最优坐席;分数相同时技能命中数多者优先,再相同时保持原顺序(稳定)。 */
+    private CsSeat pickBest(List<CsSeat> seats, String requiredSkill, AgentStrategy strategy) {
+        CsSeat best = null;
+        long bestScore = Long.MIN_VALUE;
+        int bestWeight = -1;
+        for (CsSeat seat : seats) {
+            int load = seat.getCurrentLoad() == null ? 0 : seat.getCurrentLoad();
+            int max = seat.getMaxLoad() == null ? 5 : seat.getMaxLoad();
+            if (load >= max) {
+                continue;
+            }
+            Map<String, Integer> ranks = SkillMatcher.of(seat);
+            AcdCandidate c = AcdCandidate.of(seat.getId(), load, max, ranks);
+            long score = strategy.score(c);
+            // P1-1:次级权重 = 命中技能的等级和(老数据 rank 恒 1 → 退化为原命中数,零回退)
+            int weight = skillRankWeight(requiredSkill, ranks);
+            if (best == null || score > bestScore || (score == bestScore && weight > bestWeight)) {
+                best = seat;
+                bestScore = score;
+                bestWeight = weight;
+            }
+        }
+        return best;
+    }
+
+    /** 命中技能的等级和;无技能要求或等级缺失按 1 计(与改造前 hitCount 同口径)。 */
+    static int skillRankWeight(String requiredSkill, Map<String, Integer> ranks) {
+        if (requiredSkill == null || requiredSkill.isBlank() || ranks == null || ranks.isEmpty()) {
+            return 0;
+        }
+        int sum = 0;
+        for (String part : requiredSkill.split("[,，]")) {
+            Integer rank = ranks.get(part.trim());
+            if (rank != null) {
+                sum += rank <= 0 ? 1 : rank;
+            }
+        }
+        return sum;
+    }
+
+    private static long ts(Date d) {
+        return d == null ? Long.MAX_VALUE : d.getTime();
     }
 
     /**

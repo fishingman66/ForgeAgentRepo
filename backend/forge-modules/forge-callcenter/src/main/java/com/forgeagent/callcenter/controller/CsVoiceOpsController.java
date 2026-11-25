@@ -12,6 +12,7 @@ import com.forgeagent.callcenter.domain.vo.CsCallChannelConfigVo;
 import com.forgeagent.callcenter.gateway.VoiceProvider;
 import com.forgeagent.callcenter.mapper.CsCallChannelConfigMapper;
 import com.forgeagent.callcenter.mapper.CsCallSeatStateMapper;
+import com.forgeagent.callcenter.service.EnterpriseQuotaService;
 import com.forgeagent.common.core.domain.R;
 import com.forgeagent.common.core.validate.AddGroup;
 import com.forgeagent.common.web.core.BaseController;
@@ -46,6 +47,7 @@ public class CsVoiceOpsController extends BaseController {
 
     private final CsCallChannelConfigMapper channelMapper;
     private final CsCallSeatStateMapper seatStateMapper;
+    private final EnterpriseQuotaService quotaService;
 
     /** 语音渠道列表(全量,量小;密钥等敏感列不下发)。 */
     @GetMapping("/voice-channels")
@@ -69,6 +71,21 @@ public class CsVoiceOpsController extends BaseController {
         }
         if (bo.getWorkspaceId() == null || bo.getAgentId() == null) {
             return R.fail("workspaceId / agentId 不能为空");
+        }
+        if (quotaService.enabled()) {
+            var expiry = quotaService.checkExpiry(bo.getWorkspaceId());
+            if (!expiry.allowed()) {
+                return R.fail(expiry.reason());
+            }
+            if (channelMapper.selectOne(new LambdaQueryWrapper<CsCallChannelConfig>()
+                    .eq(CsCallChannelConfig::getChannelCode, bo.getChannelCode()).last("limit 1")) == null) {
+                long used = channelMapper.selectCount(new LambdaQueryWrapper<CsCallChannelConfig>()
+                    .eq(CsCallChannelConfig::getWorkspaceId, bo.getWorkspaceId()));
+                var quota = quotaService.checkChannel(bo.getWorkspaceId(), used);
+                if (!quota.allowed()) {
+                    return R.fail(quota.reason());
+                }
+            }
         }
         Date now = new Date();
         CsCallChannelConfig existing = channelMapper.selectOne(new LambdaQueryWrapper<CsCallChannelConfig>()
@@ -131,6 +148,26 @@ public class CsVoiceOpsController extends BaseController {
         }
         if (bo.getExtension() != null && bo.getExtension().length() > 32) {
             return R.fail("extension 过长");
+        }
+        if (quotaService.enabled()) {
+            CsCallSeatState existingForQuota = seatStateMapper.selectOne(new LambdaQueryWrapper<CsCallSeatState>()
+                .eq(CsCallSeatState::getWorkNo, bo.getWorkNo()).last("limit 1"));
+            Long ws = bo.getWorkspaceId() != null ? bo.getWorkspaceId()
+                : existingForQuota == null ? null : existingForQuota.getWorkspaceId();
+            if (ws != null) {
+                var expiry = quotaService.checkExpiry(ws);
+                if (!expiry.allowed()) {
+                    return R.fail(expiry.reason());
+                }
+                if (existingForQuota == null) {
+                    long used = seatStateMapper.selectCount(new LambdaQueryWrapper<CsCallSeatState>()
+                        .eq(CsCallSeatState::getWorkspaceId, ws));
+                    var quota = quotaService.checkSeat(ws, used);
+                    if (!quota.allowed()) {
+                        return R.fail(quota.reason());
+                    }
+                }
+            }
         }
         Date now = new Date();
         CsCallSeatState existing = seatStateMapper.selectOne(new LambdaQueryWrapper<CsCallSeatState>()

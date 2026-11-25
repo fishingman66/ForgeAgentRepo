@@ -16,6 +16,9 @@ import com.forgeagent.callcenter.engine.LiveChannelRegistry;
 import com.forgeagent.callcenter.engine.ivr.IvrSessionDriver;
 import com.forgeagent.callcenter.gateway.CsVoiceEvent;
 import com.forgeagent.callcenter.gateway.CsVoiceGateway;
+import com.forgeagent.callcenter.service.CallOverflowWatcher;
+import com.forgeagent.callcenter.service.BlackPhoneService;
+import com.forgeagent.callcenter.service.DidRouteResolver;
 import com.forgeagent.callcenter.mapper.CsCallMapper;
 import com.forgeagent.customerservice.service.SeatAssistService;
 import lombok.RequiredArgsConstructor;
@@ -78,6 +81,12 @@ public class CallEventDispatcher {
     private final LiveChannelRegistry liveChannels;
     /** P3:IVR 驱动器,call.dtmf 事件投递进活跃会话的收号队列(无会话时静默)。 */
     private final ObjectProvider<IvrSessionDriver> ivrDriverProvider;
+    /** P0-3 溢出编排:转人工事件后评估排队压力;缺失/关闭时静默跳过。 */
+    private final ObjectProvider<CallOverflowWatcher> overflowWatcherProvider;
+    /** P2-1 呼入黑名单;ObjectProvider 注入,关闭/缺失时静默跳过。 */
+    private final ObjectProvider<BlackPhoneService> blacklistProvider;
+    /** P2-2 DID 字冠路由;在 applyRing 脱敏前匹配原始号码。 */
+    private final ObjectProvider<DidRouteResolver> didRouteProvider;
 
     /** 回调总入口;五个失败点全部收敛到 REJECTED,成功路径永远返回 SUCCESS。 */
     public Map<String, String> dispatch(String provider, String channelCode, String timestamp, String nonce,
@@ -119,6 +128,9 @@ public class CallEventDispatcher {
             log.warn("[CC] 回调报文解析失败 code={}: {}", channelCode, e.getMessage());
             return REJECTED;
         }
+        if (blacklisted(channel, events)) {
+            return REJECTED;
+        }
         consume(channel, events);
         return SUCCESS;
     }
@@ -152,8 +164,37 @@ public class CallEventDispatcher {
             log.warn("[CC] ESL 事件解析失败 code={}: {}", channelCode, e.getMessage());
             return -1;
         }
+        if (blacklisted(channel, events)) {
+            return -1;
+        }
         consume(channel, events);
         return events.size();
+    }
+
+    /** P2-1:黑名单判定(仅呼入,验签/解析后)。命中返回 true;服务缺失/无主叫一律放行。 */
+    private boolean blacklisted(CsCallChannelConfig channel, List<CsVoiceEvent> events) {
+        BlackPhoneService service = blacklistProvider.getIfAvailable();
+        if (service == null || !service.enabled() || events == null || events.isEmpty()) {
+            return false;
+        }
+        String caller = null;
+        for (CsVoiceEvent event : events) {
+            String c = event.str("caller");
+            if (c != null && !c.isBlank()) {
+                caller = c;
+                break;
+            }
+        }
+        if (caller == null) {
+            return false;
+        }
+        BlackPhoneService.Decision d = service.check(channel.getWorkspaceId(), caller, 0);
+        if (d.blocked()) {
+            log.warn("[CC] 呼入命中黑名单 code={} prefix={} reason={}",
+                channel.getChannelCode(), d.prefix(), d.reason());
+            return true;
+        }
+        return false;
     }
 
     /** 逐事件处理骨架:单事件异常进死信,不影响后续事件,对外成败由调用方决定。 */
@@ -299,8 +340,18 @@ public class CallEventDispatcher {
                     driver.offerDtmf(call.getCallId(), event.str("digits"));
                 }
             }
-            // 转人工:回填技能组轨迹并建工单入 ACD 队列(V2)
-            case "call.transfer" -> applyTransfer(call, event);
+            // 转人工:回填技能组轨迹并建工单入 ACD 队列(V2);P0-3 后再评估溢出
+            case "call.transfer" -> {
+                applyTransfer(call, event);
+                CallOverflowWatcher watcher = overflowWatcherProvider.getIfAvailable();
+                if (watcher != null) {
+                    try {
+                        watcher.onTransfer(call);
+                    } catch (Exception ex) {
+                        log.warn("[CC] 溢出评估失败 callId={}: {}", call.getCallId(), ex.getMessage());
+                    }
+                }
+            }
             // 坐席状态:更新 agent_cc_call_seat_state;READY 顺带触发一次 ACD 分配(V2)
             case "call.seat_state" -> applySeatState(call, event, channel);
             // 录音就绪:取回一次入存储,对象键与留存时间落库(D6)
@@ -315,10 +366,25 @@ public class CallEventDispatcher {
 
     private void applyRing(CsCall call, CsVoiceEvent event, Date now) {
         call.setRingAt(now);
-        call.setCallerNumber(CsPiiMasker.mask(event.str("caller")));
-        call.setCalleeNumber(event.str("callee"));
-        call.setAni(CsPiiMasker.mask(event.str("ani")));
-        call.setDnis(event.str("dnis"));
+        // P2-2:字冠匹配与号码变换必须在脱敏前用原始号码(参考 FsAnswerHandler:127/144)
+        String rawCaller = event.str("caller");
+        String rawCallee = event.str("callee");
+        String rawAni = event.str("ani");
+        String rawDnis = event.str("dnis");
+        DidRouteResolver resolver = didRouteProvider.getIfAvailable();
+        if (resolver != null && resolver.enabled()) {
+            DidRouteResolver.Decision d = resolver.resolve(call.getWorkspaceId(), rawCaller, rawCallee);
+            if (d.matched()) {
+                rawCaller = d.caller();
+                rawCallee = d.callee();
+                log.info("[CC] DID 字冠命中 code={} route={} target={}",
+                    call.getChannelCode(), d.rule().getRouteNum(), d.target());
+            }
+        }
+        call.setCallerNumber(CsPiiMasker.mask(rawCaller));
+        call.setCalleeNumber(rawCallee);
+        call.setAni(CsPiiMasker.mask(rawAni));
+        call.setDnis(rawDnis);
         String direction = event.str("direction");
         call.setDirection(direction == null || direction.isBlank() ? "inbound" : direction);
         businessBinder.onRing(call, event);

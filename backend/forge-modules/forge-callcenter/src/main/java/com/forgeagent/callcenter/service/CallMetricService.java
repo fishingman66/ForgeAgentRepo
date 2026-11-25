@@ -178,7 +178,8 @@ public class CallMetricService {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private static Date dayStart(Date day) {
+    /** 自然日起点(P1-3 话单补偿按振铃日归属指标,与 rebuild 同口径)。 */
+    public static Date dayStart(Date day) {
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(day);
         calendar.set(Calendar.HOUR_OF_DAY, 0);

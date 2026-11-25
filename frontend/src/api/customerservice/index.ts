@@ -1076,3 +1076,178 @@ export const reviewEvalCase = (id: number, approve: boolean) =>
     method: 'post',
     data: { approve }
   });
+
+
+// ==================== P0~P2 呼叫中心运营配置管理 ====================
+
+/** 超管候选空间(普通用户返回空);两个端点口径一致 */
+export const listAdminWorkspaces = (): AxiosPromise<number[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/workspaces', method: 'get' });
+
+export interface CcOverflowConfig {
+  id?: number;
+  workspaceId?: number;
+  name?: string;
+  triggerType?: string;
+  threshold?: number;
+  action?: string;
+  actionArg?: string;
+  enabled?: string;
+}
+
+export const listCcOverflow = (workspaceId?: number): AxiosPromise<CcOverflowConfig[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/overflow', method: 'get', params: { workspaceId } });
+export const saveCcOverflow = (data: Partial<CcOverflowConfig>): AxiosPromise<CcOverflowConfig> =>
+  request({ url: '/agent/customerservice/cc-ops/config/overflow', method: 'post', data });
+export const deleteCcOverflow = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/cc-ops/config/overflow/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CcNumberPool {
+  id?: number;
+  workspaceId?: number;
+  number?: string;
+  type?: number;
+  channelCode?: string;
+  trunkRef?: string;
+  status?: string;
+  description?: string;
+}
+
+export const listCcNumbers = (workspaceId?: number): AxiosPromise<CcNumberPool[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/number-pool', method: 'get', params: { workspaceId } });
+export const saveCcNumber = (data: Partial<CcNumberPool>): AxiosPromise<CcNumberPool> =>
+  request({ url: '/agent/customerservice/cc-ops/config/number-pool', method: 'post', data });
+export const deleteCcNumber = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/cc-ops/config/number-pool/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CcBlackPhone {
+  id?: number;
+  workspaceId?: number;
+  numPrefix?: string;
+  callDirection?: number;
+  schedule?: string;
+  callbackUrl?: string;
+  reason?: string;
+  status?: string;
+}
+
+export const listCcBlacklist = (workspaceId?: number): AxiosPromise<CcBlackPhone[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/blacklist', method: 'get', params: { workspaceId } });
+export const saveCcBlacklist = (data: Partial<CcBlackPhone>): AxiosPromise<CcBlackPhone> =>
+  request({ url: '/agent/customerservice/cc-ops/config/blacklist', method: 'post', data });
+export const deleteCcBlacklist = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/cc-ops/config/blacklist/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CcDidRoute {
+  id?: number;
+  workspaceId?: number;
+  routeNum?: string;
+  target?: string;
+  callerPrefix?: string;
+  calledPrefix?: string;
+  status?: string;
+  description?: string;
+}
+
+export const listCcDidRoutes = (workspaceId?: number): AxiosPromise<CcDidRoute[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/did-routes', method: 'get', params: { workspaceId } });
+export const saveCcDidRoute = (data: Partial<CcDidRoute>): AxiosPromise<CcDidRoute> =>
+  request({ url: '/agent/customerservice/cc-ops/config/did-routes', method: 'post', data });
+export const deleteCcDidRoute = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/cc-ops/config/did-routes/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CcEnterpriseQuota {
+  id?: number;
+  workspaceId?: number;
+  name?: string;
+  code?: string;
+  status?: string;
+  expireTime?: string;
+  seatLimit?: number;
+  groupLimit?: number;
+  channelLimit?: number;
+  concurrentLimit?: number;
+  budgetMinutes?: number;
+}
+
+export const getCcEnterprise = (workspaceId?: number): AxiosPromise<CcEnterpriseQuota> =>
+  request({ url: '/agent/customerservice/cc-ops/config/enterprise', method: 'get', params: { workspaceId } });
+export const saveCcEnterprise = (data: Partial<CcEnterpriseQuota>): AxiosPromise<CcEnterpriseQuota> =>
+  request({ url: '/agent/customerservice/cc-ops/config/enterprise', method: 'post', data });
+
+export interface CcStateLog {
+  id?: number;
+  month?: string;
+  workNo?: string;
+  beforeState?: string;
+  state?: string;
+  durationSec?: number;
+  eventTimeMs?: number;
+}
+
+export const listCcStateLogs = (workspaceId?: number): AxiosPromise<CcStateLog[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/state-logs', method: 'get', params: { workspaceId } });
+
+export interface CcCdrCompensation {
+  id?: number;
+  callId?: number;
+  workspaceId?: number;
+  statDate?: string;
+  status?: string;
+  retryCount?: number;
+  error?: string;
+}
+
+export const listCcCdrCompensations = (workspaceId?: number): AxiosPromise<CcCdrCompensation[]> =>
+  request({ url: '/agent/customerservice/cc-ops/config/cdr-compensations', method: 'get', params: { workspaceId } });
+
+// ==================== P1-1 技能管理 ====================
+
+export interface CsSkillItem {
+  id?: number;
+  workspaceId?: number;
+  skillCode?: string;
+  name?: string;
+  status?: string;
+}
+
+export const listCsSkills = (workspaceId?: number): AxiosPromise<CsSkillItem[]> =>
+  request({ url: '/agent/customerservice/skills/catalog', method: 'get', params: { workspaceId } });
+export const saveCsSkill = (data: Partial<CsSkillItem>): AxiosPromise<CsSkillItem> =>
+  request({ url: '/agent/customerservice/skills/catalog', method: 'post', data });
+export const deleteCsSkill = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/skills/catalog/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CsSkillGroupItem {
+  id?: number;
+  workspaceId?: number;
+  groupCode?: string;
+  name?: string;
+  skillCodes?: string;
+  matchType?: string;
+  status?: string;
+}
+
+export const listCsSkillGroups = (workspaceId?: number): AxiosPromise<CsSkillGroupItem[]> =>
+  request({ url: '/agent/customerservice/skills/groups', method: 'get', params: { workspaceId } });
+export const saveCsSkillGroup = (data: {
+  groupCode: string; name?: string; skillCodes: string[]; matchType?: string; workspaceId?: number
+}): AxiosPromise<void> =>
+  request({ url: '/agent/customerservice/skills/groups', method: 'post', data });
+export const deleteCsSkillGroup = (id: number, workspaceId?: number): AxiosPromise<boolean> =>
+  request({ url: `/agent/customerservice/skills/groups/${id}`, method: 'delete', params: { workspaceId } });
+
+export interface CsSkillSeat {
+  id?: number;
+  userId?: number;
+  seatGroup?: string;
+  skills?: string;
+  online?: string;
+}
+
+export const listCsSkillSeats = (workspaceId?: number): AxiosPromise<CsSkillSeat[]> =>
+  request({ url: '/agent/customerservice/skills/seats', method: 'get', params: { workspaceId } });
+export const getCsSeatSkills = (seatId: number, workspaceId?: number): AxiosPromise<Array<{ skillCode: string; rank: number }>> =>
+  request({ url: `/agent/customerservice/skills/seat/${seatId}`, method: 'get', params: { workspaceId } });
+export const saveCsSeatSkills = (seatId: number, ranks: Record<string, number>, workspaceId?: number): AxiosPromise<void> =>
+  request({ url: '/agent/customerservice/skills/seat', method: 'post', data: { seatId, ranks, workspaceId } });

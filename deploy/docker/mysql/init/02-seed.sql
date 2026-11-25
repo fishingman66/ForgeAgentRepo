@@ -647,3 +647,30 @@ INSERT INTO `sys_menu` (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`
 (1761400000000030194,'客户端修改',1761400000000030191,3,'',NULL,NULL,'N','Y','F','0','0','agent:mcpclient:edit','#',NULL,'',NULL,1,'2026-11-19 08:30:00',NULL,NULL,''),
 (1761400000000030195,'客户端删除',1761400000000030191,4,'',NULL,NULL,'N','Y','F','0','0','agent:mcpclient:remove','#',NULL,'',NULL,1,'2026-11-19 08:30:00',NULL,NULL,''),
 (1761400000000030196,'令牌轮转',1761400000000030191,5,'',NULL,NULL,'N','Y','F','0','0','agent:mcpclient:rotate','#',NULL,'',NULL,1,'2026-11-19 08:30:00',NULL,NULL,'');
+
+-- P0~P2 呼叫中心运营配置菜单 1761400000000040013
+INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param,
+                      is_frame, is_cache, menu_type, visible, status, perms, icon, active_menu,
+                      create_dept, create_by, create_time, remark)
+SELECT 1761400000000040013, '呼叫中心配置', 1761400000000040001, 9, 'cc-config',
+       'customerservice/CcConfig', null, 'N', 'Y', 'C', '0', '0',
+       'customerservice:cc:config', 'setting', null, null, 1, now(), '溢出/号码池/黑名单/字冠/配额/只读轨迹'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE menu_id = 1761400000000040013);
+-- P1-1 技能管理菜单 1761400000000040014
+INSERT INTO sys_menu (menu_id, menu_name, parent_id, order_num, path, component, query_param,
+                      is_frame, is_cache, menu_type, visible, status, perms, icon, active_menu,
+                      create_dept, create_by, create_time, remark)
+SELECT 1761400000000040014, '技能管理', 1761400000000040001, 10, 'skills',
+       'customerservice/Skills', null, 'N', 'Y', 'C', '0', '0',
+       'customerservice:skill:list', 'tree', null, null, 1, now(), '技能目录/技能组/坐席技能等级'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE menu_id = 1761400000000040014);
+
+-- P0~P2 管理菜单授权给普通用户角色(幂等)
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`)
+SELECT 2111749363962757122, 1761400000000040013
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `sys_role_menu`
+  WHERE role_id = 2111749363962757122 AND menu_id = 1761400000000040013);
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`)
+SELECT 2111749363962757122, 1761400000000040014
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `sys_role_menu`
+  WHERE role_id = 2111749363962757122 AND menu_id = 1761400000000040014);

@@ -58,6 +58,12 @@ public class CallcenterProperties {
     /** D8 规模口径:月分钟预算,超 100% 拒绝新呼入(V2 门禁)。 */
     private Integer budgetMonthlyMinutes = 400000;
 
+    /**
+     * P0-1 企业域门禁总开关,默认 false(零回退:无企业行/关闭时全部走原有行为)。
+     * 开启后按 agent_cc_enterprise 配额与到期状态拦截写入口;workspace 仍是数据隔离主键。
+     */
+    private Boolean enterpriseEnabled = false;
+
     /** 号码扩展接口实现:noop(暂无号码)。 */
     private String numberProvider = "noop";
 
@@ -123,6 +129,33 @@ public class CallcenterProperties {
 
     /** C4 负面自动转接目标队列(mod_callcenter queue);为空视为未配置,开关打开也不转。 */
     private String autoTransferQueue;
+
+    /**
+     * P0-3 溢出策略总开关,默认 false(零回退:关闭时不查策略、不下发任何通道命令)。
+     * 开启后按 agent_cc_overflow_config 的三类触发条件评估并转队列/挂机。
+     */
+    private Boolean overflowEnabled = false;
+
+    /**
+     * P1-2 坐席状态轨迹开关,默认 false(零回退:关闭时不查库、不写轨迹)。
+     * 开启后每次 seat_state 变化落 agent_cc_agent_state_log(含 month 归档键)。
+     */
+    private Boolean agentStateLogEnabled = false;
+
+    /** P1-3 企业维度统计开关,默认 false(关闭时不聚合、不改 workspace 口径)。 */
+    private Boolean enterpriseMetricEnabled = false;
+
+    /** P2-1 呼入号码黑名单开关,默认 false(关闭时零查库零拦截)。 */
+    private Boolean blacklistEnabled = false;
+
+    /** P2-2 DID 字冠路由开关,默认 false(关闭时零查库、号码原样)。 */
+    private Boolean didRouteEnabled = false;
+
+    /**
+     * P1-3 话单指标补偿开关,默认 false。补偿语义=已挂机但日指标缺失时幂等重算+留痕+退避,
+     * 不含外部推送(ForgeAgent 无出向话单出口)。
+     */
+    private Boolean cdrCompensationEnabled = false;
 
     /** C4 信息提取兜底字段:渠道 voice_config_json 未声明 extract_keys 时使用。 */
     private List<String> extractDefaultKeys = List.of("orderNo", "amount");

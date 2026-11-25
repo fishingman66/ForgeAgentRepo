@@ -63,5 +63,58 @@ public class CallcenterProductionReadinessValidator {
         if (prod && Boolean.TRUE.equals(properties.getDevScript())) {
             throw new IllegalStateException("[CC] agent.callcenter.dev-script 在 prod 下必须为 false");
         }
+
+        // ------- P0~P2 新增策略门禁(方案 docs/14 总验收标准第3条) -------
+        // 告警统一走 warnOrFail:dev 只告警(本地开箱可用),prod 阻断。
+        if (Boolean.TRUE.equals(properties.getEnterpriseEnabled())) {
+            // 配额下限:0 会让"超配额拒绝"恒真,等于全量封禁
+            require(prod, "agent.callcenter.max-seats / max-concurrent-calls / budget-monthly-minutes "
+                + "在企业配额开启时必须 > 0",
+                positive(properties.getMaxSeats()) && positive(properties.getMaxConcurrentCalls())
+                    && positive(properties.getBudgetMonthlyMinutes()));
+        }
+        if (Boolean.TRUE.equals(properties.getOverflowEnabled())) {
+            String queueExtensions = properties.getFreeswitch() == null ? null
+                : properties.getFreeswitch().getQueueExtensions();
+            require(prod, "溢出策略开启时 freeswitch.queue-extensions 若有值必须为 name:ext 格式(逗号分隔)",
+                validQueueExtensions(queueExtensions));
+        }
+        if (Boolean.TRUE.equals(properties.getDidRouteEnabled())
+            || Boolean.TRUE.equals(properties.getBlacklistEnabled())) {
+            // FR 红线:资质前 noop 是合法默认;开启 db provider 必须有明确配置
+            String np = properties.getNumberProvider() == null ? "noop" : properties.getNumberProvider();
+            String tp = properties.getTrunkProvider() == null ? "noop" : properties.getTrunkProvider();
+            require(prod, "DID 路由/黑名单开启且使用 db provider 时,必须确认 SIP 中继资质已到位(FR 红线)",
+                !("db".equalsIgnoreCase(np) || "db".equalsIgnoreCase(tp)));
+        }
+    }
+
+    /** dev 告警 / prod 阻断。 */
+    private void require(boolean prod, String message, boolean ok) {
+        if (ok) {
+            return;
+        }
+        if (prod) {
+            throw new IllegalStateException("[CC] " + message);
+        }
+        log.warn("[CC] {} (dev 环境放行)", message);
+    }
+
+    private static boolean positive(Integer v) {
+        return v != null && v > 0;
+    }
+
+    /** queue-extensions 为空合法(队列名直接当分机号);有值则每段必须 name:ext。 */
+    static boolean validQueueExtensions(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return true;
+        }
+        for (String pair : raw.split(",")) {
+            String[] kv = pair.split(":", 2);
+            if (kv.length != 2 || kv[0].trim().isEmpty() || kv[1].trim().isEmpty()) {
+                return false;
+            }
+        }
+        return true;
     }
 }

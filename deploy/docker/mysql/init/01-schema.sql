@@ -3231,3 +3231,227 @@ CREATE TABLE IF NOT EXISTS `agent_cc_ivr_flow` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_ivrflow_route` (`workspace_id`, `route_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='IVR 流程定义(C3 节点引擎)';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P0-1 企业域(配额/到期上层;workspace 仍是数据隔离主键)
+-- 无企业行 = 用 CallcenterProperties 默认值,零回退;enterprise-enabled 默认 false
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_enterprise`;
+CREATE TABLE IF NOT EXISTS `agent_cc_enterprise` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL COMMENT '关联 agent_workspace.id(隔离主键不变)',
+  `name` VARCHAR(100) NOT NULL COMMENT '企业名称',
+  `code` VARCHAR(64) NOT NULL COMMENT '企业编码(全局唯一)',
+  `pid` BIGINT NOT NULL DEFAULT 0 COMMENT '父企业ID(0=顶层)',
+  `id_path` VARCHAR(512) NOT NULL DEFAULT '' COMMENT '祖先路径 /a/b/,用于子企业继承配额',
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0=正常 1=停用',
+  `expire_time` DATETIME NULL COMMENT '到期时间(NULL=永不过期)',
+  `seat_limit` INT NULL COMMENT '坐席上限(NULL=继承父企业/用默认值)',
+  `group_limit` INT NULL COMMENT '技能组上限',
+  `channel_limit` INT NULL COMMENT '语音渠道上限',
+  `concurrent_limit` INT NULL COMMENT '并发通话上限',
+  `budget_minutes` INT NULL COMMENT '月度分钟预算',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cce_code` (`code`),
+  UNIQUE KEY `uk_cce_workspace` (`workspace_id`),
+  KEY `idx_cce_pid` (`pid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='呼叫中心企业域(配额/到期上层)';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P0-3 溢出策略(排队超时/队列长度/呼损率 → 转队列/挂机)
+-- 由 agent.callcenter.overflow-enabled 控制,默认 false 零回退
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_overflow_config`;
+CREATE TABLE IF NOT EXISTS `agent_cc_overflow_config` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL COMMENT '归属空间(隔离主键)',
+  `name` VARCHAR(100) NOT NULL COMMENT '策略名称',
+  `trigger_type` VARCHAR(20) NOT NULL DEFAULT 'QUEUE_TIMEOUT' COMMENT 'QUEUE_TIMEOUT 等待超时 / QUEUE_SIZE 队列长度 / ABANDON_RATE 呼损率',
+  `threshold` INT NOT NULL DEFAULT 60 COMMENT '阈值:秒/队列长度/呼损率百分比',
+  `action` VARCHAR(20) NOT NULL DEFAULT 'HANGUP' COMMENT 'TRANSFER_QUEUE 转队列 / HANGUP 挂机 / MARK 仅留痕',
+  `action_arg` VARCHAR(128) NULL COMMENT 'TRANSFER_QUEUE=目标队列名;HANGUP=cause;MARK=说明',
+  `enabled` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0=启用 1=停用',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccoc_ws_trigger` (`workspace_id`, `trigger_type`),
+  KEY `idx_ccoc_ws` (`workspace_id`, `enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='呼叫中心溢出策略';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P1-2 坐席状态轨迹(单表 + month 归档键;MP 无动态表名设施)
+-- 由 agent.callcenter.agent-state-log-enabled 控制,默认 false 零回退
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_agent_state_log`;
+CREATE TABLE IF NOT EXISTS `agent_cc_agent_state_log` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `month` CHAR(7) NOT NULL COMMENT '归档键 yyyy-MM(由事件时间确定)',
+  `workspace_id` BIGINT NOT NULL COMMENT '归属空间',
+  `work_no` VARCHAR(64) NOT NULL COMMENT 'AICC 工号',
+  `seat_id` BIGINT NULL,
+  `before_state` VARCHAR(24) NULL,
+  `state` VARCHAR(24) NOT NULL COMMENT '规范化后的就绪态',
+  `duration_sec` INT NOT NULL DEFAULT 0 COMMENT '前态持续秒数',
+  `event_time_ms` BIGINT NOT NULL COMMENT '事件时间(毫秒),乱序判定',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_ccasl_ws_month` (`workspace_id`, `month`),
+  KEY `idx_ccasl_workno_time` (`work_no`, `event_time_ms`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='坐席状态时长轨迹(P1-2)';
+
+
+-- ------------------------------------------------------------------
+-- 客服 P1-1 结构化技能模型(等级/多对多/技能组)
+-- CsSeat.skills 逗号串保留为兼容投影,新表写入时同步 skill:rank 串
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cs_skill`;
+CREATE TABLE IF NOT EXISTS `agent_cs_skill` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL COMMENT '归属空间',
+  `skill_code` VARCHAR(64) NOT NULL COMMENT '技能编码',
+  `name` VARCHAR(100) NOT NULL,
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0=启用 1=停用',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_css_skill` (`workspace_id`, `skill_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='技能定义(P1-1)';
+
+DROP TABLE IF EXISTS `agent_cs_seat_skill`;
+CREATE TABLE IF NOT EXISTS `agent_cs_seat_skill` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL,
+  `seat_id` BIGINT NOT NULL COMMENT 'agent_cs_seat.id',
+  `skill_code` VARCHAR(64) NOT NULL,
+  `rank` INT NOT NULL DEFAULT 1 COMMENT '技能等级,越大越熟练',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cssk_seat_skill` (`workspace_id`, `seat_id`, `skill_code`),
+  KEY `idx_cssk_skill` (`workspace_id`, `skill_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='坐席技能关联(P1-1)';
+
+DROP TABLE IF EXISTS `agent_cs_skill_group`;
+CREATE TABLE IF NOT EXISTS `agent_cs_skill_group` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL,
+  `group_code` VARCHAR(64) NOT NULL,
+  `name` VARCHAR(100) NOT NULL,
+  `skill_codes` VARCHAR(500) NOT NULL COMMENT '组内技能编码,逗号分隔,最多 10 个',
+  `match_type` VARCHAR(16) NOT NULL DEFAULT 'ANY' COMMENT 'ANY 任一命中 / ALL 全部命中',
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0=启用 1=停用',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_csgroup_code` (`workspace_id`, `group_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='技能组(P1-1)';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P1-3 企业维度统计 + 话单补偿留痕
+-- 由 agent.callcenter.enterprise-metric-enabled / cdr-compensation-enabled 控制,默认 false
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_enterprise_metric_daily`;
+CREATE TABLE IF NOT EXISTS `agent_cc_enterprise_metric_daily` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `enterprise_id` BIGINT NOT NULL COMMENT 'agent_cc_enterprise.id',
+  `stat_date` DATE NOT NULL,
+  `workspace_count` INT NOT NULL DEFAULT 0,
+  `call_count` INT NOT NULL DEFAULT 0,
+  `answered_count` INT NOT NULL DEFAULT 0,
+  `answer_rate` DECIMAL(5,2) DEFAULT 0,
+  `transfer_count` INT NOT NULL DEFAULT 0,
+  `abandon_count` INT NOT NULL DEFAULT 0,
+  `abandon_rate` DECIMAL(5,2) DEFAULT 0,
+  `avg_duration_sec` INT NOT NULL DEFAULT 0,
+  `negative_calls` INT NOT NULL DEFAULT 0,
+  `quality_avg_score` DECIMAL(5,2) DEFAULT 0,
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccemd_day` (`enterprise_id`, `stat_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='企业维度日指标(P1-3)';
+
+DROP TABLE IF EXISTS `agent_cc_cdr_compensation`;
+CREATE TABLE IF NOT EXISTS `agent_cc_cdr_compensation` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `call_id` BIGINT NOT NULL COMMENT 'agent_cc_call.id',
+  `workspace_id` BIGINT NOT NULL,
+  `stat_date` DATE NOT NULL COMMENT '按 ringAt 自然日',
+  `status` VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/RETRIED/REBUILT/UNREBUILDABLE',
+  `retry_count` INT NOT NULL DEFAULT 0,
+  `error` VARCHAR(500) NULL,
+  `last_retry_at` DATETIME NULL,
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccomp_call` (`call_id`),
+  KEY `idx_ccomp_status` (`status`, `stat_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='话单补偿留痕(P1-3)';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P2-1 号码池 / 黑名单(仅数据模型与 SPI 骨架,不接真实 PSTN)
+-- FR 红线:无 SIP 中继资质,originate 下发冻结;号码仍由回调事件带入
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_number_pool`;
+CREATE TABLE IF NOT EXISTS `agent_cc_number_pool` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL COMMENT '归属空间',
+  `number` VARCHAR(64) NOT NULL COMMENT '号码资源',
+  `type` TINYINT NOT NULL DEFAULT 1 COMMENT '1 呼入服务号 2 主叫显号 3 被叫显号',
+  `channel_code` VARCHAR(64) NULL COMMENT '关联渠道,空=空间通用',
+  `trunk_ref` VARCHAR(128) NULL COMMENT '中继引用(仅元数据,不触发绑定)',
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0 空闲 1 已分配 2 停用',
+  `description` VARCHAR(200) NULL,
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccnp_ws_num_type` (`workspace_id`, `number`, `type`),
+  KEY `idx_ccnp_alloc` (`workspace_id`, `type`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='号码池元数据(P2-1)';
+
+DROP TABLE IF EXISTS `agent_cc_black_phone`;
+CREATE TABLE IF NOT EXISTS `agent_cc_black_phone` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL,
+  `num_prefix` VARCHAR(32) NOT NULL COMMENT '号码前缀(最长优先)',
+  `call_direction` TINYINT NOT NULL DEFAULT 2 COMMENT '0 呼入 1 呼出 2 双向',
+  `schedule` VARCHAR(32) NULL COMMENT '生效时段 HH:mm-HH:mm,空=全天',
+  `callback_url` VARCHAR(500) NULL COMMENT '仅留存,不发起外部 HTTP',
+  `reason` VARCHAR(200) NULL,
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0 启用 1 停用',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccbp_ws_prefix` (`workspace_id`, `num_prefix`),
+  KEY `idx_ccbp_ws` (`workspace_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='号码黑名单(P2-1)';
+
+
+-- ------------------------------------------------------------------
+-- 呼叫中心 P2-2 DID 字冠路由(对齐 ai-call-center cc_route_call 语义)
+-- 匹配:called.contains(route_num) + '*' 兜底,length desc 取首命中
+-- 变换:callerPrefix/calledPrefix 前缀拼接(原号码,脱敏只用于日志/展示)
+-- ------------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_cc_did_route`;
+CREATE TABLE IF NOT EXISTS `agent_cc_did_route` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `workspace_id` BIGINT NOT NULL COMMENT '归属空间',
+  `route_num` VARCHAR(32) NOT NULL COMMENT '字冠:任意位置包含匹配;* 兜底',
+  `target` VARCHAR(128) NULL COMMENT '目标路由码(队列/IVR),空=仅变换号码',
+  `caller_prefix` VARCHAR(32) NULL COMMENT '主叫显号前缀',
+  `called_prefix` VARCHAR(32) NULL COMMENT '被叫前缀',
+  `status` CHAR(1) NOT NULL DEFAULT '0' COMMENT '0 启用 1 停用',
+  `description` VARCHAR(200) NULL,
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ccdr_ws_route` (`workspace_id`, `route_num`),
+  KEY `idx_ccdr_ws` (`workspace_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='DID 字冠路由(P2-2)';
